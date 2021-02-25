@@ -1,0 +1,123 @@
+"Games"
+{
+	"tf"
+	{
+		"Signatures"
+		{
+			"Path::ComputePathDetails"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path18ComputePathDetailsEP8INextBotRK6Vector"
+			}
+			"Path::BuildTrivialPath"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path16BuildTrivialPathEP8INextBotRK6Vector"
+			}
+			"Path::FindNextOccludedNode"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path20FindNextOccludedNodeEP8INextBoti"
+			}
+			"Path::Optimize"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path8OptimizeEP8INextBot"
+			}
+			"Path::PostProcess"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path11PostProcessEv"
+			}
+			"PathFollower::PathFollower"
+			{
+				"library"	"server"
+				"linux"		"@_ZN12PathFollowerC1Ev"
+			}
+			"Path::Path"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4PathC1Ev"
+			}
+			"NextBotCombatCharacter::NextBotCombatCharacter"
+			{
+				"library"	"server"
+				"linux"		"@_ZN22NextBotCombatCharacterC1Ev"
+			}
+			"NextBotGroundLocomotion::NextBotGroundLocomotion"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotionC1EP8INextBot"
+			}
+			"CTFPathFollower::CTFPathFollower"
+			{
+				"library"	"server"
+				"linux"		"@_ZN15CTFPathFollowerC1Ev"
+			}
+			"NavAreaBuildPath"
+			{
+				"library"	"server"
+				"linux"		"@_Z16NavAreaBuildPathIK9IPathCostEbP8CNavAreaS3_PK6VectorRT_PS3_fib"
+			}
+			"CNavMesh::GetGroundHeight"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8CNavMesh15GetGroundHeightERK6VectorPfPS0_"
+			}
+			"CNavMesh::GetNearestNavArea"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8CNavMesh17GetNearestNavAreaERK6Vectorbfbbi"
+			}
+			"TheNavMesh"
+			{
+				"library"	"server"
+				"linux"		"@TheNavMesh"
+			}
+			"CNavArea::IsConnected"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8CNavArea11IsConnectedEPKS_10NavDirType"
+			}
+		}
+		"Offsets"
+		{
+			"CBaseEntity::MyNextBotPointer"
+			{
+				"linux" "73"
+			}
+			"CBaseEntity::MyCombatCharacterPointer"
+			{
+				"linux" "72"
+			}
+			"CBaseEntity::PostConstructor"
+			{
+				"linux" "27"
+			}
+			"CBaseCombatCharacter::GetLastKnownArea"
+			{
+				"linux" "316"
+			}
+			"sizeof(PathFollower)"
+			{
+				"linux" "20480"
+			}
+			"sizeof(Path)"
+			{
+				"linux" "18260"
+			}
+			"sizeof(NextBotCombatCharacter)"
+			{
+				"linux" "4320"
+			}
+			"sizeof(CTFPathFollower)"
+			{
+				"linux" "20488"
+			}
+			"sizeof(NextBotGroundLocomotion)"
+			{
+				"linux" "316"
+			}
+		}
+	}
+}

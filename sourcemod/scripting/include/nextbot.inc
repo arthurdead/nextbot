@@ -1,0 +1,463 @@
+#if defined nextbot_included
+	#endinput
+#endif
+#define nextbot_included
+
+methodmap CNavArea
+{
+	property float CostSoFar
+	{
+		public native get();
+	}
+
+	property int ID
+	{
+		public native get();
+	}
+
+	public native void GetCenter(float pos[3]);
+	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
+};
+
+methodmap CNavLadder
+{
+	property float Length
+	{
+		public native get();
+	}
+};
+
+methodmap CFuncElevator
+{
+
+};
+
+methodmap ILocomotion
+{
+	property float StepHeight
+	{
+		public native get();
+	}
+
+	property float MaxJumpHeight
+	{
+		public native get();
+	}
+
+	property float DeathDropHeight
+	{
+		public native get();
+	}
+
+	property float RunSpeed
+	{
+		public native get();
+	}
+
+	property float WalkSpeed
+	{
+		public native get();
+	}
+
+	property float MaxAcceleration
+	{
+		public native get();
+	}
+
+	property float MaxDeceleration
+	{
+		public native get();
+	}
+
+	property float SpeedLimit
+	{
+		public native get();
+	}
+
+	property float DesiredSpeed
+	{
+		public native get();
+		public native set(float height);
+	}
+
+	public native bool IsAreaTraversable(CNavArea area);
+
+	public native bool IsClimbingOrJumping();
+	public native bool IsClimbingUpToLedge();
+	public native bool IsJumpingAcrossGap();
+	public native bool IsScrambling();
+	public native bool IsRunning();
+	public native bool IsStuck();
+
+	public native void SetDesiredLean(float ang[3]);
+	public native void GetDesiredLean(float ang[3]);
+
+	public native void Run();
+	public native void Walk();
+	public native void Stop();
+	public native void Jump();
+	public native void JumpAcrossGap(float goal[3], float forwrd[3]);
+	public native bool ClimbUpToLedge(float goal[3], float forwrd[3], int obstacle);
+
+	public native void FaceTowards(float pos[3]);
+	public native void Approach(float pos[3], float weight = 1.0);
+	public native void DriveTo(float pos[3]);
+};
+
+methodmap NextBotGoundLocomotion < ILocomotion
+{
+	property float Gravity
+	{
+		public native get();
+	}
+
+	property float FrictionForward
+	{
+		public native get();
+	}
+
+	property float FrictionSideways
+	{
+		public native get();
+	}
+
+	property float MaxYawRate
+	{
+		public native get();
+	}
+};
+
+methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
+{
+	property float StepHeight
+	{
+		public native set(float height);
+	}
+
+	property float MaxJumpHeight
+	{
+		public native set(float height);
+	}
+
+	property float DeathDropHeight
+	{
+		public native set(float height);
+	}
+
+	property float RunSpeed
+	{
+		public native set(float height);
+	}
+
+	property float WalkSpeed
+	{
+		public native set(float height);
+	}
+
+	property float MaxAcceleration
+	{
+		public native set(float height);
+	}
+
+	property float MaxDeceleration
+	{
+		public native set(float height);
+	}
+
+	property float SpeedLimit
+	{
+		public native set(float height);
+	}
+
+	property float Gravity
+	{
+		public native set(float height);
+	}
+
+	property float FrictionForward
+	{
+		public native set(float height);
+	}
+
+	property float FrictionSideways
+	{
+		public native set(float height);
+	}
+
+	property float MaxYawRate
+	{
+		public native set(float height);
+	}
+};
+
+methodmap INextBot
+{
+	public native INextBot(int entity);
+
+	property int Entity
+	{
+		public native get();
+	}
+
+	property ILocomotion LocomotionInterface
+	{
+		public native get();
+	}
+
+	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
+};
+
+typeset nextbot_path_functor
+{
+	function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
+};
+
+enum SegmentType
+{
+	ON_GROUND,
+	DROP_DOWN,
+	CLIMB_UP,
+	JUMP_OVER_GAP,
+	LADDER_UP,
+	LADDER_DOWN,
+	NUM_SEGMENT_TYPES
+};
+
+enum NavTraverseType
+{
+	GO_NORTH = 0,
+	GO_EAST,
+	GO_SOUTH,
+	GO_WEST,
+	GO_LADDER_UP,
+	GO_LADDER_DOWN,
+	GO_JUMP,
+	GO_ELEVATOR_UP,
+	GO_ELEVATOR_DOWN,
+	NUM_TRAVERSE_TYPES
+};
+
+methodmap Segment
+{
+	property CNavArea Area
+	{
+		public native get();
+	}
+
+	property CNavLadder Ladder
+	{
+		public native get();
+	}
+
+	property SegmentType Type
+	{
+		public native get();
+	}
+
+	property float Length
+	{
+		public native get();
+	}
+
+	property float DistanceFromStart
+	{
+		public native get();
+	}
+
+	property float Curvature
+	{
+		public native get();
+	}
+
+	property float PortalHalfWidth
+	{
+		public native get();
+	}
+
+	property NavTraverseType How
+	{
+		public native get();
+	}
+
+	public native void GetPosition(float pos[3]);
+	public native void GetPortalCenter(float pos[3]);
+	public native void GetForward(float pos[3]);
+};
+
+methodmap Path < Handle
+{
+	public native Path();
+
+	property Address Memory
+	{
+		public native get();
+	}
+
+	property float Length
+	{
+		public native get();
+	}
+
+	property float Age
+	{
+		public native get();
+	}
+
+	public native bool IsValid();
+
+	property Segment FirstSegment
+	{
+		public native get();
+	}
+
+	property Segment LastSegment
+	{
+		public native get();
+	}
+
+	public native Segment NextSegment(Segment seg);
+	public native Segment PriorSegment(Segment seg);
+
+	public native void GetPosition(float ret[3], float distanceFromStart, Segment start = Address_Null);
+	public native void GetClosestPosition(float ret[3], float pos[3], Segment start = Address_Null, float alongLimit = 0.0);
+
+	public native void GetStartPosition(float pos[3]);
+	public native void GetEndPosition(float pos[3]);
+
+	property int Subject
+	{
+		public native get();
+	}
+
+	property Segment CurrentGoal
+	{
+		public native get();
+	}
+
+	public native void Invalidate();
+
+	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_path_functor functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+	public native bool ComputeEntity(INextBot bot, int subject, nextbot_path_functor functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+};
+
+methodmap PathFollower < Path
+{
+	public native PathFollower();
+
+	property float MinLookAheadDistance
+	{
+		public native get();
+		public native set(float height);
+	}
+
+	property float GoalTolerance
+	{
+		public native get();
+		public native set(float height);
+	}
+
+	property int Hindrance
+	{
+		public native get();
+	}
+
+	public native bool IsDiscontinuityAhead(INextBot bot, SegmentType type, float range = -1.0);
+
+	public native void Update(INextBot bot);
+};
+
+methodmap CTFPathFollower < PathFollower
+{
+	public native CTFPathFollower();
+
+	property float MinLookAheadDistance
+	{
+		public native get();
+	}
+};
+
+native Handle nextbot_register_classname(const char[] classname);
+
+stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data)
+{
+	if(fromArea == Address_Null) {
+		return 0.0;
+	} else {
+		ILocomotion locomotion = bot.LocomotionInterface;
+
+		if(!locomotion.IsAreaTraversable(area)) {
+			return -1.0;
+		}
+
+		float dist = 0.0;
+		if(ladder != Address_Null) {
+			dist = ladder.Length;
+		} else if(length > 0.0) {
+			dist = length;
+		} else {
+			float pos1[3];
+			area.GetCenter(pos1);
+
+			float pos2[3];
+			fromArea.GetCenter(pos2);
+
+			float sub[3];
+			SubtractVectors(pos1, pos2, sub);
+
+			dist = GetVectorLength(sub);
+		}
+
+		float deltaZ = fromArea.ComputeAdjacentConnectionHeightChange(area);
+		if(deltaZ >= locomotion.StepHeight) {
+			if(deltaZ >= locomotion.MaxJumpHeight) {
+				return -1.0;
+			}
+
+			static const float jumpPenalty = 5.0;
+			dist += jumpPenalty * dist;
+		} else if(deltaZ < -locomotion.DeathDropHeight) {
+			return -1.0;
+		}
+
+		int timeMod = RoundToFloor( GetGameTime() / 10.0 ) + 1;
+		int entity = bot.Entity;
+		float preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+		float cost = dist * preference;
+
+		return cost + fromArea.CostSoFar;
+	}
+}
+
+#if !defined REQUIRE_EXTENSIONS
+public void __ext_nextbot_SetNTVOptional()
+{
+	MarkNativeAsOptional("Path.Path");
+	MarkNativeAsOptional("Path.ComputeVector");
+	MarkNativeAsOptional("Path.ComputeEntity");
+	MarkNativeAsOptional("Path.Memory.get");
+	MarkNativeAsOptional("PathFollower.PathFollower");
+	MarkNativeAsOptional("PathFollower.Update");
+	MarkNativeAsOptional("CTFPathFollower.CTFPathFollower");
+	MarkNativeAsOptional("NextBotGoundLocomotion.NextBotGoundLocomotion");
+	MarkNativeAsOptional("NextBotGoundLocomotion.Memory.get");
+	MarkNativeAsOptional("nextbot_register_classname");
+}
+#endif
+
+public Extension __ext_nextbot = 
+{
+	name = "nextbot", 
+	file = "nextbot.ext", 
+	
+#if defined AUTOLOAD_EXTENSIONS
+	autoload = 1,
+#else
+	autoload = 0,
+#endif
+
+#if defined REQUIRE_EXTENSIONS
+	required = 1,
+#else
+	required = 0,
+#endif
+};
