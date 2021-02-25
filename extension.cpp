@@ -68,6 +68,8 @@ class CNavMesh;
 class INextBotComponent;
 class PathFollower;
 
+#define TEAM_ANY				-2
+
 CNavMesh *TheNavMesh = nullptr;
 
 ConVar nav_authorative("nav_authorative", "0");
@@ -364,6 +366,133 @@ class IIntention : public INextBotComponent, public IContextualQuery
 {
 public:
 	
+};
+
+class CKnownEntity;
+
+class IForEachKnownEntity
+{
+public:
+	virtual bool Inspect( const CKnownEntity &known ) = 0;
+};
+
+class INextBotEntityFilter
+{
+public:
+	// return true if the given entity passes this filter
+	virtual bool IsAllowed( CBaseEntity *entity ) = 0;
+};
+
+enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
+
+class CKnownEntity
+{
+public:
+	virtual ~CKnownEntity() = 0;
+	virtual void Destroy( void ) = 0;
+	virtual void UpdatePosition( void ) = 0;
+	virtual CBaseEntity *GetEntity( void ) const = 0;
+	virtual const Vector &GetLastKnownPosition( void ) const = 0;
+	virtual bool HasLastKnownPositionBeenSeen( void ) const = 0;
+	virtual void MarkLastKnownPositionAsSeen( void ) = 0;
+	virtual const CNavArea *GetLastKnownArea( void ) const = 0;
+	virtual float GetTimeSinceLastKnown( void ) const = 0;
+	virtual float GetTimeSinceBecameKnown( void ) const = 0;
+	virtual void UpdateVisibilityStatus( bool visible ) = 0;
+	virtual bool IsVisibleInFOVNow( void ) const = 0;
+	virtual bool IsVisibleRecently( void ) const = 0;
+	virtual float GetTimeSinceBecameVisible( void ) const = 0;
+	virtual float GetTimeWhenBecameVisible( void ) const = 0;
+	virtual float GetTimeSinceLastSeen( void ) const = 0;
+	virtual bool WasEverVisible( void ) const = 0;
+	virtual bool IsObsolete( void ) const = 0;
+	virtual bool operator==( const CKnownEntity &other ) const = 0;
+	virtual bool Is( CBaseEntity *who ) const = 0;
+};
+
+class IVision : public INextBotComponent
+{
+public:
+	virtual ~IVision() = 0;
+
+	virtual void Reset( void ) = 0;									// reset to initial state
+	virtual void Update( void ) = 0;								// update internal state
+
+	//-- attention/short term memory interface follows ------------------------------------------
+
+	//
+	// WARNING: Do not keep CKnownEntity pointers returned by these methods, as they can be invalidated/freed 
+	//
+
+	/**
+	 * Iterate each interesting entity we are aware of.
+	 * If functor returns false, stop iterating and return false.
+	 * NOTE: known.GetEntity() is guaranteed to be non-NULL
+	 */
+	virtual bool ForEachKnownEntity( IForEachKnownEntity &func ) = 0;
+
+	virtual void CollectKnownEntities( CUtlVector< CKnownEntity > *knownVector ) = 0;	// populate given vector with all currently known entities
+
+	virtual const CKnownEntity *GetPrimaryKnownThreat( bool onlyVisibleThreats = false ) const = 0;	// return the biggest threat to ourselves that we are aware of
+	virtual float GetTimeSinceVisible( int team ) const = 0;				// return time since we saw any member of the given team
+
+	virtual const CKnownEntity *GetClosestKnown( int team = TEAM_ANY ) const = 0;	// return the closest known entity
+	virtual int GetKnownCount( int team, bool onlyVisible = false, float rangeLimit = -1.0f ) const = 0;		// return the number of entities on the given team known to us closer than rangeLimit
+
+	virtual const CKnownEntity *GetClosestKnown( const INextBotEntityFilter &filter ) const = 0;	// return the closest known entity that passes the given filter
+
+	virtual const CKnownEntity *GetKnown( const CBaseEntity *entity ) const = 0;		// given an entity, return our known version of it (or NULL if we don't know of it)
+
+	// Introduce a known entity into the system. Its position is assumed to be known
+	// and will be updated, and it is assumed to not yet have been seen by us, allowing for learning
+	// of known entities by being told about them, hearing them, etc.
+	virtual void AddKnownEntity( CBaseEntity *entity ) = 0;
+
+	virtual void ForgetEntity( CBaseEntity *forgetMe ) = 0;			// remove the given entity from our awareness (whether we know if it or not)
+	virtual void ForgetAllKnownEntities( void ) = 0;
+
+	//-- physical vision interface follows ------------------------------------------------------
+
+	/**
+	 * Populate "potentiallyVisible" with the set of all entities we could potentially see. 
+	 * Entities in this set will be tested for visibility/recognition in IVision::Update()
+	 */
+	virtual void CollectPotentiallyVisibleEntities( CUtlVector< CBaseEntity * > *potentiallyVisible ) = 0;
+
+	virtual float GetMaxVisionRange( void ) const = 0;				// return maximum distance vision can reach
+	virtual float GetMinRecognizeTime( void ) const = 0;			// return VISUAL reaction time
+
+	/**
+	 * IsAbleToSee() returns true if the viewer can ACTUALLY SEE the subject or position,
+	 * taking into account blindness, smoke effects, invisibility, etc.
+	 * If 'visibleSpot' is non-NULL, the highest priority spot on the subject that is visible is returned.
+	 */ 
+	virtual bool IsAbleToSee( CBaseEntity *subject, FieldOfViewCheckType checkFOV, Vector *visibleSpot = NULL ) const = 0;
+	virtual bool IsAbleToSee( const Vector &pos, FieldOfViewCheckType checkFOV ) const = 0;
+
+	virtual bool IsIgnored( CBaseEntity *subject ) const = 0;		// return true to completely ignore this entity (may not be in sight when this is called)
+	virtual bool IsVisibleEntityNoticed( CBaseEntity *subject ) const = 0;		// return true if we 'notice' the subject, even though we have LOS to it
+
+	/**
+	 * Check if 'subject' is within the viewer's field of view
+	 */
+	virtual bool IsInFieldOfView( const Vector &pos ) const = 0;
+	virtual bool IsInFieldOfView( CBaseEntity *subject ) const = 0;
+	virtual float GetDefaultFieldOfView( void ) const = 0;			// return default FOV in degrees
+	virtual float GetFieldOfView( void ) const = 0;					// return FOV in degrees
+	virtual void SetFieldOfView( float horizAngle ) = 0;			// angle given in degrees
+
+	virtual bool IsLineOfSightClear( const Vector &pos ) const = 0;	// return true if the ray to the given point is unobstructed
+
+	/**
+	 * Returns true if the ray between the position and the subject is unobstructed.
+	 * A visible spot on the subject is returned in 'visibleSpot'.
+	 */
+	virtual bool IsLineOfSightClearToEntity( const CBaseEntity *subject, Vector *visibleSpot = NULL ) const = 0;
+
+	/// @todo: Implement LookAt system
+	virtual bool IsLookingAt( const Vector &pos, float cosTolerance = 0.95f ) const = 0;					// are we looking at the given position
+	virtual bool IsLookingAt( const CBaseCombatCharacter *actor, float cosTolerance = 0.95f ) const = 0;	// are we looking at the given actor
 };
 
 class ILocomotion : public INextBotComponent
@@ -962,8 +1091,6 @@ public:
 		return otherEdge.z - myEdge.z;
 	}
 };
-
-#define TEAM_ANY				-2
 
 struct HidingSpot;
 enum NavErrorType : int;
@@ -1902,6 +2029,12 @@ cell_t INextBotLocomotionInterfaceget(IPluginContext *pContext, const cell_t *pa
 	return (cell_t)bot->GetLocomotionInterface();
 }
 
+cell_t INextBotVisionInterfaceget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	return (cell_t)bot->GetVisionInterface();
+}
+
 cell_t CTFPathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
 {
 	CTFPathFollower *obj = CTFPathFollower::create();
@@ -2685,6 +2818,462 @@ cell_t NextBotGroundLocomotionCustomDeathDropHeightset(IPluginContext *pContext,
 	return 0;
 }
 
+class SPForEachKnownEntity : public IForEachKnownEntity
+{
+public:
+	SPForEachKnownEntity(IPluginFunction *callbacl_, cell_t data_)
+		: callback(callbacl_), data(data_)
+	{}
+	
+	virtual bool Inspect( const CKnownEntity &known )
+	{
+		cell_t res;
+		callback->PushCell((cell_t)&known);
+		callback->PushCell(data);
+		callback->Execute(&res);
+		return res;
+	}
+	
+	IPluginFunction *callback;
+	cell_t data;
+};
+
+cell_t IVisionForEachKnownEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	IPluginFunction *callback = pContext->GetFunctionById(params[2]);
+	SPForEachKnownEntity each(callback, params[3]);
+	return locomotion->ForEachKnownEntity(each);
+}
+
+cell_t IVisionGetPrimaryKnownThreat(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return (cell_t)locomotion->GetPrimaryKnownThreat(params[2]);
+}
+
+cell_t IVisionGetTimeSinceVisible(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return sp_ftoc(locomotion->GetTimeSinceVisible(params[2]));
+}
+
+cell_t IVisionGetClosestKnownTeam(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return (cell_t)locomotion->GetClosestKnown(params[2]);
+}
+
+class SPGetClosestKnown : public INextBotEntityFilter
+{
+public:
+	SPGetClosestKnown(IPluginFunction *callbacl_, cell_t data_)
+		: callback(callbacl_), data(data_)
+	{}
+	
+	virtual bool IsAllowed( CBaseEntity *known )
+	{
+		cell_t res;
+		callback->PushCell(gamehelpers->EntityToBCompatRef(known));
+		callback->PushCell(data);
+		callback->Execute(&res);
+		return res;
+	}
+	
+	IPluginFunction *callback;
+	cell_t data;
+};
+
+cell_t IVisionGetClosestKnownFilter(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	IPluginFunction *callback = pContext->GetFunctionById(params[2]);
+	SPGetClosestKnown each(callback, params[3]);
+	return (cell_t)locomotion->GetClosestKnown(each);
+}
+
+cell_t IVisionGetKnownCount(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return locomotion->GetKnownCount(params[2], params[3], sp_ctof(params[4]));
+}
+
+cell_t IVisionGetKnown(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return (cell_t)locomotion->GetKnown(pSubject);
+}
+
+cell_t IVisionAddKnownEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	locomotion->AddKnownEntity(pSubject);
+	return 0;
+}
+
+cell_t IVisionForgetEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	locomotion->ForgetEntity(pSubject);
+	return 0;
+}
+
+cell_t IVisionForgetAllKnownEntities(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	locomotion->ForgetAllKnownEntities();
+	return 0;
+}
+
+cell_t IVisionIsAbleToSeeEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	Vector vec;
+	bool ret = locomotion->IsAbleToSee(pSubject, (FieldOfViewCheckType)params[3], &vec);
+	
+	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
+	
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[4], &addr);
+	
+	if(addr != pNullVec) {
+		addr[0] = sp_ftoc(vec.x);
+		addr[1] = sp_ftoc(vec.y);
+		addr[2] = sp_ftoc(vec.z);
+	}
+	
+	return ret;
+}
+
+cell_t IVisionIsAbleToSeeVector(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return locomotion->IsAbleToSee(vec, (FieldOfViewCheckType)params[3]);
+}
+
+cell_t IVisionIsIgnored(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return locomotion->IsIgnored(pSubject);
+}
+
+cell_t IVisionIsVisibleEntityNoticed(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return locomotion->IsVisibleEntityNoticed(pSubject);
+}
+
+cell_t IVisionIsInFieldOfViewVector(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return locomotion->IsInFieldOfView(vec);
+}
+
+cell_t IVisionIsInFieldOfViewEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return locomotion->IsInFieldOfView(pSubject);
+}
+
+cell_t IVisionIsLineOfSightClear(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return locomotion->IsLineOfSightClear(vec);
+}
+
+cell_t IVisionIsLineOfSightClearToEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	Vector vec;
+	bool ret = locomotion->IsLineOfSightClearToEntity(pSubject, &vec);
+	
+	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
+	
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	
+	if(addr != pNullVec) {
+		addr[0] = sp_ftoc(vec.x);
+		addr[1] = sp_ftoc(vec.y);
+		addr[2] = sp_ftoc(vec.z);
+	}
+	
+	return ret;
+}
+
+cell_t IVisionIsLookingAtVector(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return locomotion->IsLookingAt(vec, sp_ctof(params[3]));
+}
+
+cell_t IVisionIsLookingAtEntity(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return locomotion->IsLookingAt(pCombat, sp_ctof(params[3]));
+}
+
+cell_t IVisionDefaultFieldOfViewget(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return sp_ftoc(locomotion->GetDefaultFieldOfView());
+}
+
+cell_t IVisionFieldOfViewget(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return sp_ftoc(locomotion->GetFieldOfView());
+}
+
+cell_t IVisionMaxVisionRangeget(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return sp_ftoc(locomotion->GetMaxVisionRange());
+}
+
+cell_t IVisionMinRecognizeTimeget(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	return sp_ftoc(locomotion->GetMinRecognizeTime());
+}
+
+cell_t IVisionFieldOfViewset(IPluginContext *pContext, const cell_t *params)
+{
+	IVision *locomotion = (IVision *)params[1];
+	locomotion->SetFieldOfView(sp_ctof(params[2]));
+	return 0;
+}
+
+cell_t CKnownEntityEntityget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	
+	CBaseEntity *pEntity = locomotion->GetEntity();
+	if(!pEntity) {
+		return -1;
+	}
+	
+	return gamehelpers->EntityToBCompatRef(pEntity);
+}
+
+cell_t CKnownEntityLastKnownPositionBeenSeenget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return locomotion->HasLastKnownPositionBeenSeen();
+}
+
+cell_t CKnownEntityMarkLastKnownPositionAsSeen(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	locomotion->MarkLastKnownPositionAsSeen();
+	return 0;
+}
+
+cell_t CKnownEntityLastKnownAreaget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return (cell_t)locomotion->GetLastKnownArea();
+}
+
+cell_t CKnownEntityTimeSinceLastKnownget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return sp_ftoc(locomotion->GetTimeSinceLastKnown());
+}
+
+cell_t CKnownEntityTimeSinceBecameKnownget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return sp_ftoc(locomotion->GetTimeSinceBecameKnown());
+}
+
+cell_t CKnownEntityTimeSinceBecameVisibleget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return sp_ftoc(locomotion->GetTimeSinceBecameVisible());
+}
+
+cell_t CKnownEntityTimeWhenBecameVisibleget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return sp_ftoc(locomotion->GetTimeWhenBecameVisible());
+}
+
+cell_t CKnownEntityTimeSinceLastSeenget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return sp_ftoc(locomotion->GetTimeSinceLastSeen());
+}
+
+cell_t CKnownEntityWasEverVisibleget(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return sp_ftoc(locomotion->WasEverVisible());
+}
+
+cell_t CKnownEntityVisibilityStatusset(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	locomotion->UpdateVisibilityStatus(params[2]);
+	return 0;
+}
+
+cell_t CKnownEntityIsVisibleInFOVNow(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return locomotion->IsVisibleInFOVNow();
+}
+
+cell_t CKnownEntityIsVisibleRecently(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return locomotion->IsVisibleRecently();
+}
+
+cell_t CKnownEntityIsObsolete(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	return locomotion->IsObsolete();
+}
+
+cell_t CKnownEntityIs(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return locomotion->Is(pSubject);
+}
+
+cell_t CKnownEntityIsEqual(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	CKnownEntity *known = (CKnownEntity *)params[2];
+	
+	return locomotion->operator==(*known);
+}
+
+cell_t CKnownEntityDestroy(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	locomotion->Destroy();
+	return 0;
+}
+
+cell_t CKnownEntityUpdatePosition(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	locomotion->UpdatePosition();
+	return 0;
+}
+
+cell_t CKnownEntityGetLastKnownPosition(IPluginContext *pContext, const cell_t *params)
+{
+	CKnownEntity *locomotion = (CKnownEntity *)params[1];
+	const Vector &vec = locomotion->GetLastKnownPosition();
+	
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	addr[0] = sp_ftoc(vec.x);
+	addr[1] = sp_ftoc(vec.y);
+	addr[2] = sp_ftoc(vec.z);
+	
+	return 0;
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -2760,6 +3349,7 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.DriveTo", ILocomotionDriveTo},
 	{"INextBot.INextBot", INextBotget},
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
+	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
@@ -2778,6 +3368,52 @@ sp_nativeinfo_t natives[] =
 	{"NextBotGoundLocomotionCustom.FrictionForward.set", NextBotGroundLocomotionCustomFrictionForwardset},
 	{"NextBotGoundLocomotionCustom.FrictionSideways.set", NextBotGroundLocomotionCustomFrictionSidewaysset},
 	{"NextBotGoundLocomotionCustom.MaxYawRate.set", NextBotGroundLocomotionCustomMaxYawRateset},
+	{"IVision.ForEachKnownEntity", IVisionForEachKnownEntity},
+	//{"IVision.CollectKnownEntities", IVisionCollectKnownEntities},
+	{"IVision.GetPrimaryKnownThreat", IVisionGetPrimaryKnownThreat},
+	{"IVision.GetTimeSinceVisible", IVisionGetTimeSinceVisible},
+	{"IVision.GetClosestKnownTeam", IVisionGetClosestKnownTeam},
+	{"IVision.GetClosestKnownFilter", IVisionGetClosestKnownFilter},
+	{"IVision.GetKnownCount", IVisionGetKnownCount},
+	{"IVision.GetKnown", IVisionGetKnown},
+	{"IVision.AddKnownEntity", IVisionAddKnownEntity},
+	{"IVision.ForgetEntity", IVisionForgetEntity},
+	{"IVision.ForgetAllKnownEntities", IVisionForgetAllKnownEntities},
+	//{"IVision.CollectPotentiallyVisibleEntities", IVisionCollectPotentiallyVisibleEntities},
+	{"IVision.IsAbleToSeeEntity", IVisionIsAbleToSeeEntity},
+	{"IVision.IsAbleToSeeVector", IVisionIsAbleToSeeVector},
+	{"IVision.IsIgnored", IVisionIsIgnored},
+	{"IVision.IsVisibleEntityNoticed", IVisionIsVisibleEntityNoticed},
+	{"IVision.IsInFieldOfViewVector", IVisionIsInFieldOfViewVector},
+	{"IVision.IsInFieldOfViewEntity", IVisionIsInFieldOfViewEntity},
+	{"IVision.IsLineOfSightClear", IVisionIsLineOfSightClear},
+	{"IVision.IsLineOfSightClearToEntity", IVisionIsLineOfSightClearToEntity},
+	{"IVision.IsLookingAtVector", IVisionIsLookingAtVector},
+	{"IVision.IsLookingAtEntity", IVisionIsLookingAtEntity},
+	{"IVision.DefaultFieldOfView.get", IVisionDefaultFieldOfViewget},
+	{"IVision.FieldOfView.get", IVisionFieldOfViewget},
+	{"IVision.MaxVisionRange.get", IVisionMaxVisionRangeget},
+	{"IVision.MinRecognizeTime.get", IVisionMinRecognizeTimeget},
+	{"IVision.FieldOfView.set", IVisionFieldOfViewset},
+	{"CKnownEntity.Entity.get", CKnownEntityEntityget},
+	{"CKnownEntity.LastKnownPositionBeenSeen.get", CKnownEntityLastKnownPositionBeenSeenget},
+	{"CKnownEntity.LastKnownArea.get", CKnownEntityLastKnownAreaget},
+	{"CKnownEntity.TimeSinceLastKnown.get", CKnownEntityTimeSinceLastKnownget},
+	{"CKnownEntity.TimeSinceBecameKnown.get", CKnownEntityTimeSinceBecameKnownget},
+	{"CKnownEntity.TimeSinceBecameVisible.get", CKnownEntityTimeSinceBecameVisibleget},
+	{"CKnownEntity.TimeWhenBecameVisible.get", CKnownEntityTimeWhenBecameVisibleget},
+	{"CKnownEntity.TimeSinceLastSeen.get", CKnownEntityTimeSinceLastSeenget},
+	{"CKnownEntity.WasEverVisible.get", CKnownEntityWasEverVisibleget},
+	{"CKnownEntity.VisibilityStatus.get", CKnownEntityVisibilityStatusset},
+	{"CKnownEntity.MarkLastKnownPositionAsSeen", CKnownEntityMarkLastKnownPositionAsSeen},
+	{"CKnownEntity.IsVisibleInFOVNow", CKnownEntityIsVisibleInFOVNow},
+	{"CKnownEntity.IsVisibleRecently", CKnownEntityIsVisibleRecently},
+	{"CKnownEntity.IsObsolete", CKnownEntityIsObsolete},
+	{"CKnownEntity.Is", CKnownEntityIs},
+	{"CKnownEntity.IsEqual", CKnownEntityIsEqual},
+	{"CKnownEntity.Destroy", CKnownEntityDestroy},
+	{"CKnownEntity.UpdatePosition", CKnownEntityUpdatePosition},
+	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
 	{NULL, NULL}
 };
 
