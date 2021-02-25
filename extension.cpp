@@ -31,6 +31,8 @@
 
 #include "extension.h"
 #include <string>
+#include <vector>
+#include <unordered_map>
 #include <mathlib/vmatrix.h>
 #include <shareddefs.h>
 #include <util.h>
@@ -49,13 +51,13 @@
  * @brief Implement extension code here.
  */
 
-Sample g_Sample;		/**< Global singleton for extension's main interface */
+Sample g_Sample{};		/**< Global singleton for extension's main interface */
 
 SMEXT_LINK(&g_Sample);
 
 IBinTools *g_pBinTools = nullptr;
-ISDKHooks *g_pSDKHooks;
-ISDKTools *g_pSDKTools;
+ISDKHooks *g_pSDKHooks = nullptr;
+ISDKTools *g_pSDKTools = nullptr;
 IEntityFactoryDictionary *dictionary = nullptr;
 ICvar *icvar = nullptr;
 
@@ -90,7 +92,7 @@ void *NextBotGroundLocomotionCTOR = nullptr;
 void *PathComputePathDetails = nullptr;
 void *PathBuildTrivialPath = nullptr;
 void *PathFindNextOccludedNode = nullptr;
-void *PathOptimize = nullptr;
+void *PathOptimizeptr = nullptr;
 void *PathPostProcess = nullptr;
 void *CNavMeshGetGroundHeight = nullptr;
 void *CNavMeshGetNearestNavArea = nullptr;
@@ -114,9 +116,55 @@ T void_to_func(void *ptr)
 	return f;
 }
 
+#define USING_SDK2013
+
+#ifdef USING_SDK2013
+extern "C"
+{
+__attribute__((__visibility__("default"), __cdecl__)) double  __pow_finite(double x, double y)
+{
+	return pow(x, y);
+}
+}
+#else
+class CUtlVectorUltraConservativeAllocator {};
+
+template <typename T, typename A = CUtlVectorUltraConservativeAllocator >
+class CUtlVectorUltraConservative : private A
+{
+public:
+	int Count() const
+	{
+		return m_pData->m_Size;
+	}
+	
+	T& operator[]( int i )
+	{
+		return m_pData->m_Elements[i];
+	}
+
+	const T& operator[]( int i ) const
+	{
+		return m_pData->m_Elements[i];
+	}
+	
+	struct Data_t
+	{
+		int m_Size;
+		T m_Elements[0];
+	};
+
+	Data_t *m_pData;
+};
+#endif
+
 class CBaseEntity : public IServerEntity
 {
 public:
+	virtual ServerClass *GetServerClass() = 0;
+	virtual int YouForgotToImplementOrDeclareServerClass() = 0;
+	virtual datamap_t *GetDataDescMap() = 0;
+	
 	INextBot *MyNextBotPointer()
 	{
 		void **vtable = *(void ***)this;
@@ -138,8 +186,8 @@ public:
 	const Vector &GetAbsOrigin()
 	{
 		if(m_vecAbsOriginOffset == 0) {
-			datamap_t *map = gamehelpers->GetDataMap(this); 
-			sm_datatable_info_t info;
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
 			gamehelpers->FindDataMapInfo(map, "m_vecAbsOrigin", &info);
 			m_vecAbsOriginOffset = info.actual_offset;
 		}
@@ -636,7 +684,7 @@ class NextBotCombatCharacter : public CBaseCombatCharacter, INextBot
 public:
 	static NextBotCombatCharacter *create()
 	{
-		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)calloc(1, sizeofNextBotCombatCharacter);
+		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter);
 		(bytes->*void_to_func<void(NextBotCombatCharacter::*)()>(NextBotCombatCharacterCTOR))();
 		return bytes;
 	}
@@ -705,37 +753,6 @@ enum NavAttributeType
 	NAV_MESH_FUNC_COST		= 0x20000000,				// area has designer specified cost controlled by func_nav_cost entities
 	NAV_MESH_HAS_ELEVATOR	= 0x40000000,				// area is in an elevator's path
 	NAV_MESH_NAV_BLOCKER	= 0x80000000				// area is blocked by nav blocker ( Alas, needed to hijack a bit in the attributes to get within a cache line [7/24/2008 tom])
-};
-
-
-class CUtlVectorUltraConservativeAllocator {};
-
-template <typename T, typename A = CUtlVectorUltraConservativeAllocator >
-class CUtlVectorUltraConservative : private A
-{
-public:
-	int Count() const
-	{
-		return m_pData->m_Size;
-	}
-	
-	T& operator[]( int i )
-	{
-		return m_pData->m_Elements[i];
-	}
-
-	const T& operator[]( int i ) const
-	{
-		return m_pData->m_Elements[i];
-	}
-	
-	struct Data_t
-	{
-		int m_Size;
-		T m_Elements[0];
-	};
-
-	Data_t *m_pData;
 };
 
 struct NavConnect
@@ -862,8 +879,6 @@ public:
 	float m_length;									///< the length of the ladder
 	float m_width;
 
-	Vector GetPosAtHeight( float height ) const;	///< Compute x,y coordinate of the ladder at a given height
-
 	CNavArea *m_topForwardArea;						///< the area at the top of the ladder
 	CNavArea *m_topLeftArea;
 	CNavArea *m_topRightArea;
@@ -937,7 +952,7 @@ public:
 	
 	bool IsConnected( const CNavArea *area, NavDirType dir )
 	{
-	#if 0
+	#if 0//def USING_SDK2013
 		// we are connected to ourself
 		if (area == this)
 			return true;
@@ -1071,8 +1086,8 @@ public:
 	float ComputeAdjacentConnectionHeightChange(CNavArea *destinationArea)
 	{
 		// find which side it is connected on
-		int dir;
-		for( dir=0; dir<NUM_DIRECTIONS; ++dir )
+		int dir = 0;
+		for( dir = 0; dir<NUM_DIRECTIONS; ++dir )
 		{
 			if ( IsConnected( destinationArea, (NavDirType)dir ) )
 				break;
@@ -1081,11 +1096,11 @@ public:
 		if ( dir == NUM_DIRECTIONS )
 			return FLT_MAX;
 
-		Vector myEdge;
-		float halfWidth;
+		Vector myEdge{};
+		float halfWidth = 0.0f;
 		ComputePortal( destinationArea, (NavDirType)dir, &myEdge, &halfWidth );
 
-		Vector otherEdge;
+		Vector otherEdge{};
 		destinationArea->ComputePortal( this, OppositeDirection( (NavDirType)dir ), &otherEdge, &halfWidth );
 
 		return otherEdge.z - myEdge.z;
@@ -1313,8 +1328,9 @@ public:
 		bool pathResult = NavAreaBuildPath( startArea, subjectArea, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
 
 		// Failed?
-		if ( closestArea == NULL )
+		if ( closestArea == NULL ) {
 			return false;
+		}
 
 		//
 		// Build actual path by following parent links back from goal area
@@ -1322,7 +1338,7 @@ public:
 
 		// get count
 		int count = 0;
-		CNavArea *area;
+		CNavArea *area = nullptr;
 		for( area = closestArea; area; area = area->GetParent() )
 		{
 			++count;
@@ -1424,8 +1440,9 @@ public:
 		bool pathResult = NavAreaBuildPath( startArea, goalArea, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
 
 		// Failed?
-		if ( closestArea == NULL )
+		if ( closestArea == NULL ) {
 			return false;
+		}
 
 		//
 		// Build actual path by following parent links back from goal area
@@ -1433,7 +1450,7 @@ public:
 
 		// get count
 		int count = 0;
-		CNavArea *area;
+		CNavArea *area = nullptr;
 		for( area = closestArea; area; area = area->GetParent() )
 		{
 			++count;
@@ -1540,7 +1557,7 @@ public:
 			++anchor;
 		}
 	#else
-		(this->*void_to_func<void(Path::*)(INextBot *)>(PathOptimize))(bot);
+		(this->*void_to_func<void(Path::*)(INextBot *)>(PathOptimizeptr))(bot);
 	#endif
 	}
 
@@ -1549,6 +1566,11 @@ public:
 		(this->*void_to_func<void(Path::*)()>(PathPostProcess))();
 	}
 };
+
+DETOUR_DECL_MEMBER1(PathOptimize, void, INextBot *, bot)
+{
+	return ((Path *)this)->Optimize(bot);
+}
 
 class PathFollower : public Path
 {
@@ -1768,32 +1790,6 @@ public:
 	CUtlDict< IEntityFactory *, unsigned short > m_Factories;
 };
 
-class SPEntityFactory : public IEntityFactory
-{
-public:
-	SPEntityFactory(std::string &&name_)
-		: name(std::move(name_))
-	{
-	}
-	~SPEntityFactory()
-	{
-		((CEntityFactoryDictionary *)dictionary)->m_Factories.Remove(name.c_str());
-	}
-	IServerNetworkable *Create(const char *pClassName)
-	{
-		NextBotCombatCharacter *obj = NextBotCombatCharacter::create();
-		obj->PostConstructor(pClassName);
-		IServerNetworkable *net = obj->GetNetworkable();
-		return net;
-	}
-	void Destroy(IServerNetworkable *pNetworkable) {}
-	size_t GetEntitySize() { return 0; }
-	
-	std::string name;
-};
-
-HandleType_t EntityFactoryHandleType;
-
 cell_t PathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
 	Path *obj = Path::create();
@@ -1804,15 +1800,6 @@ cell_t PathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
 {
 	PathFollower *obj = PathFollower::create();
 	return handlesys->CreateHandle(PathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
-}
-
-cell_t nextbot_register_classname(IPluginContext *pContext, const cell_t *params)
-{
-	char *name;
-	pContext->LocalToString(params[1], &name);
-	SPEntityFactory *obj = new SPEntityFactory(name);
-	dictionary->InstallFactory(obj, name);
-	return handlesys->CreateHandle(EntityFactoryHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
 }
 
 class SPPathCost : public IPathCost
@@ -1854,22 +1841,12 @@ cell_t PathComputeVectorNative(IPluginContext *pContext, const cell_t *params)
 		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
 	}
 	
-	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
-	if(!pEntity)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
-	}
-	
-	cell_t *value;
+	cell_t *value = nullptr;
 	pContext->LocalToPhysAddr(params[3], &value);
 	
 	Vector goal = Vector(sp_ctof(value[0]), sp_ctof(value[1]), sp_ctof(value[2]));
 	
-	INextBot *bot = pEntity->MyNextBotPointer();
-	if(!bot)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
-	}
+	INextBot *bot = (INextBot *)params[2];
 	
 	IPluginFunction *callback = pContext->GetFunctionById(params[4]);
 	SPPathCost cost(bot, callback, params[5]);
@@ -1964,7 +1941,7 @@ cell_t CNavAreaGetCenter(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
 	const Vector &vec = area->GetCenter();
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2039,6 +2016,13 @@ cell_t CTFPathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
 {
 	CTFPathFollower *obj = CTFPathFollower::create();
 	return handlesys->CreateHandle(CTFPathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+}
+
+cell_t INextBotEntityget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	return gamehelpers->EntityToBCompatRef(bot->GetEntity());
 }
 
 cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *params)
@@ -2178,7 +2162,7 @@ cell_t PathGetPosition(IPluginContext *pContext, const cell_t *params)
 	
 	const Vector &vec = obj->GetPosition(distanceFromStart, start);
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2202,7 +2186,7 @@ cell_t PathGetClosestPosition(IPluginContext *pContext, const cell_t *params)
 	
 	Segment *start = (Segment *)params[4];
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[3], &addr);
 	
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
@@ -2230,7 +2214,7 @@ cell_t PathGetStartPosition(IPluginContext *pContext, const cell_t *params)
 	
 	const Vector &vec = obj->GetStartPosition();
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2252,7 +2236,7 @@ cell_t PathGetEndPosition(IPluginContext *pContext, const cell_t *params)
 	
 	const Vector &vec = obj->GetEndPosition();
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2462,7 +2446,7 @@ cell_t SegmentGetPosition(IPluginContext *pContext, const cell_t *params)
 	
 	const Vector &vec = seg->pos;
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2477,7 +2461,7 @@ cell_t SegmentGetPortalCenter(IPluginContext *pContext, const cell_t *params)
 	
 	const Vector &vec = seg->m_portalCenter;
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2492,7 +2476,7 @@ cell_t SegmentGetForward(IPluginContext *pContext, const cell_t *params)
 	
 	const Vector &vec = seg->forward;
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
@@ -2584,7 +2568,7 @@ cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	QAngle ang(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -2599,7 +2583,7 @@ cell_t ILocomotionGetDesiredLean(IPluginContext *pContext, const cell_t *params)
 
 	const QAngle &ang = area->GetDesiredLean();
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	addr[0] = sp_ftoc(ang.x);
 	addr[1] = sp_ftoc(ang.y);
@@ -2640,7 +2624,7 @@ cell_t ILocomotionJumpAcrossGap(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector goal(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -2655,7 +2639,7 @@ cell_t ILocomotionClimbUpToLedge(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector goal(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -2675,7 +2659,7 @@ cell_t ILocomotionFaceTowards(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -2688,7 +2672,7 @@ cell_t ILocomotionApproach(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -2701,7 +2685,7 @@ cell_t ILocomotionDriveTo(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -2827,7 +2811,7 @@ public:
 	
 	virtual bool Inspect( const CKnownEntity &known )
 	{
-		cell_t res;
+		cell_t res = 0;
 		callback->PushCell((cell_t)&known);
 		callback->PushCell(data);
 		callback->Execute(&res);
@@ -2873,7 +2857,7 @@ public:
 	
 	virtual bool IsAllowed( CBaseEntity *known )
 	{
-		cell_t res;
+		cell_t res = 0;
 		callback->PushCell(gamehelpers->EntityToBCompatRef(known));
 		callback->PushCell(data);
 		callback->Execute(&res);
@@ -2956,12 +2940,12 @@ cell_t IVisionIsAbleToSeeEntity(IPluginContext *pContext, const cell_t *params)
 		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
 	}
 	
-	Vector vec;
+	Vector vec{};
 	bool ret = locomotion->IsAbleToSee(pSubject, (FieldOfViewCheckType)params[3], &vec);
 	
 	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[4], &addr);
 	
 	if(addr != pNullVec) {
@@ -2977,7 +2961,7 @@ cell_t IVisionIsAbleToSeeVector(IPluginContext *pContext, const cell_t *params)
 {
 	IVision *locomotion = (IVision *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -3014,7 +2998,7 @@ cell_t IVisionIsInFieldOfViewVector(IPluginContext *pContext, const cell_t *para
 {
 	IVision *locomotion = (IVision *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -3038,7 +3022,7 @@ cell_t IVisionIsLineOfSightClear(IPluginContext *pContext, const cell_t *params)
 {
 	IVision *locomotion = (IVision *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -3055,12 +3039,12 @@ cell_t IVisionIsLineOfSightClearToEntity(IPluginContext *pContext, const cell_t 
 		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
 	}
 	
-	Vector vec;
+	Vector vec{};
 	bool ret = locomotion->IsLineOfSightClearToEntity(pSubject, &vec);
 	
 	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[3], &addr);
 	
 	if(addr != pNullVec) {
@@ -3076,7 +3060,7 @@ cell_t IVisionIsLookingAtVector(IPluginContext *pContext, const cell_t *params)
 {
 	IVision *locomotion = (IVision *)params[1];
 
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
@@ -3265,13 +3249,317 @@ cell_t CKnownEntityGetLastKnownPosition(IPluginContext *pContext, const cell_t *
 	CKnownEntity *locomotion = (CKnownEntity *)params[1];
 	const Vector &vec = locomotion->GetLastKnownPosition();
 	
-	cell_t *addr;
+	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[3], &addr);
 	addr[0] = sp_ftoc(vec.x);
 	addr[1] = sp_ftoc(vec.y);
 	addr[2] = sp_ftoc(vec.z);
 	
 	return 0;
+}
+
+enum nextbot_prop_type
+{
+	CustomPropInt,
+	CustomPropFloat,
+	CustomPropBool,
+};
+
+using custom_prop_t = std::pair<std::string, nextbot_prop_type>;
+using custom_prop_vec_t = std::vector<custom_prop_t>;
+
+struct custom_prop_info_t
+{
+	bool was_overriden = false;
+	IEntityFactory *fac = nullptr;
+	datamap_t map{};
+	std::vector<typedescription_t> dataDesc{};
+	std::string mapname{};
+	std::vector<std::string> prop_names{};
+	int size = 0;
+	int base = 0;
+	
+	custom_prop_info_t()
+	{
+		map.chains_validated = 0;
+		map.packed_offsets_computed = 0;
+		map.packed_size = 0;
+	}
+	
+	~custom_prop_info_t()
+	{
+		for(typedescription_t &desc : dataDesc) {
+			free((void *)desc.fieldName);
+		}
+	}
+	
+	void zero(CBaseEntity *pEntity)
+	{
+		for(typedescription_t &desc : dataDesc) {
+			switch(desc.fieldType) {
+				case FIELD_INTEGER: { *(int *)(((unsigned char *)pEntity) + desc.fieldOffset[TD_OFFSET_NORMAL]) = 0; break; }
+				case FIELD_FLOAT: { *(float *)(((unsigned char *)pEntity) + desc.fieldOffset[TD_OFFSET_NORMAL]) = 0.0f; break; }
+				case FIELD_BOOLEAN: { *(bool *)(((unsigned char *)pEntity) + desc.fieldOffset[TD_OFFSET_NORMAL]) = false; break; }
+			}
+		}
+	}
+	
+	void update_offsets()
+	{
+		for(typedescription_t &desc : dataDesc) {
+			desc.fieldOffset[TD_OFFSET_NORMAL] += base;
+		}
+	}
+	
+	void add_prop(std::string &&name, nextbot_prop_type type)
+	{
+		typedescription_t &desc = dataDesc.emplace_back();
+		
+		size_t len = name.length();
+		desc.fieldName = (char *)malloc(len+1);
+		strncpy((char *)desc.fieldName, name.c_str(), len);
+		((char *)desc.fieldName)[len] = '\0';
+		
+		prop_names.emplace_back(std::move(name));
+		
+		desc.flags = FTYPEDESC_PRIVATE|FTYPEDESC_VIEW_NEVER;
+		desc.fieldOffset[TD_OFFSET_NORMAL] = size;
+		if(was_overriden && base != 0) {
+			desc.fieldOffset[TD_OFFSET_NORMAL] += base;
+		}
+		desc.fieldSize = 1;
+		
+		switch(type) {
+			case CustomPropInt: {
+				desc.fieldType = FIELD_INTEGER;
+				desc.fieldSizeInBytes = sizeof(int);
+				break;
+			}
+			case CustomPropFloat: {
+				desc.fieldType = FIELD_FLOAT;
+				desc.fieldSizeInBytes = sizeof(float);
+				break;
+			}
+			case CustomPropBool: {
+				desc.fieldType = FIELD_BOOLEAN;
+				desc.fieldSizeInBytes = sizeof(bool);
+				break;
+			}
+		}
+		
+		size += desc.fieldSizeInBytes;
+		
+		desc.fieldOffset[TD_OFFSET_PACKED] = 0;
+		desc.externalName = nullptr;
+		desc.pSaveRestoreOps = nullptr;
+		desc.inputFunc = nullptr;
+		desc.td = nullptr;
+		desc.override_field = nullptr;
+		desc.override_count = 0;
+		desc.fieldTolerance = 0.0f;
+		
+		map.dataDesc = dataDesc.data();
+		++map.dataNumFields;
+	}
+};
+
+using prop_map_t = std::unordered_map<std::string, custom_prop_info_t>;
+prop_map_t prop_map{};
+
+SH_DECL_HOOK1(IEntityFactory, Create, SH_NOATTRIB, 0, IServerNetworkable *, const char *);
+SH_DECL_HOOK1(IVEngineServer, PvAllocEntPrivateData, SH_NOATTRIB, 0, void *, long);
+SH_DECL_HOOK0(CBaseEntity, GetDataDescMap, SH_NOATTRIB, 0, datamap_t *);
+
+static class chook_mgr
+{
+public:
+	void hook_create(custom_prop_info_t &info);
+	
+	datamap_t *HookGetDataDescMap()
+	{
+		CBaseEntity *pEntity = META_IFACEPTR(CBaseEntity);
+		const char *classname = gamehelpers->GetEntityClassname(pEntity);
+		
+		std::string clsname{classname};
+		prop_map_t::iterator it = prop_map.find(clsname);
+		if(it != prop_map.end()) {
+			datamap_t *map = &it->second.map;
+			RETURN_META_VALUE(MRES_SUPERCEDE, map);
+		} else {
+			RETURN_META_VALUE(MRES_IGNORED, nullptr);
+		}
+	}
+	
+	IServerNetworkable *HookCreate(const char *classname)
+	{
+		std::string clsname{classname};
+		
+		prop_map_t::iterator it = prop_map.find(clsname);
+		if(it != prop_map.end()) {
+			currinfo = &it->second;
+		}
+		
+		IEntityFactory *fac = META_IFACEPTR(IEntityFactory);
+		IServerNetworkable *net = SH_CALL(fac, &IEntityFactory::Create)(classname);
+		
+		CBaseEntity *pEntity = net->GetBaseEntity();
+		
+		if(!currinfo->was_overriden) {
+			datamap_t *map = gamehelpers->GetDataMap(pEntity);
+			
+			currinfo->mapname = map->dataClassName;
+			currinfo->mapname += "_custom";
+			currinfo->map.dataClassName = currinfo->mapname.c_str();
+			currinfo->map.baseMap = map;
+			
+			currinfo->base = last_cb;
+			currinfo->update_offsets();
+			//currinfo->zero(pEntity);
+			
+			currinfo->was_overriden = true;
+		}
+		
+		SH_ADD_HOOK(CBaseEntity, GetDataDescMap, pEntity, SH_MEMBER(this, &chook_mgr::HookGetDataDescMap), false);
+		
+		currinfo = nullptr;
+		
+		RETURN_META_VALUE(MRES_SUPERCEDE, net);
+	}
+	
+	long get_newallocsize(long cb)
+	{
+		last_cb = cb;
+		
+		if(currinfo != nullptr) {
+			cb += currinfo->size;
+		}
+		
+		return cb;
+	}
+	
+	void *HookPvAllocEntPrivateData(long cb)
+	{
+		cb = get_newallocsize(cb);
+		
+		RETURN_META_VALUE_NEWPARAMS(MRES_HANDLED, nullptr, &IVEngineServer::PvAllocEntPrivateData, (cb));
+	}
+	
+	custom_prop_info_t *currinfo = nullptr;
+	bool engine_was_hooked = false;
+	int last_cb = 0;
+} hook_mgr;
+
+void chook_mgr::hook_create(custom_prop_info_t &info)
+{
+	if(!engine_was_hooked) {
+		SH_ADD_HOOK(IVEngineServer, PvAllocEntPrivateData, engine, SH_MEMBER(this, &chook_mgr::HookPvAllocEntPrivateData), false);
+		engine_was_hooked = true;
+	}
+	
+	SH_ADD_HOOK(IEntityFactory, Create, info.fac, SH_MEMBER(this, &chook_mgr::HookCreate), false);
+}
+
+class SPEntityFactory : public IEntityFactory
+{
+public:
+	SPEntityFactory(std::string &&name_)
+		: name(std::move(name_))
+	{
+	}
+	~SPEntityFactory()
+	{
+		((CEntityFactoryDictionary *)dictionary)->m_Factories.Remove(name.c_str());
+	}
+	IServerNetworkable *Create(const char *pClassName)
+	{
+		NextBotCombatCharacter *obj = NextBotCombatCharacter::create();
+		obj->PostConstructor(pClassName);
+		IServerNetworkable *net = obj->GetNetworkable();
+		return net;
+	}
+	void Destroy(IServerNetworkable *pNetworkable) {}
+	size_t GetEntitySize() { return -1; }
+	
+	std::string name;
+};
+
+cell_t nextbot_custom_datamap_helper(std::string &&str, std::string &&clsname, IEntityFactory *fac, nextbot_prop_type type, IPluginContext *pContext)
+{
+	prop_map_t::iterator it = prop_map.find(clsname);
+	if(it != prop_map.end()) {
+		for(std::string &prop : it->second.prop_names) {
+			if(prop == str) {
+				return 0;
+			}
+		}
+	} else {
+		if(!fac) {
+			fac = dictionary->FindFactory(clsname.c_str());
+			if(!fac) {
+				return pContext->ThrowNativeError("invalid classname %s", clsname.c_str());
+			}
+		}
+		
+		custom_prop_info_t info{};
+		info.fac = fac;
+		
+		prop_map_t::value_type par{std::move(clsname), std::move(info)};
+		it = prop_map.emplace(std::move(par)).first;
+		
+		hook_mgr.hook_create(it->second);
+	}
+	
+	it->second.add_prop(std::move(str), type);
+	
+	return 0;
+}
+
+cell_t nextbot_custom_datamap(IPluginContext *pContext, const cell_t *params)
+{
+	char *classname = nullptr;
+	pContext->LocalToString(params[1], &classname);
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	std::string clsname{classname};
+	std::string str{name};
+	
+	return nextbot_custom_datamap_helper(std::move(str), std::move(clsname), nullptr, (nextbot_prop_type)params[3], pContext);
+}
+
+cell_t nextbot_custom_datamap_ex(IPluginContext *pContext, const cell_t *params)
+{
+	SPEntityFactory *fac = (SPEntityFactory *)params[1];
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	std::string clsname{fac->name};
+	std::string str{name};
+	
+	return nextbot_custom_datamap_helper(std::move(str), std::move(clsname), fac, (nextbot_prop_type)params[3], pContext);
+}
+
+cell_t nextbot_register_classname(IPluginContext *pContext, const cell_t *params)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[1], &name);
+	
+	IEntityFactory *fac = dictionary->FindFactory(name);
+	
+	if(fac != nullptr) {
+		if(fac->GetEntitySize() == (size_t)-1) {
+			return (cell_t)fac;
+		} else {
+			return 0;
+		}
+	}
+	
+	std::string str{name};
+	fac = new SPEntityFactory(std::move(str));
+	dictionary->InstallFactory(fac, name);
+	return (cell_t)fac;
 }
 
 sp_nativeinfo_t natives[] =
@@ -3351,6 +3639,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
+	{"INextBot.Entity.get", INextBotEntityget},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
 	{"NextBotGroundLocomotion.FrictionForward.get", NextBotGroundLocomotionFrictionForwardget},
@@ -3414,6 +3703,8 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.Destroy", CKnownEntityDestroy},
 	{"CKnownEntity.UpdatePosition", CKnownEntityUpdatePosition},
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
+	{"nextbot_custom_datamap", nextbot_custom_datamap},
+	{"nextbot_custom_datamap_ex", nextbot_custom_datamap_ex},
 	{NULL, NULL}
 };
 
@@ -3440,9 +3731,6 @@ void Sample::OnHandleDestroy(HandleType_t type, void *object)
 	} else if(type == CTFPathFollowerHandleType) {
 		CTFPathFollower *obj = (CTFPathFollower *)object;
 		delete obj;
-	} else if(type == EntityFactoryHandleType) {
-		SPEntityFactory *obj = (SPEntityFactory *)object;
-		delete obj;
 	}
 }
 
@@ -3455,10 +3743,10 @@ bool Sample::RegisterConCommandBase(ConCommandBase *pCommand)
 
 SH_DECL_HOOK0(CNavMesh, IsAuthoritative, SH_NOATTRIB, 0, bool);
 
+IGameConfig *g_pGameConf = nullptr;
+
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
-	IGameConfig *g_pGameConf = nullptr;
-	
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
 	
 	g_pGameConf->GetOffset("sizeof(Path)", &sizeofPath);
@@ -3476,7 +3764,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
 	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
 	g_pGameConf->GetMemSig("Path::FindNextOccludedNode", &PathFindNextOccludedNode);
-	g_pGameConf->GetMemSig("Path::Optimize", &PathOptimize);
+	g_pGameConf->GetMemSig("Path::Optimize", &PathOptimizeptr);
 	g_pGameConf->GetMemSig("Path::PostProcess", &PathPostProcess);
 	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
 	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);
@@ -3497,16 +3785,15 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 	
-	gameconfs->CloseGameConfigFile(g_pGameConf);
+	DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
 	
-	sm_sendprop_info_t info;
+	sm_sendprop_info_t info{};
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_iTeamNum", &info);
 	m_iTeamNumOffset = info.actual_offset;
 	
 	PathHandleType = handlesys->CreateType("Path", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	CTFPathFollowerHandleType = handlesys->CreateType("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
-	EntityFactoryHandleType = handlesys->CreateType("EntityFactory", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
 	sharesys->AddDependency(myself, "bintools.ext", true, true);
 	sharesys->AddDependency(myself, "sdktools.ext", true, true);
@@ -3594,5 +3881,5 @@ void Sample::SDK_OnUnload()
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());
 	handlesys->RemoveType(CTFPathFollowerHandleType, myself->GetIdentity());
-	handlesys->RemoveType(EntityFactoryHandleType, myself->GetIdentity());
+	gameconfs->CloseGameConfigFile(g_pGameConf);
 }

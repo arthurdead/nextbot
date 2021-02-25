@@ -363,8 +363,8 @@ methodmap INextBot
 		public native get();
 	}
 
-	public native void RegisterComponent(INextBotComponent comp);
-	public native void UnregisterComponent(INextBotComponent comp);
+	//public native void RegisterComponent(INextBotComponent comp);
+	//public native void UnregisterComponent(INextBotComponent comp);
 
 	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
 	//public native IVisionCustom AllocateCustomVision();
@@ -534,7 +534,21 @@ methodmap CTFPathFollower < PathFollower
 	}
 };
 
-native Handle nextbot_register_classname(const char[] classname);
+enum nextbot_prop_type
+{
+	CustomPropInt,
+	CustomPropFloat,
+	CustomPropBool,
+};
+
+methodmap IEntityFactoryCustom
+{
+
+};
+
+native void nextbot_custom_datamap(const char[] classname, const char[] name, nextbot_prop_type type);
+native void nextbot_custom_datamap_ex(IEntityFactoryCustom fac, const char[] name, nextbot_prop_type type);
+native IEntityFactoryCustom nextbot_register_classname(const char[] classname);
 
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data)
 {

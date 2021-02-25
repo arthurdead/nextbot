@@ -6,6 +6,14 @@ projectName = 'nextbot'
 # smsdk_ext.cpp will be automatically added later
 sourceFiles = [
   'extension.cpp',
+  os.path.join(Extension.sm_root, 'public', 'CDetour', 'detours.cpp'),
+  os.path.join(Extension.sm_root, 'public', 'asm', 'asm.c'),
+  os.path.join(Extension.sm_root, 'public', 'libudis86/decode.c'),
+  os.path.join(Extension.sm_root, 'public', 'libudis86/itab.c'),
+  os.path.join(Extension.sm_root, 'public', 'libudis86/syn-att.c'),
+  os.path.join(Extension.sm_root, 'public', 'libudis86/syn-intel.c'),
+  os.path.join(Extension.sm_root, 'public', 'libudis86/syn.c'),
+  os.path.join(Extension.sm_root, 'public', 'libudis86/udis86.c'),
 ]
 
 ###############
