@@ -3,6 +3,21 @@
 #endif
 #define nextbot_included
 
+#define TEAM_ANY -2
+
+typeset nextbot_functions
+{
+	//IVision.ForEachKnownEntity
+	function bool (CKnownEntity known, any data);
+
+	//IVision.GetClosestKnownFilter
+	function bool (int entity, any data);
+
+	//Path.ComputeVector
+	//Path.ComputeEntity
+	function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
+};
+
 methodmap CNavArea
 {
 	property float CostSoFar
@@ -32,7 +47,12 @@ methodmap CFuncElevator
 
 };
 
-methodmap ILocomotion
+methodmap INextBotComponent
+{
+
+};
+
+methodmap ILocomotion < INextBotComponent
 {
 	property float StepHeight
 	{
@@ -190,6 +210,140 @@ methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
 	}
 };
 
+methodmap CKnownEntity
+{
+	property int Entity
+	{
+		public native get();
+	}
+
+	property bool LastKnownPositionBeenSeen
+	{
+		public native get();
+	}
+
+	property CNavArea LastKnownArea
+	{
+		public native get();
+	}
+
+	property float TimeSinceLastKnown
+	{
+		public native get();
+	}
+
+	property float TimeSinceBecameKnown
+	{
+		public native get();
+	}
+
+	property float TimeSinceBecameVisible
+	{
+		public native get();
+	}
+
+	property float TimeWhenBecameVisible
+	{
+		public native get();
+	}
+
+	property float TimeSinceLastSeen
+	{
+		public native get();
+	}
+
+	property bool WasEverVisible
+	{
+		public native get();
+	}
+
+	property bool VisibilityStatus
+	{
+		public native set(bool height);
+	}
+
+	public native void MarkLastKnownPositionAsSeen();
+	public native bool IsVisibleInFOVNow();
+	public native bool IsVisibleRecently();
+	public native bool IsObsolete();
+	public native bool Is(int entity);
+	public native bool IsEqual(CKnownEntity entity);
+	public native void Destroy();
+	public native void UpdatePosition();
+	public native void GetLastKnownPosition(float pos[3]);
+};
+
+enum FieldOfViewCheckType
+{
+	USE_FOV,
+	DISREGARD_FOV
+};
+
+methodmap IVision < INextBotComponent
+{
+	public native bool ForEachKnownEntity(nextbot_functions func, any data = 0);
+	public native void CollectKnownEntities(ArrayList list);
+	public native CKnownEntity GetPrimaryKnownThreat(bool onlyVisibleThreats = false);
+	public native float GetTimeSinceVisible(int team);
+	public native CKnownEntity GetClosestKnownTeam(int team);
+	public native CKnownEntity GetClosestKnownFilter(nextbot_functions func, any data = 0);
+	public native int GetKnownCount(int team, bool onlyVisible = false, float rangeLimit = -1.0);
+	public native CKnownEntity GetKnown(int entity);
+	public native void AddKnownEntity(int entity);
+	public native void ForgetEntity(int entity);
+	public native void ForgetAllKnownEntities();
+	public native void CollectPotentiallyVisibleEntities(ArrayList list);
+	public native bool IsAbleToSeeEntity(int entity, FieldOfViewCheckType checkFOV, float visibleSpot[3] = NULL_VECTOR);
+	public native bool IsAbleToSeeVector(float pos[3], FieldOfViewCheckType checkFOV);
+	public native bool IsIgnored(int entity);
+	public native bool IsVisibleEntityNoticed(int entity);
+	public native bool IsInFieldOfViewVector(float pos[3]);
+	public native bool IsInFieldOfViewEntity(int entity);
+	public native bool IsLineOfSightClear(float pos[3]);
+	public native bool IsLineOfSightClearToEntity(int entity, float visibleSpot[3] = NULL_VECTOR);
+	public native bool IsLookingAtVector(float pos[3], float cosTolerance = 0.95);
+	public native bool IsLookingAtEntity(int entity, float cosTolerance = 0.95);
+
+	property float DefaultFieldOfView
+	{
+		public native get();
+	}
+
+	property float FieldOfView
+	{
+		public native get();
+		public native set(float height);
+	}
+
+	property float MaxVisionRange
+	{
+		public native get();
+	}
+
+	property float MinRecognizeTime
+	{
+		public native get();
+	}
+};
+
+methodmap IVisionCustom < IVision
+{
+	property float MaxVisionRange
+	{
+		public native set(float height);
+	}
+
+	property float MinRecognizeTime
+	{
+		public native set(float height);
+	}
+
+	property float DefaultFieldOfView
+	{
+		public native set(float height);
+	}
+};
+
 methodmap INextBot
 {
 	public native INextBot(int entity);
@@ -204,12 +358,16 @@ methodmap INextBot
 		public native get();
 	}
 
-	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
-};
+	property IVision VisionInterface
+	{
+		public native get();
+	}
 
-typeset nextbot_path_functor
-{
-	function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
+	public native void RegisterComponent(INextBotComponent comp);
+	public native void UnregisterComponent(INextBotComponent comp);
+
+	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
+	//public native IVisionCustom AllocateCustomVision();
 };
 
 enum SegmentType
@@ -336,8 +494,8 @@ methodmap Path < Handle
 
 	public native void Invalidate();
 
-	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_path_functor functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
-	public native bool ComputeEntity(INextBot bot, int subject, nextbot_path_functor functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+	public native bool ComputeEntity(INextBot bot, int subject, nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
 };
 
 methodmap PathFollower < Path
