@@ -29,8 +29,6 @@
  * Version: $Id$
  */
 
-#define USING_SDK2013
-
 #define swap V_swap
 
 #define BASEENTITY_H
@@ -105,7 +103,6 @@ void *NextBotGroundLocomotionCTOR = nullptr;
 void *PathComputePathDetails = nullptr;
 void *PathBuildTrivialPath = nullptr;
 void *PathFindNextOccludedNode = nullptr;
-void *PathOptimizeptr = nullptr;
 void *PathPostProcess = nullptr;
 void *CNavMeshGetGroundHeight = nullptr;
 void *CNavMeshGetNearestNavArea = nullptr;
@@ -545,6 +542,20 @@ class IBody;
 class IIntention;
 class IVision;
 
+class INextBotReply
+{
+public:
+	virtual void OnSuccess( INextBot *bot ) = 0;						// invoked when process completed successfully
+
+	enum FailureReason
+	{
+		DENIED,
+		INTERRUPTED,
+		FAILED
+	};
+	virtual void OnFail( INextBot *bot, FailureReason reason ) = 0;		// invoked when process failed
+};
+
 class INextBotComponent : public INextBotEventResponder
 {
 public:
@@ -928,6 +939,118 @@ public:
 
 	virtual void AdjustPosture( const Vector &moveGoal ) = 0;
 	virtual void StuckMonitor( void ) = 0;
+};
+
+class IBody : public INextBotComponent
+{
+public:
+	virtual ~IBody() = 0;
+
+	virtual void Reset( void )  = 0;			// reset to initial state
+	virtual void Update( void )  = 0;										// update internal state
+
+	/**
+	 * Move the bot to a new position.
+	 * If the body is not currently movable or if it
+	 * is in a motion-controlled animation activity 
+	 * the position will not be changed and false will be returned.
+	 */
+	virtual bool SetPosition( const Vector &pos ) = 0;
+
+	virtual const Vector &GetEyePosition( void ) const = 0;					// return the eye position of the bot in world coordinates
+	virtual const Vector &GetViewVector( void ) const = 0;					// return the view unit direction vector in world coordinates
+
+	enum LookAtPriorityType
+	{
+		BORING,
+		INTERESTING,				// last known enemy location, dangerous sound location
+		IMPORTANT,					// a danger
+		CRITICAL,					// an active threat to our safety
+		MANDATORY					// nothing can interrupt this look at - two simultaneous look ats with this priority is an error
+	};
+	virtual void AimHeadTowards( const Vector &lookAtPos, 
+								 LookAtPriorityType priority = BORING, 
+								 float duration = 0.0f,
+								 INextBotReply *replyWhenAimed = NULL,
+								 const char *reason = NULL ) = 0;		// aim the bot's head towards the given goal
+	virtual void AimHeadTowards( CBaseEntity *subject,
+								 LookAtPriorityType priority = BORING, 
+								 float duration = 0.0f,
+								 INextBotReply *replyWhenAimed = NULL,
+								 const char *reason = NULL ) = 0;		// continually aim the bot's head towards the given subject
+
+	virtual bool IsHeadAimingOnTarget( void ) const = 0;				// return true if the bot's head has achieved its most recent lookat target
+	virtual bool IsHeadSteady( void ) const = 0;						// return true if head is not rapidly turning to look somewhere else
+	virtual float GetHeadSteadyDuration( void ) const = 0;				// return the duration that the bot's head has not been rotating
+	virtual float GetHeadAimSubjectLeadTime( void ) const = 0;			// return how far into the future we should predict our moving subject's position to aim at when tracking subject look-ats
+	virtual float GetHeadAimTrackingInterval( void ) const = 0;			// return how often we should sample our target's position and velocity to update our aim tracking, to allow realistic slop in tracking
+	virtual void ClearPendingAimReply( void ) = 0;					// clear out currently pending replyWhenAimed callback
+
+	virtual float GetMaxHeadAngularVelocity( void ) const = 0;			// return max turn rate of head in degrees/second
+
+	enum ActivityType 
+	{ 
+		MOTION_CONTROLLED_XY	= 0x0001,	// XY position and orientation of the bot is driven by the animation.
+		MOTION_CONTROLLED_Z		= 0x0002,	// Z position of the bot is driven by the animation.
+		ACTIVITY_UNINTERRUPTIBLE= 0x0004,	// activity can't be changed until animation finishes
+		ACTIVITY_TRANSITORY		= 0x0008,	// a short animation that takes over from the underlying animation momentarily, resuming it upon completion
+		ENTINDEX_PLAYBACK_RATE	= 0x0010,	// played back at different rates based on entindex
+	};
+
+	/**
+	 * Begin an animation activity, return false if we cant do that right now.
+	 */
+	virtual bool StartActivity( Activity act, unsigned int flags = 0 ) = 0;
+	virtual int SelectAnimationSequence( Activity act ) const = 0;			// given an Activity, select and return a specific animation sequence within it
+
+	virtual Activity GetActivity( void ) const = 0;							// return currently animating activity
+	virtual bool IsActivity( Activity act ) const = 0;						// return true if currently animating activity matches the given one
+	virtual bool HasActivityType( unsigned int flags ) const = 0;			// return true if currently animating activity has any of the given flags
+
+	enum PostureType
+	{
+		STAND,
+		CROUCH,
+		SIT,
+		CRAWL,
+		LIE
+	};
+	virtual void SetDesiredPosture( PostureType posture )  = 0;			// request a posture change
+	virtual PostureType GetDesiredPosture( void ) const = 0;				// get posture body is trying to assume
+	virtual bool IsDesiredPosture( PostureType posture ) const = 0;			// return true if body is trying to assume this posture
+	virtual bool IsInDesiredPosture( void ) const = 0;						// return true if body's actual posture matches its desired posture
+
+	virtual PostureType GetActualPosture( void ) const = 0;					// return body's current actual posture
+	virtual bool IsActualPosture( PostureType posture ) const = 0;			// return true if body is actually in the given posture
+
+	virtual bool IsPostureMobile( void ) const = 0;							// return true if body's current posture allows it to move around the world
+	virtual bool IsPostureChanging( void ) const = 0;						// return true if body's posture is in the process of changing to new posture
+	
+	
+	/**
+	 * "Arousal" is the level of excitedness/arousal/anxiety of the body.
+	 * Is changes instantaneously to avoid complex interactions with posture transitions.
+	 */
+	enum ArousalType
+	{
+		NEUTRAL,
+		ALERT,
+		INTENSE
+	};
+	virtual void SetArousal( ArousalType arousal ) = 0;					// arousal level change
+	virtual ArousalType GetArousal( void ) const = 0;						// get arousal level
+	virtual bool IsArousal( ArousalType arousal ) const = 0;				// return true if body is at this arousal level
+
+
+	virtual float GetHullWidth( void ) const = 0;							// width of bot's collision hull in XY plane
+	virtual float GetHullHeight( void ) const = 0;							// height of bot's current collision hull based on posture
+	virtual float GetStandHullHeight( void ) const = 0;						// height of bot's collision hull when standing
+	virtual float GetCrouchHullHeight( void ) const = 0;					// height of bot's collision hull when crouched
+	virtual const Vector &GetHullMins( void ) const = 0;					// return current collision hull minimums based on actual body posture
+	virtual const Vector &GetHullMaxs( void ) const = 0;					// return current collision hull maximums based on actual body posture
+
+	virtual unsigned int GetSolidMask( void ) const = 0;					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
+	virtual unsigned int GetCollisionGroup( void ) const = 0;
 };
 
 class NextBotCombatCharacter : public CBaseCombatCharacter, INextBot
@@ -1331,7 +1454,6 @@ public:
 	
 	void Optimize( INextBot *bot )
 	{
-	#if 1
 		if(!path_expensive_optimize.GetBool())
 			return;
 		
@@ -1361,9 +1483,6 @@ public:
 
 			++anchor;
 		}
-	#else
-		(this->*void_to_func<void(Path::*)(INextBot *)>(PathOptimizeptr))(bot);
-	#endif
 	}
 
 	void PostProcess()
@@ -1478,6 +1597,7 @@ public:
 		float accel = 500.0f;
 		float deaccel = 500.0f;
 		float limit = 99999999.9f;
+		float slope = 0.6f;
 		
 		float gravity = 1000.0f;
 		float fricforward = 0.0f;
@@ -1503,6 +1623,8 @@ public:
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().deaccel); }
 	float HookGetSpeedLimit()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().limit); }
+	float HookGetTraversableSlopeLimit()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().slope); }
 	
 	float HookGetGravity()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().gravity); }
@@ -1531,6 +1653,7 @@ SH_DECL_HOOK0(ILocomotion, GetWalkSpeed, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetMaxAcceleration, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetMaxDeceleration, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetSpeedLimit, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetTraversableSlopeLimit, SH_NOATTRIB, 0, float);
 
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetGravity, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionForward, SH_NOATTRIB, 0, float);
@@ -1553,6 +1676,7 @@ NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *b
 	SH_ADD_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxAcceleration), false);
 	SH_ADD_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxDeceleration), false);
 	SH_ADD_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetSpeedLimit), false);
+	SH_ADD_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit), false);
 	
 	SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetGravity), false);
 	SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
@@ -1574,6 +1698,7 @@ void NextBotGroundLocomotionCustom::dtor()
 	SH_REMOVE_HOOK(ILocomotion, GetMaxAcceleration, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetMaxAcceleration), false);
 	SH_REMOVE_HOOK(ILocomotion, GetMaxDeceleration, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetMaxDeceleration), false);
 	SH_REMOVE_HOOK(ILocomotion, GetSpeedLimit, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetSpeedLimit), false);
+	SH_REMOVE_HOOK(ILocomotion, GetTraversableSlopeLimit, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit), false);
 	
 	SH_REMOVE_HOOK(NextBotGroundLocomotion, GetGravity, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetGravity), false);
 	SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionForward, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
@@ -1585,9 +1710,9 @@ void NextBotGroundLocomotionCustom::dtor()
 	RETURN_META(MRES_IGNORED);
 }
 
-HandleType_t PathHandleType;
-HandleType_t PathFollowerHandleType;
-HandleType_t CTFPathFollowerHandleType;
+HandleType_t PathHandleType = 0;
+HandleType_t PathFollowerHandleType = 0;
+HandleType_t CTFPathFollowerHandleType = 0;
 
 class CEntityFactoryDictionary : public IEntityFactoryDictionary
 {
@@ -1815,6 +1940,12 @@ cell_t INextBotVisionInterfaceget(IPluginContext *pContext, const cell_t *params
 {
 	INextBot *bot = (INextBot *)params[1];
 	return (cell_t)bot->GetVisionInterface();
+}
+
+cell_t INextBotBodyInterfaceget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	return (cell_t)bot->GetBodyInterface();
 }
 
 cell_t CTFPathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
@@ -2320,6 +2451,12 @@ cell_t ILocomotionSpeedLimitget(IPluginContext *pContext, const cell_t *params)
 	return sp_ftoc(area->GetSpeedLimit());
 }
 
+cell_t ILocomotionTraversableSlopeLimitget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return sp_ftoc(area->GetTraversableSlopeLimit());
+}
+
 cell_t ILocomotionDesiredSpeedget(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -2555,6 +2692,13 @@ cell_t NextBotGroundLocomotionCustomSpeedLimitset(IPluginContext *pContext, cons
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
 	locomotion->getvars().limit = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotGroundLocomotionCustomTraversableSlopeLimitset(IPluginContext *pContext, const cell_t *params)
+{
+	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
+	locomotion->getvars().slope = sp_ctof(params[2]);
 	return 0;
 }
 
@@ -3420,6 +3564,7 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.MaxAcceleration.get", ILocomotionMaxAccelerationget},
 	{"ILocomotion.MaxDeceleration.get", ILocomotionMaxDecelerationget},
 	{"ILocomotion.SpeedLimit.get", ILocomotionSpeedLimitget},
+	{"ILocomotion.TraversableSlopeLimit.get", ILocomotionTraversableSlopeLimitget},
 	{"ILocomotion.DesiredSpeed.get", ILocomotionDesiredSpeedget},
 	{"ILocomotion.DesiredSpeed.set", ILocomotionDesiredSpeedset},
 	{"ILocomotion.IsAreaTraversable", ILocomotionIsAreaTraversable},
@@ -3443,6 +3588,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.INextBot", INextBotget},
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
+	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.Entity.get", INextBotEntityget},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
@@ -3458,6 +3604,7 @@ sp_nativeinfo_t natives[] =
 	{"NextBotGoundLocomotionCustom.MaxAcceleration.set", NextBotGroundLocomotionCustomMaxAccelerationset},
 	{"NextBotGoundLocomotionCustom.MaxDeceleration.set", NextBotGroundLocomotionCustomMaxDecelerationset},
 	{"NextBotGoundLocomotionCustom.SpeedLimit.set", NextBotGroundLocomotionCustomSpeedLimitset},
+	{"NextBotGoundLocomotionCustom.TraversableSlopeLimit.set", NextBotGroundLocomotionCustomTraversableSlopeLimitset},
 	{"NextBotGoundLocomotionCustom.Gravity.set", NextBotGroundLocomotionCustomGravityset},
 	{"NextBotGoundLocomotionCustom.FrictionForward.set", NextBotGroundLocomotionCustomFrictionForwardset},
 	{"NextBotGoundLocomotionCustom.FrictionSideways.set", NextBotGroundLocomotionCustomFrictionSidewaysset},
@@ -3574,7 +3721,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
 	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
 	g_pGameConf->GetMemSig("Path::FindNextOccludedNode", &PathFindNextOccludedNode);
-	g_pGameConf->GetMemSig("Path::Optimize", &PathOptimizeptr);
 	g_pGameConf->GetMemSig("Path::PostProcess", &PathPostProcess);
 	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
 	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);

@@ -94,6 +94,11 @@ methodmap ILocomotion < INextBotComponent
 		public native get();
 	}
 
+	property float TraversableSlopeLimit
+	{
+		public native get();
+	}
+
 	property float DesiredSpeed
 	{
 		public native get();
@@ -185,6 +190,11 @@ methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
 	}
 
 	property float SpeedLimit
+	{
+		public native set(float height);
+	}
+
+	property float TraversableSlopeLimit
 	{
 		public native set(float height);
 	}
@@ -344,6 +354,78 @@ methodmap IVisionCustom < IVision
 	}
 };
 
+methodmap IBody < INextBotComponent
+{
+	property float HullWidth
+	{
+		public native get();
+	}
+
+	property float HullHeight
+	{
+		public native get();
+	}
+
+	property float StandHullHeight
+	{
+		public native get();
+	}
+
+	property float CrouchHullHeight
+	{
+		public native get();
+	}
+
+	property float SolidMask
+	{
+		public native get();
+	}
+
+	property float CollisionGroup
+	{
+		public native get();
+	}
+
+	public native void GetHullMins(float vec[3]);
+	public native void GetHullMaxs(float vec[3]);
+};
+
+methodmap IBodyCustom < IBody
+{
+	property float HullWidth
+	{
+		public native set(float height);
+	}
+
+	property float HullHeight
+	{
+		public native set(float height);
+	}
+
+	property float StandHullHeight
+	{
+		public native set(float height);
+	}
+
+	property float CrouchHullHeight
+	{
+		public native set(float height);
+	}
+
+	property float SolidMask
+	{
+		public native set(float height);
+	}
+
+	property float CollisionGroup
+	{
+		public native set(float height);
+	}
+
+	public native void SetHullMins(float vec[3]);
+	public native void SetHullMaxs(float vec[3]);
+};
+
 methodmap INextBot
 {
 	public native INextBot(int entity);
@@ -363,11 +445,17 @@ methodmap INextBot
 		public native get();
 	}
 
+	property IBody BodyInterface
+	{
+		public native get();
+	}
+
 	//public native void RegisterComponent(INextBotComponent comp);
 	//public native void UnregisterComponent(INextBotComponent comp);
 
 	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
 	//public native IVisionCustom AllocateCustomVision();
+	//public native IBodyCustom AllocateCustomBody();
 };
 
 enum SegmentType
@@ -549,6 +637,26 @@ methodmap IEntityFactoryCustom
 native void nextbot_custom_datamap(const char[] classname, const char[] name, nextbot_prop_type type);
 native void nextbot_custom_datamap_ex(IEntityFactoryCustom fac, const char[] name, nextbot_prop_type type);
 native IEntityFactoryCustom nextbot_register_classname(const char[] classname);
+
+stock void SetEntPropCustom(int entity, const char[] name, any value)
+{
+	SetEntProp(entity, Prop_Data, name, value);
+}
+
+stock void SetEntPropFloatCustom(int entity, const char[] name, float value)
+{
+	SetEntPropFloat(entity, Prop_Data, name, value);
+}
+
+stock any GetEntPropCustom(int entity, const char[] name)
+{
+	return GetEntProp(entity, Prop_Data, name);
+}
+
+stock float GetEntPropFloatCustom(int entity, const char[] name)
+{
+	return GetEntPropFloat(entity, Prop_Data, name);
+}
 
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data)
 {
