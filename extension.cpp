@@ -29,22 +29,35 @@
  * Version: $Id$
  */
 
+#define USING_SDK2013
+
+#define swap V_swap
+
+#define BASEENTITY_H
+#define NEXT_BOT
+#define GLOWS_ENABLE
+#define TF_DLL
+#define USES_ECON_ITEMS
+#define USE_NAV_MESH
+#define RAD_TELEMETRY_DISABLED
+
 #include "extension.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <mathlib/vmatrix.h>
-#include <shareddefs.h>
-#include <util.h>
 #include <toolframework/itoolentity.h>
-#include <tier1/utldict.h>
-#include <tier1/utlvector.h>
-#include <eiface.h>
 #include <ehandle.h>
 #include <GameEventListener.h>
+#include <eiface.h>
+#include <dt_common.h>
+#include <shareddefs.h>
+#include <util.h>
+#include <variant_t.h>
+#include <predictioncopy.h>
+#include <tier1/utldict.h>
+#include <tier1/utlvector.h>
 #include <CDetour/detours.h>
-#include <tier0/memalloc.h>
-#include <tier0/memdbgon.h>
 
 /**
  * @file extension.cpp
@@ -69,8 +82,8 @@ class CBaseCombatCharacter;
 class CNavMesh;
 class INextBotComponent;
 class PathFollower;
-
-#define TEAM_ANY				-2
+class ISave;
+class IRestore;
 
 CNavMesh *TheNavMesh = nullptr;
 
@@ -96,7 +109,6 @@ void *PathOptimizeptr = nullptr;
 void *PathPostProcess = nullptr;
 void *CNavMeshGetGroundHeight = nullptr;
 void *CNavMeshGetNearestNavArea = nullptr;
-void *CNavAreaIsConnected = nullptr;
 
 void *NavAreaBuildPathPtr = nullptr;
 
@@ -116,54 +128,75 @@ T void_to_func(void *ptr)
 	return f;
 }
 
-#define USING_SDK2013
-
-#ifdef USING_SDK2013
 extern "C"
 {
-__attribute__((__visibility__("default"), __cdecl__)) double  __pow_finite(double x, double y)
+__attribute__((__visibility__("default"), __cdecl__)) double __pow_finite(double a, double b)
 {
-	return pow(x, y);
+	return pow(a, b);
 }
-}
-#else
-class CUtlVectorUltraConservativeAllocator {};
 
-template <typename T, typename A = CUtlVectorUltraConservativeAllocator >
-class CUtlVectorUltraConservative : private A
+__attribute__((__visibility__("default"), __cdecl__)) double __log_finite(double a)
 {
-public:
-	int Count() const
-	{
-		return m_pData->m_Size;
-	}
-	
-	T& operator[]( int i )
-	{
-		return m_pData->m_Elements[i];
-	}
+	return log(a);
+}
 
-	const T& operator[]( int i ) const
-	{
-		return m_pData->m_Elements[i];
-	}
-	
-	struct Data_t
-	{
-		int m_Size;
-		T m_Elements[0];
-	};
+__attribute__((__visibility__("default"), __cdecl__)) double __exp_finite(double a)
+{
+	return exp(a);
+}
 
-	Data_t *m_pData;
-};
-#endif
+__attribute__((__visibility__("default"), __cdecl__)) double __atan2_finite(double a, double b)
+{
+	return atan2(a, b);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) float __atan2f_finite(float a, float b)
+{
+	return atan2f(a, b);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) float __powf_finite(float a, float b)
+{
+	return powf(a, b);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) float __logf_finite(float a)
+{
+	return logf(a);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) float __expf_finite(float a)
+{
+	return expf(a);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) float __acosf_finite(float a)
+{
+	return acosf(a);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) double __asin_finite(double a)
+{
+	return asin(a);
+}
+
+__attribute__((__visibility__("default"), __cdecl__)) double __acos_finite(double a)
+{
+	return acos(a);
+}
+
+}
+
+#define DECLARE_PREDICTABLE()
+
+#include <collisionproperty.h>
 
 class CBaseEntity : public IServerEntity
 {
 public:
-	virtual ServerClass *GetServerClass() = 0;
-	virtual int YouForgotToImplementOrDeclareServerClass() = 0;
-	virtual datamap_t *GetDataDescMap() = 0;
+	DECLARE_CLASS_NOBASE( CBaseEntity );
+	DECLARE_SERVERCLASS();
+	DECLARE_DATADESC();
 	
 	INextBot *MyNextBotPointer()
 	{
@@ -199,6 +232,25 @@ public:
 	{
 		return *(int *)(((unsigned char *)this) + m_iTeamNumOffset);
 	}
+	
+	int GetHealth() { return 0; }
+	int m_takedamage;
+	CCollisionProperty		*CollisionProp() { return nullptr; }
+	const CCollisionProperty*CollisionProp() const { return nullptr; }
+	void	NetworkStateChanged() { }
+	void	NetworkStateChanged( void *pVar ) {  }
+	virtual bool ShouldBlockNav() const { return true; }
+	int ObjectCaps() { return 0; }
+	bool HasSpawnFlags(int) { return 0; }
+};
+
+inline bool FClassnameIs(CBaseEntity *pEntity, const char *szClassname)
+{ 
+	return false;
+}
+
+class CBaseToggle : public CBaseEntity
+{
 };
 
 class CBaseCombatCharacter : public CBaseEntity
@@ -209,15 +261,214 @@ public:
 		void **vtable = *(void ***)this;
 		return (this->*void_to_func<CNavArea *(CBaseCombatCharacter::*)()>(vtable[CBaseCombatCharacterGetLastKnownArea]))();
 	}
+	
+	void OnNavAreaRemoved(CNavArea *) {}
 };
+
+#define FCAP_USE_IN_RADIUS 0
+#define FCAP_IMPULSE_USE 0
+
+#define private public
+
+#include <nav_mesh.h>
+#include <nav_area.h>
+
+bool CNavArea::IsConnected( const CNavArea *area, NavDirType dir ) const
+{
+	// we are connected to ourself
+	if (area == this)
+		return true;
+
+	if (dir == NUM_DIRECTIONS)
+	{
+		// search all directions
+		for( int d=0; d<NUM_DIRECTIONS; ++d )
+		{
+			FOR_EACH_VEC( m_connect[ d ], it )
+			{
+				if (area == m_connect[ d ][ it ].area)
+					return true;
+			}
+		}
+
+		// check ladder connections
+		FOR_EACH_VEC( m_ladder[ CNavLadder::LADDER_UP ], it )
+		{
+			CNavLadder *ladder = m_ladder[ CNavLadder::LADDER_UP ][ it ].ladder;
+
+			if (ladder->m_topBehindArea == area ||
+				ladder->m_topForwardArea == area ||
+				ladder->m_topLeftArea == area ||
+				ladder->m_topRightArea == area)
+				return true;
+		}
+
+		FOR_EACH_VEC( m_ladder[ CNavLadder::LADDER_DOWN ], dit )
+		{
+			CNavLadder *ladder = m_ladder[ CNavLadder::LADDER_DOWN ][ dit ].ladder;
+
+			if (ladder->m_bottomArea == area)
+				return true;
+		}
+	}
+	else
+	{
+		// check specific direction
+		FOR_EACH_VEC( m_connect[ dir ], it )
+		{
+			if (area == m_connect[ dir ][ it ].area)
+				return true;
+		}
+	}
+
+	return false;
+}
+
+void CNavArea::ComputePortal( const CNavArea *to, NavDirType dir, Vector *center, float *halfWidth ) const
+{
+	if ( dir == NORTH || dir == SOUTH )
+	{
+		if ( dir == NORTH )
+		{
+			center->y = m_nwCorner.y;
+		}
+		else
+		{
+			center->y = m_seCorner.y;
+		}
+
+		float left = MAX( m_nwCorner.x, to->m_nwCorner.x );
+		float right = MIN( m_seCorner.x, to->m_seCorner.x );
+
+		// clamp to our extent in case areas are disjoint
+		if ( left < m_nwCorner.x )
+		{
+			left = m_nwCorner.x;
+		}
+		else if ( left > m_seCorner.x )
+		{
+			left = m_seCorner.x;
+		}
+
+		if ( right < m_nwCorner.x )
+		{
+			right = m_nwCorner.x;
+		}
+		else if ( right > m_seCorner.x )
+		{
+			right = m_seCorner.x;
+		}
+
+		center->x = ( left + right )/2.0f;
+		*halfWidth = ( right - left )/2.0f;
+	}
+	else	// EAST or WEST
+	{
+		if ( dir == WEST )
+		{
+			center->x = m_nwCorner.x;
+		}
+		else
+		{
+			center->x = m_seCorner.x;
+		}
+
+		float top = MAX( m_nwCorner.y, to->m_nwCorner.y );
+		float bottom = MIN( m_seCorner.y, to->m_seCorner.y );
+
+		// clamp to our extent in case areas are disjoint
+		if ( top < m_nwCorner.y )
+		{
+			top = m_nwCorner.y;
+		}
+		else if ( top > m_seCorner.y )
+		{
+			top = m_seCorner.y;
+		}
+
+		if ( bottom < m_nwCorner.y )
+		{
+			bottom = m_nwCorner.y;
+		}
+		else if ( bottom > m_seCorner.y )
+		{
+			bottom = m_seCorner.y;
+		}
+
+		center->y = (top + bottom)/2.0f;
+		*halfWidth = (bottom - top)/2.0f;
+	}
+
+	center->z = GetZ( center->x, center->y );
+}
+
+float CNavArea::ComputeAdjacentConnectionHeightChange( const CNavArea *destinationArea ) const
+{
+	// find which side it is connected on
+	int dir;
+	for( dir=0; dir<NUM_DIRECTIONS; ++dir )
+	{
+		if ( IsConnected( destinationArea, (NavDirType)dir ) )
+			break;
+	}
+
+	if ( dir == NUM_DIRECTIONS )
+		return FLT_MAX;
+
+	Vector myEdge;
+	float halfWidth;
+	ComputePortal( destinationArea, (NavDirType)dir, &myEdge, &halfWidth );
+
+	Vector otherEdge;
+	destinationArea->ComputePortal( this, OppositeDirection( (NavDirType)dir ), &otherEdge, &halfWidth );
+
+	return otherEdge.z - myEdge.z;
+}
+
+float CNavArea::GetZ( float x, float y ) const RESTRICT
+{
+	// guard against division by zero due to degenerate areas
+	if (m_invDxCorners == 0.0f || m_invDyCorners == 0.0f)
+		return m_neZ;
+
+	float u = (x - m_nwCorner.x) * m_invDxCorners;
+	float v = (y - m_nwCorner.y) * m_invDyCorners;
+
+	// clamp Z values to (x,y) volume
+	
+	u = fsel( u, u, 0 );			// u >= 0 ? u : 0
+	u = fsel( u - 1.0f, 1.0f, u );	// u >= 1 ? 1 : u
+
+	v = fsel( v, v, 0 );			// v >= 0 ? v : 0
+	v = fsel( v - 1.0f, 1.0f, v );	// v >= 1 ? 1 : v
+
+	float northZ = m_nwCorner.z + u * (m_neZ - m_nwCorner.z);
+	float southZ = m_swZ + u * (m_seCorner.z - m_swZ);
+
+	return northZ + v * (southZ - northZ);
+}
+
+CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround, int team ) const
+{
+	return (this->*void_to_func<CNavArea *(CNavMesh::*)(const Vector &, bool, float, bool, bool, int) const>(CNavMeshGetNearestNavArea))(pos, anyZ, maxDist, checkLOS, checkGround, team);
+}
+
+bool CNavMesh::GetGroundHeight( const Vector &pos, float *height, Vector *normal ) const
+{
+	return (this->*void_to_func<bool(CNavMesh::*)(const Vector &, float *, Vector *) const>(CNavMeshGetGroundHeight))(pos, height, normal);
+}
+
+template< typename CostFunctor >
+bool NavAreaBuildPath( CNavArea *startArea, CNavArea *goalArea, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea = NULL, float maxPathLength = 0.0f, int teamID = TEAM_ANY, bool ignoreNavBlockers = false )
+{
+	return (void_to_func<bool(*)(CNavArea *, CNavArea *, const Vector *, CostFunctor &, CNavArea **, float, int, bool)>(NavAreaBuildPathPtr))(startArea, goalArea, goalPos, costFunc, closestArea, maxPathLength, teamID, ignoreNavBlockers);
+}
 
 class CBaseCombatWeapon;
 class Path;
 struct animevent_t;
 enum MoveToFailureType : int;
 struct AI_Response;
-enum NavTraverseType : int;
-enum NavDirType: int;
 using AIConcept_t = int;
 
 class INextBotEventResponder
@@ -707,452 +958,6 @@ public:
 	virtual CNavArea *operator() ( CNavArea *currentGoal, CNavArea *newArea ) const = 0;
 };
 
-/**
- * Defines possible ways to move from one area to another
- */
-enum NavTraverseType : int
-{
-	// NOTE: First 4 directions MUST match NavDirType
-	GO_NORTH = 0,
-	GO_EAST,
-	GO_SOUTH,
-	GO_WEST,
-
-	GO_LADDER_UP,
-	GO_LADDER_DOWN,
-	GO_JUMP,
-	GO_ELEVATOR_UP,
-	GO_ELEVATOR_DOWN,
-
-	NUM_TRAVERSE_TYPES
-};
-
-enum NavAttributeType
-{
-	NAV_MESH_INVALID		= 0,
-	NAV_MESH_CROUCH			= 0x00000001,				// must crouch to use this node/area
-	NAV_MESH_JUMP			= 0x00000002,				// must jump to traverse this area (only used during generation)
-	NAV_MESH_PRECISE		= 0x00000004,				// do not adjust for obstacles, just move along area
-	NAV_MESH_NO_JUMP		= 0x00000008,				// inhibit discontinuity jumping
-	NAV_MESH_STOP			= 0x00000010,				// must stop when entering this area
-	NAV_MESH_RUN			= 0x00000020,				// must run to traverse this area
-	NAV_MESH_WALK			= 0x00000040,				// must walk to traverse this area
-	NAV_MESH_AVOID			= 0x00000080,				// avoid this area unless alternatives are too dangerous
-	NAV_MESH_TRANSIENT		= 0x00000100,				// area may become blocked, and should be periodically checked
-	NAV_MESH_DONT_HIDE		= 0x00000200,				// area should not be considered for hiding spot generation
-	NAV_MESH_STAND			= 0x00000400,				// bots hiding in this area should stand
-	NAV_MESH_NO_HOSTAGES	= 0x00000800,				// hostages shouldn't use this area
-	NAV_MESH_STAIRS			= 0x00001000,				// this area represents stairs, do not attempt to climb or jump them - just walk up
-	NAV_MESH_NO_MERGE		= 0x00002000,				// don't merge this area with adjacent areas
-	NAV_MESH_OBSTACLE_TOP	= 0x00004000,				// this nav area is the climb point on the tip of an obstacle
-	NAV_MESH_CLIFF			= 0x00008000,				// this nav area is adjacent to a drop of at least CliffHeight
-
-	NAV_MESH_FIRST_CUSTOM	= 0x00010000,				// apps may define custom app-specific bits starting with this value
-	NAV_MESH_LAST_CUSTOM	= 0x04000000,				// apps must not define custom app-specific bits higher than with this value
-
-	NAV_MESH_FUNC_COST		= 0x20000000,				// area has designer specified cost controlled by func_nav_cost entities
-	NAV_MESH_HAS_ELEVATOR	= 0x40000000,				// area is in an elevator's path
-	NAV_MESH_NAV_BLOCKER	= 0x80000000				// area is blocked by nav blocker ( Alas, needed to hijack a bit in the attributes to get within a cache line [7/24/2008 tom])
-};
-
-struct NavConnect
-{
-	NavConnect()
-	{
-		id = 0;
-		length = -1;
-	}
-
-	union
-	{
-		unsigned int id;
-		CNavArea *area;
-	};
-
-	mutable float length;
-
-	bool operator==( const NavConnect &other ) const
-	{
-		return (area == other.area) ? true : false;
-	}
-};
-
-typedef CUtlVectorUltraConservativeAllocator CNavVectorAllocator;
-typedef CUtlVectorUltraConservative<NavConnect, CNavVectorAllocator> NavConnectVector;
-
-union NavLadderConnect
-{
-	unsigned int id;
-	CNavLadder *ladder;
-
-	bool operator==( const NavLadderConnect &other ) const
-	{
-		return (ladder == other.ladder) ? true : false;
-	}
-};
-typedef CUtlVectorUltraConservative<NavLadderConnect, CNavVectorAllocator> NavLadderConnectVector;
-
-enum LadderDirectionType
-{
-	NAV_LADDER_UP = 0,
-	NAV_LADDER_DOWN,
-
-	NUM_LADDER_DIRECTIONS
-};
-
-enum NavDirType : int
-{
-	NORTH = 0,
-	EAST = 1,
-	SOUTH = 2,
-	WEST = 3,
-
-	NUM_DIRECTIONS
-};
-
-enum { MAX_NAV_TEAMS = 2 };
-
-class CNavAreaCriticalData
-{
-protected:
-	// --- Begin critical data, which is heavily hit during pathing operations and carefully arranged for cache performance [7/24/2008 tom] ---
-
-	/* 0  */	Vector m_nwCorner;											// north-west corner position (2D mins)
-	/* 12 */	Vector m_seCorner;											// south-east corner position (2D maxs)
-	/* 24 */	float m_invDxCorners;
-	/* 28 */	float m_invDyCorners;
-	/* 32 */	float m_neZ;												// height of the implicit corner defined by (m_seCorner.x, m_nwCorner.y, m_neZ)
-	/* 36 */	float m_swZ;												// height of the implicit corner defined by (m_nwCorner.x, m_seCorner.y, m_neZ)
-	/* 40 */	Vector m_center;											// centroid of area
-
-	/* 52 */	unsigned char m_playerCount[ MAX_NAV_TEAMS ];				// the number of players currently in this area
-
-	/* 54 */	bool m_isBlocked[ MAX_NAV_TEAMS ];							// if true, some part of the world is preventing movement through this nav area
-
-	/* 56 */	unsigned int m_marker;										// used to flag the area as visited
-	/* 60 */	float m_totalCost;											// the distance so far plus an estimate of the distance left
-	/* 64 */	float m_costSoFar;											// distance travelled so far
-
-	/* 68 */	CNavArea *m_nextOpen, *m_prevOpen;							// only valid if m_openMarker == m_masterMarker
-	/* 76 */	unsigned int m_openMarker;									// if this equals the current marker value, we are on the open list
-
-	/* 80 */	int	m_attributeFlags;										// set of attribute bit flags (see NavAttributeType)
-
-	//- connections to adjacent areas -------------------------------------------------------------------
-	/* 84 */	NavConnectVector m_connect[ NUM_DIRECTIONS ];				// a list of adjacent areas for each direction
-	/* 100*/	NavLadderConnectVector m_ladder[ NUM_LADDER_DIRECTIONS ];	// list of ladders leading up and down from this area
-	/* 108*/	NavConnectVector m_elevatorAreas;							// a list of areas reachable via elevator from this area
-
-	/* 112*/	unsigned int m_nearNavSearchMarker;							// used in GetNearestNavArea()
-
-	/* 116*/	CNavArea *m_parent;											// the area just prior to this on in the search path
-	/* 120*/	NavTraverseType m_parentHow;								// how we get from parent to us
-
-	/* 124*/	float m_pathLengthSoFar;									// length of path so far, needed for limiting pathfind max path length
-
-	/* *************** 360 cache line *************** */
-
-	/* 128*/	CFuncElevator *m_elevator;									// if non-NULL, this area is in an elevator's path. The elevator can transport us vertically to another area.
-
-	// --- End critical data --- 
-};
-
-inline NavDirType OppositeDirection( NavDirType dir )
-{
-	switch( dir )
-	{
-		case NORTH: return SOUTH;
-		case SOUTH: return NORTH;
-		case EAST:	return WEST;
-		case WEST:	return EAST;
-		default: break;
-	}
-
-	return NORTH;
-}
-
-class CNavLadder
-{
-public:
-	Vector m_top;									///< world coords of the top of the ladder
-	Vector m_bottom;								///< world coords of the top of the ladder
-	float m_length;									///< the length of the ladder
-	float m_width;
-
-	CNavArea *m_topForwardArea;						///< the area at the top of the ladder
-	CNavArea *m_topLeftArea;
-	CNavArea *m_topRightArea;
-	CNavArea *m_topBehindArea;						///< area at top of ladder "behind" it - only useful for descending
-	CNavArea *m_bottomArea;							///< the area at the bottom of the ladder
-	
-	CHandle<CBaseEntity> m_ladderEntity;
-
-	NavDirType m_dir;								///< which way the ladder faces (ie: surface normal of climbable side)
-	Vector m_normal;								///< surface normal of the ladder surface (or Vector-ized m_dir, if the traceline fails)
-
-	unsigned int m_id;	
-};
-
-class CNavArea : public CNavAreaCriticalData
-{
-public:
-	unsigned int m_id;											// unique area ID
-
-	CNavArea *GetParent()
-	{
-		return m_parent;
-	}
-	
-	NavTraverseType GetParentHow()
-	{
-		return m_parentHow;
-	}
-	
-	float GetZ( const Vector &pos )
-	{
-		return GetZ( pos.x, pos.y );
-	}
-	
-	float GetZ( float x, float y )
-	{
-		if (m_invDxCorners == 0.0f || m_invDyCorners == 0.0f)
-			return m_neZ;
-		
-		float u = (x - m_nwCorner.x) * m_invDxCorners;
-		float v = (y - m_nwCorner.y) * m_invDyCorners;
-
-		// clamp Z values to (x,y) volume
-		
-		u = fsel( u, u, 0 );			// u >= 0 ? u : 0
-		u = fsel( u - 1.0f, 1.0f, u );	// u >= 1 ? 1 : u
-
-		v = fsel( v, v, 0 );			// v >= 0 ? v : 0
-		v = fsel( v - 1.0f, 1.0f, v );	// v >= 1 ? 1 : v
-
-		float northZ = m_nwCorner.z + u * (m_neZ - m_nwCorner.z);
-		float southZ = m_swZ + u * (m_seCorner.z - m_swZ);
-
-		return northZ + v * (southZ - northZ);
-	}
-	
-	float GetCostSoFar()
-	{
-		return m_costSoFar;
-	}
-	
-	int GetID()
-	{
-		return m_id;
-	}
-	
-	const Vector &GetCenter()
-	{
-		return m_center;
-	}
-	
-	bool IsConnected( const CNavArea *area, NavDirType dir )
-	{
-	#if 0//def USING_SDK2013
-		// we are connected to ourself
-		if (area == this)
-			return true;
-
-		if (dir == NUM_DIRECTIONS)
-		{
-			// search all directions
-			for( int d=0; d<NUM_DIRECTIONS; ++d )
-			{
-				FOR_EACH_VEC( m_connect[ d ], it )
-				{
-					if (area == m_connect[ d ][ it ].area)
-						return true;
-				}
-			}
-
-			// check ladder connections
-			FOR_EACH_VEC( m_ladder[ NAV_LADDER_UP ], it )
-			{
-				CNavLadder *ladder = m_ladder[ NAV_LADDER_UP ][ it ].ladder;
-
-				if (ladder->m_topBehindArea == area ||
-					ladder->m_topForwardArea == area ||
-					ladder->m_topLeftArea == area ||
-					ladder->m_topRightArea == area)
-					return true;
-			}
-
-			FOR_EACH_VEC( m_ladder[ NAV_LADDER_DOWN ], dit )
-			{
-				CNavLadder *ladder = m_ladder[ NAV_LADDER_DOWN ][ dit ].ladder;
-
-				if (ladder->m_bottomArea == area)
-					return true;
-			}
-		}
-		else
-		{
-			// check specific direction
-			FOR_EACH_VEC( m_connect[ dir ], it )
-			{
-				if (area == m_connect[ dir ][ it ].area)
-					return true;
-			}
-		}
-
-		return false;
-	#else
-		return (this->*void_to_func<bool(CNavArea::*)(const CNavArea *, NavDirType)>(CNavAreaIsConnected))(area, dir);
-	#endif
-	}
-	
-	void ComputePortal( const CNavArea *to, NavDirType dir, Vector *center, float *halfWidth )
-	{
-		if ( dir == NORTH || dir == SOUTH )
-		{
-			if ( dir == NORTH )
-			{
-				center->y = m_nwCorner.y;
-			}
-			else
-			{
-				center->y = m_seCorner.y;
-			}
-
-			float left = MAX( m_nwCorner.x, to->m_nwCorner.x );
-			float right = MIN( m_seCorner.x, to->m_seCorner.x );
-
-			// clamp to our extent in case areas are disjoint
-			if ( left < m_nwCorner.x )
-			{
-				left = m_nwCorner.x;
-			}
-			else if ( left > m_seCorner.x )
-			{
-				left = m_seCorner.x;
-			}
-
-			if ( right < m_nwCorner.x )
-			{
-				right = m_nwCorner.x;
-			}
-			else if ( right > m_seCorner.x )
-			{
-				right = m_seCorner.x;
-			}
-
-			center->x = ( left + right )/2.0f;
-			*halfWidth = ( right - left )/2.0f;
-		}
-		else	// EAST or WEST
-		{
-			if ( dir == WEST )
-			{
-				center->x = m_nwCorner.x;
-			}
-			else
-			{
-				center->x = m_seCorner.x;
-			}
-
-			float top = MAX( m_nwCorner.y, to->m_nwCorner.y );
-			float bottom = MIN( m_seCorner.y, to->m_seCorner.y );
-
-			// clamp to our extent in case areas are disjoint
-			if ( top < m_nwCorner.y )
-			{
-				top = m_nwCorner.y;
-			}
-			else if ( top > m_seCorner.y )
-			{
-				top = m_seCorner.y;
-			}
-
-			if ( bottom < m_nwCorner.y )
-			{
-				bottom = m_nwCorner.y;
-			}
-			else if ( bottom > m_seCorner.y )
-			{
-				bottom = m_seCorner.y;
-			}
-
-			center->y = (top + bottom)/2.0f;
-			*halfWidth = (bottom - top)/2.0f;
-		}
-
-		center->z = GetZ( center->x, center->y );
-	}
-	
-	float ComputeAdjacentConnectionHeightChange(CNavArea *destinationArea)
-	{
-		// find which side it is connected on
-		int dir = 0;
-		for( dir = 0; dir<NUM_DIRECTIONS; ++dir )
-		{
-			if ( IsConnected( destinationArea, (NavDirType)dir ) )
-				break;
-		}
-
-		if ( dir == NUM_DIRECTIONS )
-			return FLT_MAX;
-
-		Vector myEdge{};
-		float halfWidth = 0.0f;
-		ComputePortal( destinationArea, (NavDirType)dir, &myEdge, &halfWidth );
-
-		Vector otherEdge{};
-		destinationArea->ComputePortal( this, OppositeDirection( (NavDirType)dir ), &otherEdge, &halfWidth );
-
-		return otherEdge.z - myEdge.z;
-	}
-};
-
-struct HidingSpot;
-enum NavErrorType : int;
-
-class CNavMesh : public CGameEventListener
-{
-public:
-	virtual ~CNavMesh() = 0;
-	
-	virtual void PreLoadAreas( int nAreas ) = 0;
-	virtual CNavArea *CreateArea( void ) const = 0;							// CNavArea factory
-	virtual void DestroyArea( CNavArea * ) const = 0;
-	virtual HidingSpot *CreateHidingSpot( void ) const = 0;					// Hiding Spot factory
-
-	virtual void Reset( void ) = 0;											// destroy Navigation Mesh data and revert to initial state
-	virtual void Update( void ) = 0;										// invoked on each game frame
-
-	virtual NavErrorType Load( void ) = 0;									// load navigation data from a file
-	virtual NavErrorType PostLoad( unsigned int version ) = 0;				// (EXTEND) invoked after all areas have been loaded - for pointer binding, etc
-	/**
-	 * Return true if nav mesh can be trusted for all climbing/jumping decisions because game environment is fairly simple.
-	 * Authoritative meshes mean path followers can skip CPU intensive realtime scanning of unpredictable geometry.
-	 */
-	virtual bool IsAuthoritative( void ) = 0;
-	
-	CNavArea *GetNearestNavArea( const Vector &pos, bool anyZ = false, float maxDist = 10000.0f, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY )
-	{
-		return (this->*void_to_func<CNavArea *(CNavMesh::*)(const Vector &, bool, float, bool, bool, int)>(CNavMeshGetNearestNavArea))(pos, anyZ, maxDist, checkLOS, checkGround, team);
-	}
-	
-	bool GetGroundHeight( const Vector &pos, float *height, Vector *normal = NULL )
-	{
-		return (this->*void_to_func<bool(CNavMesh::*)(const Vector &, float *, Vector *)>(CNavMeshGetGroundHeight))(pos, height, normal);
-	}
-	
-	bool HookIsAuthoritative()
-	{
-		RETURN_META_VALUE(MRES_SUPERCEDE, nav_authorative.GetBool());
-	}
-};
-
-template <typename CostFunctor>
-bool NavAreaBuildPath(CNavArea *startArea, CNavArea *goalArea, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea = NULL, float maxPathLength = 0.0f, int teamID = TEAM_ANY, bool ignoreNavBlockers = false)
-{
-	return (void_to_func<bool(*)(CNavArea *, CNavArea *, const Vector *, CostFunctor &, CNavArea **, float, int, bool)>(NavAreaBuildPathPtr))(startArea, goalArea, goalPos, costFunc, closestArea, maxPathLength, teamID, ignoreNavBlockers);
-}
-
 enum SegmentType
 {
 	ON_GROUND,
@@ -1326,7 +1131,7 @@ public:
 		//
 		CNavArea *closestArea = NULL;
 		bool pathResult = NavAreaBuildPath( startArea, subjectArea, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
-
+		
 		// Failed?
 		if ( closestArea == NULL ) {
 			return false;
@@ -1342,7 +1147,7 @@ public:
 		for( area = closestArea; area; area = area->GetParent() )
 		{
 			++count;
-
+			
 			if ( area == startArea )
 			{
 				// startArea can be re-evaluated during the pathfind and given a parent...
@@ -1569,7 +1374,7 @@ public:
 
 DETOUR_DECL_MEMBER1(PathOptimize, void, INextBot *, bot)
 {
-	return ((Path *)this)->Optimize(bot);
+	((Path *)this)->Optimize(bot);
 }
 
 class PathFollower : public Path
@@ -3741,7 +3546,12 @@ bool Sample::RegisterConCommandBase(ConCommandBase *pCommand)
 	return true;
 }
 
-SH_DECL_HOOK0(CNavMesh, IsAuthoritative, SH_NOATTRIB, 0, bool);
+SH_DECL_HOOK0(CNavMesh, IsAuthoritative, const, 0, bool);
+
+bool HookIsAuthoritative()
+{
+	RETURN_META_VALUE(MRES_SUPERCEDE, nav_authorative.GetBool());
+}
 
 IGameConfig *g_pGameConf = nullptr;
 
@@ -3768,7 +3578,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("Path::PostProcess", &PathPostProcess);
 	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
 	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);
-	g_pGameConf->GetMemSig("CNavArea::IsConnected", &CNavAreaIsConnected);
 	
 	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
 	
@@ -3777,11 +3586,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::PostConstructor", &CBaseEntityPostConstructor);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
 	
-	void *TheNavMeshPtr = nullptr;
-	g_pGameConf->GetMemSig("TheNavMesh", &TheNavMeshPtr);
-	TheNavMesh = *(CNavMesh **)TheNavMeshPtr;
+	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMesh);
 	
-	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_MEMBER(TheNavMesh, &CNavMesh::HookIsAuthoritative), false);
+	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_STATIC(HookIsAuthoritative), false);
 	
 	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 	

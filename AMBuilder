@@ -30,7 +30,7 @@ else:
   project.sources += [os.path.join(Extension.sm_root, 'public', 'smsdk_ext.cpp')]
 
 project.sources += sourceFiles
-  
+
 for sdk_name in Extension.sdks:
   sdk = Extension.sdks[sdk_name]
 
