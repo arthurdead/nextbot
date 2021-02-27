@@ -66,11 +66,8 @@ Sample g_Sample{};		/**< Global singleton for extension's main interface */
 
 SMEXT_LINK(&g_Sample);
 
-IBinTools *g_pBinTools = nullptr;
-ISDKHooks *g_pSDKHooks = nullptr;
-ISDKTools *g_pSDKTools = nullptr;
-IEntityFactoryDictionary *dictionary = nullptr;
 ICvar *icvar = nullptr;
+CGlobalVars *gpGlobals = nullptr;
 
 class INextBot;
 class CNavArea;
@@ -106,13 +103,15 @@ void *PathFindNextOccludedNode = nullptr;
 void *PathPostProcess = nullptr;
 void *CNavMeshGetGroundHeight = nullptr;
 void *CNavMeshGetNearestNavArea = nullptr;
+void *CBaseEntitySetAbsOrigin = nullptr;
 
 void *NavAreaBuildPathPtr = nullptr;
 
 int CBaseEntityMyNextBotPointer = 0;
 int CBaseEntityMyCombatCharacterPointer = 0;
-int CBaseEntityPostConstructor = 0;
 int CBaseCombatCharacterGetLastKnownArea = 0;
+int CBaseEntityWorldSpaceCenter = 0;
+int CBaseEntityEyeAngles = 0;
 
 int m_vecAbsOriginOffset = 0;
 int m_iTeamNumOffset = 0;
@@ -181,7 +180,6 @@ __attribute__((__visibility__("default"), __cdecl__)) double __acos_finite(doubl
 {
 	return acos(a);
 }
-
 }
 
 #define DECLARE_PREDICTABLE()
@@ -207,12 +205,6 @@ public:
 		return (this->*void_to_func<CBaseCombatCharacter *(CBaseEntity::*)()>(vtable[CBaseEntityMyCombatCharacterPointer]))();
 	}
 	
-	void PostConstructor(const char *classname)
-	{
-		void **vtable = *(void ***)this;
-		(this->*void_to_func<void (CBaseEntity::*)(const char *classname)>(vtable[CBaseEntityPostConstructor]))(classname);
-	}
-	
 	const Vector &GetAbsOrigin()
 	{
 		if(m_vecAbsOriginOffset == 0) {
@@ -228,6 +220,23 @@ public:
 	int GetTeamNumber()
 	{
 		return *(int *)(((unsigned char *)this) + m_iTeamNumOffset);
+	}
+	
+	const Vector &WorldSpaceCenter( ) const
+	{
+		void **vtable = *(void ***)this;
+		return (this->*void_to_func<const Vector & (CBaseEntity::*)() const>(vtable[CBaseEntityWorldSpaceCenter]))();
+	}
+	
+	const QAngle &EyeAngles( void )
+	{
+		void **vtable = *(void ***)this;
+		return (this->*void_to_func<const QAngle & (CBaseEntity::*)()>(vtable[CBaseEntityEyeAngles]))();
+	}
+	
+	void SetAbsOrigin( const Vector& origin )
+	{
+		return (this->*void_to_func<void(CBaseEntity::*)(const Vector&)>(CBaseEntitySetAbsOrigin))(origin);
 	}
 	
 	int GetHealth() { return 0; }
@@ -471,70 +480,70 @@ using AIConcept_t = int;
 class INextBotEventResponder
 {
 public:
-	virtual ~INextBotEventResponder() = 0;
+	virtual ~INextBotEventResponder() {}
 	
 	// these methods are used by derived classes to define how events propagate
-	virtual INextBotEventResponder *FirstContainedResponder( void ) const = 0;
-	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const = 0;
+	virtual INextBotEventResponder *FirstContainedResponder( void ) const { return nullptr; }
+	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const { return nullptr; }
 	
 	//
 	// Events.  All events must be 'extended' by calling the derived class explicitly to ensure propagation.
 	// Each event must implement its propagation in this interface class.
 	//
-	virtual void OnLeaveGround( CBaseEntity *ground ) = 0;		// invoked when bot leaves ground for any reason
-	virtual void OnLandOnGround( CBaseEntity *ground ) = 0;		// invoked when bot lands on the ground after being in the air
+	virtual void OnLeaveGround( CBaseEntity *ground ) {}		// invoked when bot leaves ground for any reason
+	virtual void OnLandOnGround( CBaseEntity *ground ) {}		// invoked when bot lands on the ground after being in the air
 
-	virtual void OnContact( CBaseEntity *other, CGameTrace *result = NULL ) = 0;	// invoked when bot touches 'other'
+	virtual void OnContact( CBaseEntity *other, CGameTrace *result = NULL ) {}	// invoked when bot touches 'other'
 
-	virtual void OnMoveToSuccess( const Path *path ) = 0;		// invoked when a bot reaches the end of the given Path
-	virtual void OnMoveToFailure( const Path *path, MoveToFailureType reason ) = 0;	// invoked when a bot fails to reach the end of the given Path
-	virtual void OnStuck( void ) = 0;							// invoked when bot becomes stuck while trying to move
-	virtual void OnUnStuck( void ) = 0;							// invoked when a previously stuck bot becomes un-stuck and can again move
+	virtual void OnMoveToSuccess( const Path *path ) {}		// invoked when a bot reaches the end of the given Path
+	virtual void OnMoveToFailure( const Path *path, MoveToFailureType reason ) {}	// invoked when a bot fails to reach the end of the given Path
+	virtual void OnStuck( void ) {}							// invoked when bot becomes stuck while trying to move
+	virtual void OnUnStuck( void ) {}							// invoked when a previously stuck bot becomes un-stuck and can again move
 
-	virtual void OnPostureChanged( void ) = 0;					// when bot has assumed new posture (query IBody for posture)
+	virtual void OnPostureChanged( void ) {}					// when bot has assumed new posture (query IBody for posture)
 
-	virtual void OnAnimationActivityComplete( int activity ) = 0;	// when animation activity has finished playing
-	virtual void OnAnimationActivityInterrupted( int activity ) = 0;// when animation activity was replaced by another animation
-	virtual void OnAnimationEvent( animevent_t *event ) = 0;	// when a QC-file animation event is triggered by the current animation sequence
+	virtual void OnAnimationActivityComplete( int activity ) {}	// when animation activity has finished playing
+	virtual void OnAnimationActivityInterrupted( int activity ) {}// when animation activity was replaced by another animation
+	virtual void OnAnimationEvent( animevent_t *event ) {}	// when a QC-file animation event is triggered by the current animation sequence
 
-	virtual void OnIgnite( void ) = 0;							// when bot starts to burn
-	virtual void OnInjured( const CTakeDamageInfo &info ) = 0;	// when bot is damaged by something
-	virtual void OnKilled( const CTakeDamageInfo &info ) = 0;	// when the bot's health reaches zero
-	virtual void OnOtherKilled( CBaseCombatCharacter *victim, const CTakeDamageInfo &info ) = 0;	// when someone else dies
+	virtual void OnIgnite( void ) {}							// when bot starts to burn
+	virtual void OnInjured( const CTakeDamageInfo &info ) {}	// when bot is damaged by something
+	virtual void OnKilled( const CTakeDamageInfo &info ) {}	// when the bot's health reaches zero
+	virtual void OnOtherKilled( CBaseCombatCharacter *victim, const CTakeDamageInfo &info ) {}	// when someone else dies
 
-	virtual void OnSight( CBaseEntity *subject ) = 0;			// when subject initially enters bot's visual awareness
-	virtual void OnLostSight( CBaseEntity *subject ) = 0;		// when subject leaves enters bot's visual awareness
+	virtual void OnSight( CBaseEntity *subject ) {}			// when subject initially enters bot's visual awareness
+	virtual void OnLostSight( CBaseEntity *subject ) {}		// when subject leaves enters bot's visual awareness
 
-	virtual void OnSound( CBaseEntity *source, const Vector &pos, KeyValues *keys ) = 0;				// when an entity emits a sound. "pos" is world coordinates of sound. "keys" are from sound's GameData
-	virtual void OnSpokeConcept( CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response ) = 0;	// when an Actor speaks a concept
-	virtual void OnWeaponFired( CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon ) = 0;		// when someone fires a weapon
+	virtual void OnSound( CBaseEntity *source, const Vector &pos, KeyValues *keys ) {}				// when an entity emits a sound. "pos" is world coordinates of sound. "keys" are from sound's GameData
+	virtual void OnSpokeConcept( CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response ) {}	// when an Actor speaks a concept
+	virtual void OnWeaponFired( CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon ) {}		// when someone fires a weapon
 
-	virtual void OnNavAreaChanged( CNavArea *newArea, CNavArea *oldArea ) = 0;	// when bot enters a new navigation area
+	virtual void OnNavAreaChanged( CNavArea *newArea, CNavArea *oldArea ) {}	// when bot enters a new navigation area
 
-	virtual void OnModelChanged( void ) = 0;					// when the entity's model has been changed	
+	virtual void OnModelChanged( void ) {}					// when the entity's model has been changed	
 
-	virtual void OnPickUp( CBaseEntity *item, CBaseCombatCharacter *giver ) = 0;	// when something is added to our inventory
-	virtual void OnDrop( CBaseEntity *item ) = 0;									// when something is removed from our inventory
-	virtual void OnActorEmoted( CBaseCombatCharacter *emoter, int emote ) = 0;			// when "emoter" does an "emote" (ie: manual voice command, etc)
+	virtual void OnPickUp( CBaseEntity *item, CBaseCombatCharacter *giver ) {}	// when something is added to our inventory
+	virtual void OnDrop( CBaseEntity *item ) {}									// when something is removed from our inventory
+	virtual void OnActorEmoted( CBaseCombatCharacter *emoter, int emote ) {}			// when "emoter" does an "emote" (ie: manual voice command, etc)
 
-	virtual void OnCommandAttack( CBaseEntity *victim ) = 0;	// attack the given entity
-	virtual void OnCommandApproach( const Vector &pos, float range = 0.0f ) = 0;	// move to within range of the given position
-	virtual void OnCommandApproach( CBaseEntity *goal ) = 0;	// follow the given leader
-	virtual void OnCommandRetreat( CBaseEntity *threat, float range = 0.0f ) = 0;	// retreat from the threat at least range units away (0 == infinite)
-	virtual void OnCommandPause( float duration = 0.0f ) = 0;	// pause for the given duration (0 == forever)
-	virtual void OnCommandResume( void ) = 0;					// resume after a pause
+	virtual void OnCommandAttack( CBaseEntity *victim ) {}	// attack the given entity
+	virtual void OnCommandApproach( const Vector &pos, float range = 0.0f ) {}	// move to within range of the given position
+	virtual void OnCommandApproach( CBaseEntity *goal ) {}	// follow the given leader
+	virtual void OnCommandRetreat( CBaseEntity *threat, float range = 0.0f ) {}	// retreat from the threat at least range units away (0 == infinite)
+	virtual void OnCommandPause( float duration = 0.0f ) {}	// pause for the given duration (0 == forever)
+	virtual void OnCommandResume( void ) {}					// resume after a pause
 
-	virtual void OnCommandString( const char *command ) = 0;	// for debugging: respond to an arbitrary string representing a generalized command
+	virtual void OnCommandString( const char *command ) {}	// for debugging: respond to an arbitrary string representing a generalized command
 
-	virtual void OnShoved( CBaseEntity *pusher ) = 0;			// 'pusher' has shoved me
-	virtual void OnBlinded( CBaseEntity *blinder ) = 0;			// 'blinder' has blinded me with a flash of light
+	virtual void OnShoved( CBaseEntity *pusher ) {}			// 'pusher' has shoved me
+	virtual void OnBlinded( CBaseEntity *blinder ) {}			// 'blinder' has blinded me with a flash of light
 
-	virtual void OnTerritoryContested( int territoryID ) = 0;	// territory has been invaded and is changing ownership
-	virtual void OnTerritoryCaptured( int territoryID ) = 0;	// we have captured enemy territory
-	virtual void OnTerritoryLost( int territoryID ) = 0;		// we have lost territory to the enemy
+	virtual void OnTerritoryContested( int territoryID ) {}	// territory has been invaded and is changing ownership
+	virtual void OnTerritoryCaptured( int territoryID ) {}	// we have captured enemy territory
+	virtual void OnTerritoryLost( int territoryID ) {}		// we have lost territory to the enemy
 
-	virtual void OnWin( void ) = 0;
-	virtual void OnLose( void ) = 0;
+	virtual void OnWin( void ) {}
+	virtual void OnLose( void ) {}
 };
 
 class ILocomotion;
@@ -559,13 +568,14 @@ public:
 class INextBotComponent : public INextBotEventResponder
 {
 public:
-	virtual ~INextBotComponent() = 0;
+	INextBotComponent( INextBot *bot, bool reg );
+	virtual ~INextBotComponent();
 
-	virtual void Reset( void ) = 0;				// reset to initial state
-	virtual void Update( void ) = 0;									// update internal state
-	virtual void Upkeep( void ) = 0;										// lightweight update guaranteed to occur every server tick
+	virtual void Reset( void ) { m_lastUpdateTime = 0; m_curInterval = TICK_INTERVAL; }				// reset to initial state
+	virtual void Update( void ) {}									// update internal state
+	virtual void Upkeep( void ) {}										// lightweight update guaranteed to occur every server tick
 
-	virtual INextBot *GetBot( void ) const = 0;
+	virtual INextBot *GetBot( void ) const { return m_bot; }
 	
 	float m_lastUpdateTime;
 	float m_curInterval;
@@ -619,6 +629,22 @@ public:
 		}
 	}
 	
+	void ReplaceComponent(INextBotComponent *whom, INextBotComponent *with)
+	{
+		with->m_nextComponent = whom->m_nextComponent;
+		
+		for(INextBotComponent *cur = m_componentList, *prev = nullptr; cur != nullptr; prev = cur, cur = cur->m_nextComponent) {
+			if (cur == whom) {
+				if(prev != nullptr) {
+					prev->m_nextComponent = with;
+				} else {
+					m_componentList = with;
+				}
+				break;
+			}
+		}
+	}
+	
 	INextBotComponent *m_componentList;						// the first component
 
 	const PathFollower *m_currentPath;						// the path we most recently followed
@@ -642,6 +668,23 @@ public:
 
 	//CUtlVector< NextBotDebugLineType * > m_debugHistory;
 };
+
+INextBotComponent::INextBotComponent( INextBot *bot, bool reg )
+{
+	m_curInterval = TICK_INTERVAL;
+	m_lastUpdateTime = 0;
+	m_bot = bot;
+	
+	// register this component with the bot
+	if(reg) {
+		bot->RegisterComponent( this );
+	}
+}
+
+INextBotComponent::~INextBotComponent()
+{
+	m_bot->UnregisterComponent( this );
+}
 
 enum QueryResultType : int;
 class CKnownEntity;
@@ -944,10 +987,11 @@ public:
 class IBody : public INextBotComponent
 {
 public:
-	virtual ~IBody() = 0;
+	IBody( INextBot *bot, bool reg ) : INextBotComponent( bot, reg ) { }
+	virtual ~IBody() {}
 
-	virtual void Reset( void )  = 0;			// reset to initial state
-	virtual void Update( void )  = 0;										// update internal state
+	virtual void Reset( void )  { INextBotComponent::Reset(); }			// reset to initial state
+	virtual void Update( void )  {}										// update internal state
 
 	/**
 	 * Move the bot to a new position.
@@ -957,8 +1001,8 @@ public:
 	 */
 	virtual bool SetPosition( const Vector &pos ) = 0;
 
-	virtual const Vector &GetEyePosition( void ) const = 0;					// return the eye position of the bot in world coordinates
-	virtual const Vector &GetViewVector( void ) const = 0;					// return the view unit direction vector in world coordinates
+	virtual const Vector &GetEyePosition( void ) = 0;					// return the eye position of the bot in world coordinates
+	virtual const Vector &GetViewVector( void ) = 0;					// return the view unit direction vector in world coordinates
 
 	enum LookAtPriorityType
 	{
@@ -972,21 +1016,31 @@ public:
 								 LookAtPriorityType priority = BORING, 
 								 float duration = 0.0f,
 								 INextBotReply *replyWhenAimed = NULL,
-								 const char *reason = NULL ) = 0;		// aim the bot's head towards the given goal
+								 const char *reason = NULL ) {
+		if ( replyWhenAimed )
+		{
+			replyWhenAimed->OnFail( GetBot(), INextBotReply::FAILED );
+		}
+	}		// aim the bot's head towards the given goal
 	virtual void AimHeadTowards( CBaseEntity *subject,
 								 LookAtPriorityType priority = BORING, 
 								 float duration = 0.0f,
 								 INextBotReply *replyWhenAimed = NULL,
-								 const char *reason = NULL ) = 0;		// continually aim the bot's head towards the given subject
+								 const char *reason = NULL ) {
+		if ( replyWhenAimed )
+		{
+			replyWhenAimed->OnFail( GetBot(), INextBotReply::FAILED );
+		}
+	}		// continually aim the bot's head towards the given subject
 
-	virtual bool IsHeadAimingOnTarget( void ) const = 0;				// return true if the bot's head has achieved its most recent lookat target
-	virtual bool IsHeadSteady( void ) const = 0;						// return true if head is not rapidly turning to look somewhere else
-	virtual float GetHeadSteadyDuration( void ) const = 0;				// return the duration that the bot's head has not been rotating
-	virtual float GetHeadAimSubjectLeadTime( void ) const = 0;			// return how far into the future we should predict our moving subject's position to aim at when tracking subject look-ats
-	virtual float GetHeadAimTrackingInterval( void ) const = 0;			// return how often we should sample our target's position and velocity to update our aim tracking, to allow realistic slop in tracking
-	virtual void ClearPendingAimReply( void ) = 0;					// clear out currently pending replyWhenAimed callback
+	virtual bool IsHeadAimingOnTarget( void ) const { return false; }				// return true if the bot's head has achieved its most recent lookat target
+	virtual bool IsHeadSteady( void ) const { return true; }						// return true if head is not rapidly turning to look somewhere else
+	virtual float GetHeadSteadyDuration( void ) const { return 0.0f; }				// return the duration that the bot's head has not been rotating
+	virtual float GetHeadAimSubjectLeadTime( void ) const { return 0.0f; }			// return how far into the future we should predict our moving subject's position to aim at when tracking subject look-ats
+	virtual float GetHeadAimTrackingInterval( void ) const { return 0.0f; }			// return how often we should sample our target's position and velocity to update our aim tracking, to allow realistic slop in tracking
+	virtual void ClearPendingAimReply( void ) {}					// clear out currently pending replyWhenAimed callback
 
-	virtual float GetMaxHeadAngularVelocity( void ) const = 0;			// return max turn rate of head in degrees/second
+	virtual float GetMaxHeadAngularVelocity( void ) const { return 1000.0f; }			// return max turn rate of head in degrees/second
 
 	enum ActivityType 
 	{ 
@@ -1000,12 +1054,12 @@ public:
 	/**
 	 * Begin an animation activity, return false if we cant do that right now.
 	 */
-	virtual bool StartActivity( Activity act, unsigned int flags = 0 ) = 0;
-	virtual int SelectAnimationSequence( Activity act ) const = 0;			// given an Activity, select and return a specific animation sequence within it
+	virtual bool StartActivity( Activity act, unsigned int flags = 0 ) { return false; }
+	virtual int SelectAnimationSequence( Activity act ) const { return 0; }			// given an Activity, select and return a specific animation sequence within it
 
-	virtual Activity GetActivity( void ) const = 0;							// return currently animating activity
-	virtual bool IsActivity( Activity act ) const = 0;						// return true if currently animating activity matches the given one
-	virtual bool HasActivityType( unsigned int flags ) const = 0;			// return true if currently animating activity has any of the given flags
+	virtual Activity GetActivity( void ) const { return ACT_INVALID; }							// return currently animating activity
+	virtual bool IsActivity( Activity act ) const { return false; }						// return true if currently animating activity matches the given one
+	virtual bool HasActivityType( unsigned int flags ) const { return false; }			// return true if currently animating activity has any of the given flags
 
 	enum PostureType
 	{
@@ -1015,16 +1069,16 @@ public:
 		CRAWL,
 		LIE
 	};
-	virtual void SetDesiredPosture( PostureType posture )  = 0;			// request a posture change
-	virtual PostureType GetDesiredPosture( void ) const = 0;				// get posture body is trying to assume
-	virtual bool IsDesiredPosture( PostureType posture ) const = 0;			// return true if body is trying to assume this posture
-	virtual bool IsInDesiredPosture( void ) const = 0;						// return true if body's actual posture matches its desired posture
+	virtual void SetDesiredPosture( PostureType posture )  {}			// request a posture change
+	virtual PostureType GetDesiredPosture( void ) const { return IBody::STAND; }				// get posture body is trying to assume
+	virtual bool IsDesiredPosture( PostureType posture ) const { return true; }			// return true if body is trying to assume this posture
+	virtual bool IsInDesiredPosture( void ) const { return true; }						// return true if body's actual posture matches its desired posture
 
-	virtual PostureType GetActualPosture( void ) const = 0;					// return body's current actual posture
-	virtual bool IsActualPosture( PostureType posture ) const = 0;			// return true if body is actually in the given posture
+	virtual PostureType GetActualPosture( void ) const { return IBody::STAND; }					// return body's current actual posture
+	virtual bool IsActualPosture( PostureType posture ) const { return true; }			// return true if body is actually in the given posture
 
-	virtual bool IsPostureMobile( void ) const = 0;							// return true if body's current posture allows it to move around the world
-	virtual bool IsPostureChanging( void ) const = 0;						// return true if body's posture is in the process of changing to new posture
+	virtual bool IsPostureMobile( void ) const { return true; }							// return true if body's current posture allows it to move around the world
+	virtual bool IsPostureChanging( void ) const { return false; }						// return true if body's posture is in the process of changing to new posture
 	
 	
 	/**
@@ -1037,20 +1091,96 @@ public:
 		ALERT,
 		INTENSE
 	};
-	virtual void SetArousal( ArousalType arousal ) = 0;					// arousal level change
-	virtual ArousalType GetArousal( void ) const = 0;						// get arousal level
-	virtual bool IsArousal( ArousalType arousal ) const = 0;				// return true if body is at this arousal level
+	virtual void SetArousal( ArousalType arousal ) {}					// arousal level change
+	virtual ArousalType GetArousal( void ) const { return IBody::NEUTRAL; }						// get arousal level
+	virtual bool IsArousal( ArousalType arousal ) const { return true; }				// return true if body is at this arousal level
 
 
-	virtual float GetHullWidth( void ) const = 0;							// width of bot's collision hull in XY plane
-	virtual float GetHullHeight( void ) const = 0;							// height of bot's current collision hull based on posture
-	virtual float GetStandHullHeight( void ) const = 0;						// height of bot's collision hull when standing
-	virtual float GetCrouchHullHeight( void ) const = 0;					// height of bot's collision hull when crouched
-	virtual const Vector &GetHullMins( void ) const = 0;					// return current collision hull minimums based on actual body posture
-	virtual const Vector &GetHullMaxs( void ) const = 0;					// return current collision hull maximums based on actual body posture
+	virtual float GetHullWidth( void ) { return 26.0f; }							// width of bot's collision hull in XY plane
+	virtual float GetHullHeight( void ) { return 16.0f; }							// height of bot's current collision hull based on posture
+	virtual float GetStandHullHeight( void ) { return 68.0f; }						// height of bot's collision hull when standing
+	virtual float GetCrouchHullHeight( void ) { return 32.0f; }					// height of bot's collision hull when crouched
+	virtual const Vector &GetHullMins( void ) { return vec3_origin; }					// return current collision hull minimums based on actual body posture
+	virtual const Vector &GetHullMaxs( void ) { return vec3_origin; }					// return current collision hull maximums based on actual body posture
 
-	virtual unsigned int GetSolidMask( void ) const = 0;					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
-	virtual unsigned int GetCollisionGroup( void ) const = 0;
+	virtual unsigned int GetSolidMask( void ) { return MASK_NPCSOLID; }					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
+	virtual unsigned int GetCollisionGroup( void ) { return COLLISION_GROUP_NONE; }
+};
+
+class IBodyCustom : public IBody
+{
+public:
+	IBodyCustom( INextBot *bot, bool reg ) : IBody( bot, reg ) {
+		
+		HullWidth = 26.0f;
+		HullHeight = 68.0f;
+		
+		hullMins.x = -HullWidth/2.0f;
+		hullMins.y = hullMins.x;
+		hullMins.z = 0.0f;
+		
+		hullMaxs.x = HullWidth/2.0f;
+		hullMaxs.y = hullMaxs.x;
+		hullMaxs.z = HullHeight;
+	}
+	
+	void SetHullWidth(float height)
+	{
+		HullWidth = height;
+	}
+	
+	void SetHullHeight(float height)
+	{
+		HullHeight = height;
+	}
+	
+	void SetHullMins(Vector &&height)
+	{
+		hullMins = std::move(height);
+	}
+	
+	void SetHullMaxs(Vector &&height)
+	{
+		hullMaxs = std::move(height);
+	}
+	
+	float HullWidth;
+	float HullHeight;
+	float StandHullHeight = 68.0f;
+	float CrouchHullHeight = 32.0f;
+	int SolidMask = MASK_NPCSOLID;
+	int CollisionGroup = COLLISION_GROUP_NONE;
+	Vector eye;
+	Vector view;
+	Vector hullMaxs;
+	Vector hullMins;
+	
+	float GetHullWidth( void ) override { return HullWidth; }							// width of bot's collision hull in XY plane
+	float GetHullHeight( void ) override { return HullHeight; }							// height of bot's current collision hull based on posture
+	float GetStandHullHeight( void ) override { return StandHullHeight; }						// height of bot's collision hull when standing
+	float GetCrouchHullHeight( void ) override { return CrouchHullHeight; }					// height of bot's collision hull when crouched
+	const Vector &GetHullMins( void ) override { return hullMaxs; }					// return current collision hull minimums based on actual body posture
+	const Vector &GetHullMaxs( void ) override { return hullMins; }					// return current collision hull maximums based on actual body posture
+
+	unsigned int GetSolidMask( void ) override { return SolidMask; }					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
+	unsigned int GetCollisionGroup( void ) override { return CollisionGroup; }
+	
+	const Vector &GetEyePosition( void ) override
+	{
+		eye = GetBot()->GetEntity()->WorldSpaceCenter();
+		return eye;
+	}
+	const Vector &GetViewVector( void ) override
+	{
+		AngleVectors( GetBot()->GetEntity()->EyeAngles(), &view );
+		return view;
+	}
+	
+	bool SetPosition( const Vector &pos ) override
+	{
+		GetBot()->GetEntity()->SetAbsOrigin( pos );
+		return true;
+	}
 };
 
 class NextBotCombatCharacter : public CBaseCombatCharacter, INextBot
@@ -1640,7 +1770,7 @@ public:
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
-	static NextBotGroundLocomotionCustom *create(INextBot *bot);
+	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg);
 };
 
 SH_DECL_MANUALHOOK0_void(NextBotGroundLocomotionDtor, 0, 0, 0)
@@ -1660,7 +1790,7 @@ SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionForward, SH_NOATTRIB, 0, float
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionSideways, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
 
-NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *bot)
+NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *bot, bool reg)
 {
 	NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeofNextBotGroundLocomotion + sizeof(vars_t));
 	(bytes->*void_to_func<void(NextBotGroundLocomotion::*)(INextBot *)>(NextBotGroundLocomotionCTOR))(bot);
@@ -1682,6 +1812,11 @@ NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *b
 	SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
 	SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionSideways), false);
 	SH_ADD_HOOK(NextBotGroundLocomotion, GetMaxYawRate, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxYawRate), false);
+	
+	if(!reg) {
+		bot->m_componentList = bytes->m_nextComponent;
+		bytes->m_nextComponent = nullptr;
+	}
 	
 	return bytes;
 }
@@ -1713,12 +1848,6 @@ void NextBotGroundLocomotionCustom::dtor()
 HandleType_t PathHandleType = 0;
 HandleType_t PathFollowerHandleType = 0;
 HandleType_t CTFPathFollowerHandleType = 0;
-
-class CEntityFactoryDictionary : public IEntityFactoryDictionary
-{
-public:
-	CUtlDict< IEntityFactory *, unsigned short > m_Factories;
-};
 
 cell_t PathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
@@ -1965,16 +2094,38 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 {
 	INextBot *bot = (INextBot *)params[1];
 	
+	NextBotGroundLocomotionCustom *locomotion = NextBotGroundLocomotionCustom::create(bot, false);
+	
 	if(bot->m_baseLocomotion) {
-		bot->UnregisterComponent(bot->m_baseLocomotion);
-		#pragma warning "why this crash"
-		//delete bot->m_baseLocomotion;
+		bot->ReplaceComponent(bot->m_baseLocomotion, locomotion);
+		delete bot->m_baseLocomotion;
+	} else {
+		bot->RegisterComponent(locomotion);
 	}
 	
-	NextBotGroundLocomotionCustom *locomotion = NextBotGroundLocomotionCustom::create(bot);
 	locomotion->Reset();
 	
 	bot->m_baseLocomotion = locomotion;
+
+	return (cell_t)locomotion;
+}
+
+cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	IBodyCustom *locomotion = new IBodyCustom(bot, false);
+	
+	if(bot->m_baseBody) {
+		bot->ReplaceComponent(bot->m_baseBody, locomotion);
+		delete bot->m_baseBody;
+	} else {
+		bot->RegisterComponent(locomotion);
+	}
+	
+	locomotion->Reset();
+	
+	bot->m_baseBody = locomotion;
 
 	return (cell_t)locomotion;
 }
@@ -2433,6 +2584,42 @@ cell_t ILocomotionWalkSpeedget(IPluginContext *pContext, const cell_t *params)
 	return sp_ftoc(area->GetWalkSpeed());
 }
 
+cell_t IBodyHullWidthget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return sp_ftoc(area->GetHullWidth());
+}
+
+cell_t IBodyHullHeightget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return sp_ftoc(area->GetHullHeight());
+}
+
+cell_t IBodyStandHullHeightget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return sp_ftoc(area->GetStandHullHeight());
+}
+
+cell_t IBodyCrouchHullHeightget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return sp_ftoc(area->GetCrouchHullHeight());
+}
+
+cell_t IBodySolidMaskget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return sp_ftoc(area->GetSolidMask());
+}
+
+cell_t IBodyCollisionGroupget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return sp_ftoc(area->GetCollisionGroup());
+}
+
 cell_t ILocomotionMaxAccelerationget(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -2461,6 +2648,12 @@ cell_t ILocomotionDesiredSpeedget(IPluginContext *pContext, const cell_t *params
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 	return sp_ftoc(area->GetDesiredSpeed());
+}
+
+cell_t ILocomotionGroundSpeedget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return sp_ftoc(area->GetGroundSpeed());
 }
 
 cell_t ILocomotionDesiredSpeedset(IPluginContext *pContext, const cell_t *params)
@@ -2519,11 +2712,97 @@ cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
+cell_t IBodyCustomSetHullMins(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *area = (IBodyCustom *)params[1];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector ang(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	area->SetHullMins(std::move(ang));
+	
+	return 0;
+}
+
+cell_t IBodyCustomSetHullMaxs(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *area = (IBodyCustom *)params[1];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector ang(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	area->SetHullMaxs(std::move(ang));
+	
+	return 0;
+}
+
 cell_t ILocomotionGetDesiredLean(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
 	const QAngle &ang = area->GetDesiredLean();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t ILocomotionGetGroundMotionVector(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	const Vector &ang = area->GetGroundMotionVector();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t ILocomotionGetVelocity(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	const Vector &ang = area->GetVelocity();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t IBodyGetHullMins(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+
+	const Vector &ang = area->GetHullMins();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t IBodyGetHullMaxs(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+
+	const Vector &ang = area->GetHullMaxs();
 	
 	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
@@ -2734,6 +3013,48 @@ cell_t NextBotGroundLocomotionCustomStepHeightset(IPluginContext *pContext, cons
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
 	locomotion->getvars().step = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t IBodyCustomHullWidthset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->SetHullWidth(sp_ctof(params[2]));
+	return 0;
+}
+
+cell_t IBodyCustomHullHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->SetHullHeight(sp_ctof(params[2]));
+	return 0;
+}
+
+cell_t IBodyCustomStandHullHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->StandHullHeight = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t IBodyCustomCrouchHullHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->CrouchHullHeight = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t IBodyCustomSolidMaskset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->SolidMask = params[2];
+	return 0;
+}
+
+cell_t IBodyCustomCollisionGroupset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->CollisionGroup = params[2];
 	return 0;
 }
 
@@ -3207,308 +3528,9 @@ cell_t CKnownEntityGetLastKnownPosition(IPluginContext *pContext, const cell_t *
 	return 0;
 }
 
-enum nextbot_prop_type
+cell_t AllocateNextBotCombatCharacter(IPluginContext *pContext, const cell_t *params)
 {
-	CustomPropInt,
-	CustomPropFloat,
-	CustomPropBool,
-};
-
-using custom_prop_t = std::pair<std::string, nextbot_prop_type>;
-using custom_prop_vec_t = std::vector<custom_prop_t>;
-
-struct custom_prop_info_t
-{
-	bool was_overriden = false;
-	IEntityFactory *fac = nullptr;
-	datamap_t map{};
-	std::vector<typedescription_t> dataDesc{};
-	std::string mapname{};
-	std::vector<std::string> prop_names{};
-	int size = 0;
-	int base = 0;
-	
-	custom_prop_info_t()
-	{
-		map.chains_validated = 0;
-		map.packed_offsets_computed = 0;
-		map.packed_size = 0;
-	}
-	
-	~custom_prop_info_t()
-	{
-		for(typedescription_t &desc : dataDesc) {
-			free((void *)desc.fieldName);
-		}
-	}
-	
-	void zero(CBaseEntity *pEntity)
-	{
-		for(typedescription_t &desc : dataDesc) {
-			switch(desc.fieldType) {
-				case FIELD_INTEGER: { *(int *)(((unsigned char *)pEntity) + desc.fieldOffset[TD_OFFSET_NORMAL]) = 0; break; }
-				case FIELD_FLOAT: { *(float *)(((unsigned char *)pEntity) + desc.fieldOffset[TD_OFFSET_NORMAL]) = 0.0f; break; }
-				case FIELD_BOOLEAN: { *(bool *)(((unsigned char *)pEntity) + desc.fieldOffset[TD_OFFSET_NORMAL]) = false; break; }
-			}
-		}
-	}
-	
-	void update_offsets()
-	{
-		for(typedescription_t &desc : dataDesc) {
-			desc.fieldOffset[TD_OFFSET_NORMAL] += base;
-		}
-	}
-	
-	void add_prop(std::string &&name, nextbot_prop_type type)
-	{
-		typedescription_t &desc = dataDesc.emplace_back();
-		
-		size_t len = name.length();
-		desc.fieldName = (char *)malloc(len+1);
-		strncpy((char *)desc.fieldName, name.c_str(), len);
-		((char *)desc.fieldName)[len] = '\0';
-		
-		prop_names.emplace_back(std::move(name));
-		
-		desc.flags = FTYPEDESC_PRIVATE|FTYPEDESC_VIEW_NEVER;
-		desc.fieldOffset[TD_OFFSET_NORMAL] = size;
-		if(was_overriden && base != 0) {
-			desc.fieldOffset[TD_OFFSET_NORMAL] += base;
-		}
-		desc.fieldSize = 1;
-		
-		switch(type) {
-			case CustomPropInt: {
-				desc.fieldType = FIELD_INTEGER;
-				desc.fieldSizeInBytes = sizeof(int);
-				break;
-			}
-			case CustomPropFloat: {
-				desc.fieldType = FIELD_FLOAT;
-				desc.fieldSizeInBytes = sizeof(float);
-				break;
-			}
-			case CustomPropBool: {
-				desc.fieldType = FIELD_BOOLEAN;
-				desc.fieldSizeInBytes = sizeof(bool);
-				break;
-			}
-		}
-		
-		size += desc.fieldSizeInBytes;
-		
-		desc.fieldOffset[TD_OFFSET_PACKED] = 0;
-		desc.externalName = nullptr;
-		desc.pSaveRestoreOps = nullptr;
-		desc.inputFunc = nullptr;
-		desc.td = nullptr;
-		desc.override_field = nullptr;
-		desc.override_count = 0;
-		desc.fieldTolerance = 0.0f;
-		
-		map.dataDesc = dataDesc.data();
-		++map.dataNumFields;
-	}
-};
-
-using prop_map_t = std::unordered_map<std::string, custom_prop_info_t>;
-prop_map_t prop_map{};
-
-SH_DECL_HOOK1(IEntityFactory, Create, SH_NOATTRIB, 0, IServerNetworkable *, const char *);
-SH_DECL_HOOK1(IVEngineServer, PvAllocEntPrivateData, SH_NOATTRIB, 0, void *, long);
-SH_DECL_HOOK0(CBaseEntity, GetDataDescMap, SH_NOATTRIB, 0, datamap_t *);
-
-static class chook_mgr
-{
-public:
-	void hook_create(custom_prop_info_t &info);
-	
-	datamap_t *HookGetDataDescMap()
-	{
-		CBaseEntity *pEntity = META_IFACEPTR(CBaseEntity);
-		const char *classname = gamehelpers->GetEntityClassname(pEntity);
-		
-		std::string clsname{classname};
-		prop_map_t::iterator it = prop_map.find(clsname);
-		if(it != prop_map.end()) {
-			datamap_t *map = &it->second.map;
-			RETURN_META_VALUE(MRES_SUPERCEDE, map);
-		} else {
-			RETURN_META_VALUE(MRES_IGNORED, nullptr);
-		}
-	}
-	
-	IServerNetworkable *HookCreate(const char *classname)
-	{
-		std::string clsname{classname};
-		
-		prop_map_t::iterator it = prop_map.find(clsname);
-		if(it != prop_map.end()) {
-			currinfo = &it->second;
-		}
-		
-		IEntityFactory *fac = META_IFACEPTR(IEntityFactory);
-		IServerNetworkable *net = SH_CALL(fac, &IEntityFactory::Create)(classname);
-		
-		CBaseEntity *pEntity = net->GetBaseEntity();
-		
-		if(!currinfo->was_overriden) {
-			datamap_t *map = gamehelpers->GetDataMap(pEntity);
-			
-			currinfo->mapname = map->dataClassName;
-			currinfo->mapname += "_custom";
-			currinfo->map.dataClassName = currinfo->mapname.c_str();
-			currinfo->map.baseMap = map;
-			
-			currinfo->base = last_cb;
-			currinfo->update_offsets();
-			//currinfo->zero(pEntity);
-			
-			currinfo->was_overriden = true;
-		}
-		
-		SH_ADD_HOOK(CBaseEntity, GetDataDescMap, pEntity, SH_MEMBER(this, &chook_mgr::HookGetDataDescMap), false);
-		
-		currinfo = nullptr;
-		
-		RETURN_META_VALUE(MRES_SUPERCEDE, net);
-	}
-	
-	long get_newallocsize(long cb)
-	{
-		last_cb = cb;
-		
-		if(currinfo != nullptr) {
-			cb += currinfo->size;
-		}
-		
-		return cb;
-	}
-	
-	void *HookPvAllocEntPrivateData(long cb)
-	{
-		cb = get_newallocsize(cb);
-		
-		RETURN_META_VALUE_NEWPARAMS(MRES_HANDLED, nullptr, &IVEngineServer::PvAllocEntPrivateData, (cb));
-	}
-	
-	custom_prop_info_t *currinfo = nullptr;
-	bool engine_was_hooked = false;
-	int last_cb = 0;
-} hook_mgr;
-
-void chook_mgr::hook_create(custom_prop_info_t &info)
-{
-	if(!engine_was_hooked) {
-		SH_ADD_HOOK(IVEngineServer, PvAllocEntPrivateData, engine, SH_MEMBER(this, &chook_mgr::HookPvAllocEntPrivateData), false);
-		engine_was_hooked = true;
-	}
-	
-	SH_ADD_HOOK(IEntityFactory, Create, info.fac, SH_MEMBER(this, &chook_mgr::HookCreate), false);
-}
-
-class SPEntityFactory : public IEntityFactory
-{
-public:
-	SPEntityFactory(std::string &&name_)
-		: name(std::move(name_))
-	{
-	}
-	~SPEntityFactory()
-	{
-		((CEntityFactoryDictionary *)dictionary)->m_Factories.Remove(name.c_str());
-	}
-	IServerNetworkable *Create(const char *pClassName)
-	{
-		NextBotCombatCharacter *obj = NextBotCombatCharacter::create();
-		obj->PostConstructor(pClassName);
-		IServerNetworkable *net = obj->GetNetworkable();
-		return net;
-	}
-	void Destroy(IServerNetworkable *pNetworkable) {}
-	size_t GetEntitySize() { return -1; }
-	
-	std::string name;
-};
-
-cell_t nextbot_custom_datamap_helper(std::string &&str, std::string &&clsname, IEntityFactory *fac, nextbot_prop_type type, IPluginContext *pContext)
-{
-	prop_map_t::iterator it = prop_map.find(clsname);
-	if(it != prop_map.end()) {
-		for(std::string &prop : it->second.prop_names) {
-			if(prop == str) {
-				return 0;
-			}
-		}
-	} else {
-		if(!fac) {
-			fac = dictionary->FindFactory(clsname.c_str());
-			if(!fac) {
-				return pContext->ThrowNativeError("invalid classname %s", clsname.c_str());
-			}
-		}
-		
-		custom_prop_info_t info{};
-		info.fac = fac;
-		
-		prop_map_t::value_type par{std::move(clsname), std::move(info)};
-		it = prop_map.emplace(std::move(par)).first;
-		
-		hook_mgr.hook_create(it->second);
-	}
-	
-	it->second.add_prop(std::move(str), type);
-	
-	return 0;
-}
-
-cell_t nextbot_custom_datamap(IPluginContext *pContext, const cell_t *params)
-{
-	char *classname = nullptr;
-	pContext->LocalToString(params[1], &classname);
-	
-	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
-	
-	std::string clsname{classname};
-	std::string str{name};
-	
-	return nextbot_custom_datamap_helper(std::move(str), std::move(clsname), nullptr, (nextbot_prop_type)params[3], pContext);
-}
-
-cell_t nextbot_custom_datamap_ex(IPluginContext *pContext, const cell_t *params)
-{
-	SPEntityFactory *fac = (SPEntityFactory *)params[1];
-	
-	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
-	
-	std::string clsname{fac->name};
-	std::string str{name};
-	
-	return nextbot_custom_datamap_helper(std::move(str), std::move(clsname), fac, (nextbot_prop_type)params[3], pContext);
-}
-
-cell_t nextbot_register_classname(IPluginContext *pContext, const cell_t *params)
-{
-	char *name = nullptr;
-	pContext->LocalToString(params[1], &name);
-	
-	IEntityFactory *fac = dictionary->FindFactory(name);
-	
-	if(fac != nullptr) {
-		if(fac->GetEntitySize() == (size_t)-1) {
-			return (cell_t)fac;
-		} else {
-			return 0;
-		}
-	}
-	
-	std::string str{name};
-	fac = new SPEntityFactory(std::move(str));
-	dictionary->InstallFactory(fac, name);
-	return (cell_t)fac;
+	return (cell_t)NextBotCombatCharacter::create();
 }
 
 sp_nativeinfo_t natives[] =
@@ -3550,7 +3572,6 @@ sp_nativeinfo_t natives[] =
 	{"PathFollower.GoalTolerance.set", PathFollowerGoalToleranceset},
 	{"PathFollower.IsDiscontinuityAhead", PathFollowerIsDiscontinuityAhead},
 	{"CTFPathFollower.MinLookAheadDistance.get", CTFPathFollowerMinLookAheadDistanceget},
-	{"nextbot_register_classname", nextbot_register_classname},
 	{"CNavArea.CostSoFar.get", CNavAreaCostSoFarget},
 	{"CNavArea.ID.get", CNavAreaIDget},
 	{"CNavArea.GetCenter", CNavAreaGetCenter},
@@ -3585,11 +3606,16 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.FaceTowards", ILocomotionFaceTowards},
 	{"ILocomotion.Approach", ILocomotionApproach},
 	{"ILocomotion.DriveTo", ILocomotionDriveTo},
+	{"ILocomotion.GetDesiredLean", ILocomotionGetDesiredLean},
+	{"ILocomotion.GroundSpeed.get", ILocomotionGroundSpeedget},
+	{"ILocomotion.GetGroundMotionVector", ILocomotionGetGroundMotionVector},
+	{"ILocomotion.GetVelocity", ILocomotionGetVelocity},
 	{"INextBot.INextBot", INextBotget},
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
 	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
+	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
 	{"INextBot.Entity.get", INextBotEntityget},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
@@ -3636,6 +3662,22 @@ sp_nativeinfo_t natives[] =
 	{"IVision.MaxVisionRange.get", IVisionMaxVisionRangeget},
 	{"IVision.MinRecognizeTime.get", IVisionMinRecognizeTimeget},
 	{"IVision.FieldOfView.set", IVisionFieldOfViewset},
+	{"IBody.HullWidth.get", IBodyHullWidthget},
+	{"IBody.HullHeight.get", IBodyHullHeightget},
+	{"IBody.StandHullHeight.get", IBodyStandHullHeightget},
+	{"IBody.CrouchHullHeight.get", IBodyCrouchHullHeightget},
+	{"IBody.SolidMask.get", IBodySolidMaskget},
+	{"IBody.CollisionGroup.get", IBodyCollisionGroupget},
+	{"IBody.GetHullMins", IBodyGetHullMins},
+	{"IBody.GetHullMaxs", IBodyGetHullMaxs},
+	{"IBodyCustom.HullWidth.set", IBodyCustomHullWidthset},
+	{"IBodyCustom.HullHeight.set", IBodyCustomHullHeightset},
+	{"IBodyCustom.StandHullHeight.set", IBodyCustomStandHullHeightset},
+	{"IBodyCustom.CrouchHullHeight.set", IBodyCustomCrouchHullHeightset},
+	{"IBodyCustom.SolidMask.set", IBodyCustomSolidMaskset},
+	{"IBodyCustom.CollisionGroup.set", IBodyCustomCollisionGroupset},
+	{"IBodyCustom.SetHullMins", IBodyCustomSetHullMins},
+	{"IBodyCustom.SetHullMaxs", IBodyCustomSetHullMaxs},
 	{"CKnownEntity.Entity.get", CKnownEntityEntityget},
 	{"CKnownEntity.LastKnownPositionBeenSeen.get", CKnownEntityLastKnownPositionBeenSeenget},
 	{"CKnownEntity.LastKnownArea.get", CKnownEntityLastKnownAreaget},
@@ -3655,17 +3697,14 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.Destroy", CKnownEntityDestroy},
 	{"CKnownEntity.UpdatePosition", CKnownEntityUpdatePosition},
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
-	{"nextbot_custom_datamap", nextbot_custom_datamap},
-	{"nextbot_custom_datamap_ex", nextbot_custom_datamap_ex},
+	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
 	{NULL, NULL}
 };
 
 bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
-	IServerTools *servertools = nullptr;
-	GET_V_IFACE_ANY(GetServerFactory, servertools, IServerTools, VSERVERTOOLS_INTERFACE_VERSION)
+	gpGlobals = ismm->GetCGlobals();
 	GET_V_IFACE_ANY(GetEngineFactory, engine, IVEngineServer, INTERFACEVERSION_VENGINESERVER)
-	dictionary = servertools->GetEntityFactoryDictionary();
 	GET_V_IFACE_CURRENT(GetEngineFactory, icvar, ICvar, CVAR_INTERFACE_VERSION);
 	g_pCVar = icvar;
 	ConVar_Register(0, this);
@@ -3685,7 +3724,6 @@ void Sample::OnHandleDestroy(HandleType_t type, void *object)
 		delete obj;
 	}
 }
-
 
 bool Sample::RegisterConCommandBase(ConCommandBase *pCommand)
 {
@@ -3724,12 +3762,14 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("Path::PostProcess", &PathPostProcess);
 	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
 	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);
+	g_pGameConf->GetMemSig("CBaseEntity::SetAbsOrigin", &CBaseEntitySetAbsOrigin);
 	
 	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
-	g_pGameConf->GetOffset("CBaseEntity::PostConstructor", &CBaseEntityPostConstructor);
+	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
+	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
 	
 	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMesh);
@@ -3748,10 +3788,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	CTFPathFollowerHandleType = handlesys->CreateType("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
-	sharesys->AddDependency(myself, "bintools.ext", true, true);
-	sharesys->AddDependency(myself, "sdktools.ext", true, true);
-	sharesys->AddDependency(myself, "sdkhooks.ext", true, true);
-	
 	plsys->AddPluginsListener(this);
 	
 	sharesys->RegisterLibrary(myself, "nextbot");
@@ -3766,70 +3802,26 @@ void Sample::OnPluginUnloaded(IPlugin *plugin)
 
 void Sample::SDK_OnAllLoaded()
 {
-	SM_GET_LATE_IFACE(SDKTOOLS, g_pSDKTools);
-	SM_GET_LATE_IFACE(BINTOOLS, g_pBinTools);
-	SM_GET_LATE_IFACE(SDKHOOKS, g_pSDKHooks);
-
-	g_pSDKHooks->AddEntityListener(this);
-	
 	sharesys->AddNatives(myself, natives);
 }
 
 bool Sample::QueryRunning(char *error, size_t maxlength)
 {
-	SM_CHECK_IFACE(SDKTOOLS, g_pSDKTools);
-	SM_CHECK_IFACE(BINTOOLS, g_pBinTools);
-	SM_CHECK_IFACE(SDKHOOKS, g_pSDKHooks);
 	return true;
 }
 
 bool Sample::QueryInterfaceDrop(SMInterface *pInterface)
 {
-	if(pInterface == g_pBinTools)
-		return false;
-	else if(pInterface == g_pBinTools)
-		return false;
-	else if(pInterface == g_pBinTools)
-		return false;
-
 	return IExtensionInterface::QueryInterfaceDrop(pInterface);
-}
-
-void Sample::OnCoreMapEnd()
-{
-	
-}
-
-void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname)
-{
-	
-}
-
-void Sample::OnEntityDestroyed(CBaseEntity *pEntity)
-{
-	
 }
 
 void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 {
-	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_SDKHOOKS_NAME) == 0)
-	{
-		g_pSDKHooks->RemoveEntityListener(this);
-		g_pSDKHooks = NULL;
-	}
-	else if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_BINTOOLS_NAME) == 0)
-	{
-		g_pBinTools = NULL;
-	}
-	else if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_SDKTOOLS_NAME) == 0)
-	{
-		g_pSDKTools = NULL;
-	}
+	
 }
 
 void Sample::SDK_OnUnload()
 {
-	g_pSDKHooks->RemoveEntityListener(this);
 	plsys->RemovePluginsListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());

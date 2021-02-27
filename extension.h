@@ -38,26 +38,21 @@
  */
 
 #include "smsdk_ext.h"
-#include <ISDKHooks.h>
-#include <IBinTools.h>
-#include <ISDKTools.h>
 
 /**
  * @brief Sample implementation of the SDK Extension.
  * Note: Uncomment one of the pre-defined virtual functions in order to use it.
  */
-class Sample : public SDKExtension, public ISMEntityListener, public IPluginsListener, public IHandleTypeDispatch, public IConCommandBaseAccessor
+class Sample : public SDKExtension, public IPluginsListener, public IHandleTypeDispatch, public IConCommandBaseAccessor
 {
 public:
 	virtual void OnHandleDestroy(HandleType_t type, void *object);
 	virtual void OnPluginUnloaded(IPlugin *plugin);
 	
-	virtual void OnEntityCreated(CBaseEntity *pEntity, const char *classname);
-	virtual void OnEntityDestroyed(CBaseEntity *pEntity);
-	
-	virtual void OnCoreMapEnd();
-	
 	virtual bool RegisterConCommandBase(ConCommandBase *pCommand);
+	
+	bool QueryInterfaceDrop(SMInterface *pInterface);
+	virtual void NotifyInterfaceDrop(SMInterface *pInterface);
 	
 	/**
 	 * @brief This is called after the initial loading sequence has been processed.
@@ -93,9 +88,6 @@ public:
 	 * @return			True if working, false otherwise.
 	 */
 	virtual bool QueryRunning(char *error, size_t maxlen);
-	
-	bool QueryInterfaceDrop(SMInterface *pInterface);
-	virtual void NotifyInterfaceDrop(SMInterface *pInterface);
 public:
 #if defined SMEXT_CONF_METAMOD
 	/**

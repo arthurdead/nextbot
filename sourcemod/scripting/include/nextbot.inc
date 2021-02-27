@@ -105,6 +105,15 @@ methodmap ILocomotion < INextBotComponent
 		public native set(float height);
 	}
 
+	property float GroundSpeed
+	{
+		public native get();
+	}
+
+	public native void GetGroundMotionVector(float ang[3]);
+
+	public native void GetVelocity(float ang[3]);
+
 	public native bool IsAreaTraversable(CNavArea area);
 
 	public native bool IsClimbingOrJumping();
@@ -412,14 +421,14 @@ methodmap IBodyCustom < IBody
 		public native set(float height);
 	}
 
-	property float SolidMask
+	property int SolidMask
 	{
-		public native set(float height);
+		public native set(int height);
 	}
 
-	property float CollisionGroup
+	property int CollisionGroup
 	{
-		public native set(float height);
+		public native set(int height);
 	}
 
 	public native void SetHullMins(float vec[3]);
@@ -455,7 +464,7 @@ methodmap INextBot
 
 	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
 	//public native IVisionCustom AllocateCustomVision();
-	//public native IBodyCustom AllocateCustomBody();
+	public native IBodyCustom AllocateCustomBody();
 };
 
 enum SegmentType
@@ -622,40 +631,11 @@ methodmap CTFPathFollower < PathFollower
 	}
 };
 
-enum nextbot_prop_type
+native Address AllocateNextBotCombatCharacter();
+
+stock Address datamaps_allocatenextbot()
 {
-	CustomPropInt,
-	CustomPropFloat,
-	CustomPropBool,
-};
-
-methodmap IEntityFactoryCustom
-{
-
-};
-
-native void nextbot_custom_datamap(const char[] classname, const char[] name, nextbot_prop_type type);
-native void nextbot_custom_datamap_ex(IEntityFactoryCustom fac, const char[] name, nextbot_prop_type type);
-native IEntityFactoryCustom nextbot_register_classname(const char[] classname);
-
-stock void SetEntPropCustom(int entity, const char[] name, any value)
-{
-	SetEntProp(entity, Prop_Data, name, value);
-}
-
-stock void SetEntPropFloatCustom(int entity, const char[] name, float value)
-{
-	SetEntPropFloat(entity, Prop_Data, name, value);
-}
-
-stock any GetEntPropCustom(int entity, const char[] name)
-{
-	return GetEntProp(entity, Prop_Data, name);
-}
-
-stock float GetEntPropFloatCustom(int entity, const char[] name)
-{
-	return GetEntPropFloat(entity, Prop_Data, name);
+	return AllocateNextBotCombatCharacter();
 }
 
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data)
@@ -720,7 +700,6 @@ public void __ext_nextbot_SetNTVOptional()
 	MarkNativeAsOptional("CTFPathFollower.CTFPathFollower");
 	MarkNativeAsOptional("NextBotGoundLocomotion.NextBotGoundLocomotion");
 	MarkNativeAsOptional("NextBotGoundLocomotion.Memory.get");
-	MarkNativeAsOptional("nextbot_register_classname");
 }
 #endif
 
