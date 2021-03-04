@@ -3740,6 +3740,8 @@ bool HookIsAuthoritative()
 
 IGameConfig *g_pGameConf = nullptr;
 
+CDetour *pPathOptimize = nullptr;
+
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
@@ -3778,7 +3780,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 	
-	DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
+	pPathOptimize = DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
+	pPathOptimize->EnableDetour();
 	
 	sm_sendprop_info_t info{};
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_iTeamNum", &info);
@@ -3822,6 +3825,7 @@ void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 
 void Sample::SDK_OnUnload()
 {
+	pPathOptimize->Destroy();
 	plsys->RemovePluginsListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());
