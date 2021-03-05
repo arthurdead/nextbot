@@ -90,6 +90,14 @@
 			{
 				"linux" "72"
 			}
+			"CBaseEntity::WorldSpaceCenter"
+			{
+				"linux" "150"
+			}
+			"CBaseEntity::EyeAngles"
+			{
+				"linux" "132"
+			}
 			"CBaseCombatCharacter::GetLastKnownArea"
 			{
 				"linux" "316"
