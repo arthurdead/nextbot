@@ -2282,6 +2282,13 @@ cell_t INextBotEntityget(IPluginContext *pContext, const cell_t *params)
 	return gamehelpers->EntityToBCompatRef(bot->GetEntity());
 }
 
+cell_t INextBotComponentBotget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBotComponent *bot = (INextBotComponent *)params[1];
+	
+	return (cell_t)bot->GetBot();
+}
+
 cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *bot = (INextBot *)params[1];
@@ -2889,6 +2896,12 @@ cell_t ILocomotionIsStuck(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 	return area->IsStuck();
+}
+
+cell_t ILocomotionOnGroundget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return area->IsOnGround();
 }
 
 cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
@@ -3837,12 +3850,13 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.DesiredSpeed.get", ILocomotionDesiredSpeedget},
 	{"ILocomotion.DesiredSpeed.set", ILocomotionDesiredSpeedset},
 	{"ILocomotion.IsAreaTraversable", ILocomotionIsAreaTraversable},
-	{"ILocomotion.IsClimbingOrJumping", ILocomotionIsClimbingOrJumping},
-	{"ILocomotion.IsClimbingUpToLedge", ILocomotionIsClimbingUpToLedge},
-	{"ILocomotion.IsJumpingAcrossGap", ILocomotionIsJumpingAcrossGap},
-	{"ILocomotion.IsScrambling", ILocomotionIsScrambling},
-	{"ILocomotion.IsRunning", ILocomotionIsRunning},
-	{"ILocomotion.IsStuck", ILocomotionIsStuck},
+	{"ILocomotion.ClimbingOrJumping.get", ILocomotionIsClimbingOrJumping},
+	{"ILocomotion.ClimbingUpToLedge.get", ILocomotionIsClimbingUpToLedge},
+	{"ILocomotion.JumpingAcrossGap.get", ILocomotionIsJumpingAcrossGap},
+	{"ILocomotion.Scrambling.get", ILocomotionIsScrambling},
+	{"ILocomotion.Running.get", ILocomotionIsRunning},
+	{"ILocomotion.Stuck.get", ILocomotionIsStuck},
+	{"ILocomotion.OnGround.get", ILocomotionOnGroundget},
 	{"ILocomotion.SetDesiredLean", ILocomotionSetDesiredLean},
 	{"ILocomotion.GetDesiredLean", ILocomotionGetDesiredLean},
 	{"ILocomotion.Run", ILocomotionRun},
@@ -3865,6 +3879,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
 	{"INextBot.Entity.get", INextBotEntityget},
+	{"INextBotComponent.Bot.get", INextBotComponentBotget},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
 	{"NextBotGroundLocomotion.FrictionForward.get", NextBotGroundLocomotionFrictionForwardget},

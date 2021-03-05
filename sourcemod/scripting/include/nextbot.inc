@@ -3,7 +3,9 @@
 #endif
 #define nextbot_included
 
-#define TEAM_ANY -2
+#include <tf2>
+
+#define TFTeam_Any view_as<TFTeam>(-2)
 
 typeset nextbot_functions
 {
@@ -60,8 +62,10 @@ methodmap CNavArea
 	public native float ComputeFuncNavCost(int entity);
 	public native void GetCenter(float pos[3]);
 	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
-	public native int GetPlayerCount(int team = 0);
+	public native int GetPlayerCount(TFTeam team = TFTeam_Unassigned);
 };
+
+#define CNavArea_Null view_as<CNavArea>(Address_Null)
 
 enum TFNavAttributeType
 {
@@ -121,7 +125,7 @@ methodmap CTFNavArea < CNavArea
 
 methodmap CNavMesh
 {
-	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
+	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, TFTeam team = TFTeam_Any);
 	public native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
 };
 
@@ -135,6 +139,8 @@ methodmap CNavLadder
 	}
 };
 
+#define CNavLadder_Null view_as<CNavLadder>(Address_Null)
+
 methodmap CFuncElevator
 {
 
@@ -142,7 +148,10 @@ methodmap CFuncElevator
 
 methodmap INextBotComponent
 {
-
+	property INextBot Bot
+	{
+		public native get();
+	}
 };
 
 methodmap ILocomotion < INextBotComponent
@@ -203,18 +212,46 @@ methodmap ILocomotion < INextBotComponent
 		public native get();
 	}
 
+	property bool ClimbingOrJumping
+	{
+		public native get();
+	}
+
+	property bool ClimbingUpToLedge
+	{
+		public native get();
+	}
+
+	property bool JumpingAcrossGap
+	{
+		public native get();
+	}
+
+	property bool Scrambling
+	{
+		public native get();
+	}
+
+	property bool Running
+	{
+		public native get();
+	}
+
+	property bool Stuck
+	{
+		public native get();
+	}
+
+	property bool OnGround
+	{
+		public native get();
+	}
+
 	public native void GetGroundMotionVector(float ang[3]);
 
 	public native void GetVelocity(float ang[3]);
 
 	public native bool IsAreaTraversable(CNavArea area);
-
-	public native bool IsClimbingOrJumping();
-	public native bool IsClimbingUpToLedge();
-	public native bool IsJumpingAcrossGap();
-	public native bool IsScrambling();
-	public native bool IsRunning();
-	public native bool IsStuck();
 
 	public native void SetDesiredLean(float ang[3]);
 	public native void GetDesiredLean(float ang[3]);
@@ -632,6 +669,8 @@ methodmap Segment
 	public native void GetForward(float pos[3]);
 };
 
+#define Segment_Null view_as<Segment>(Address_Null)
+
 methodmap Path < Handle
 {
 	public native Path();
@@ -666,8 +705,8 @@ methodmap Path < Handle
 	public native Segment NextSegment(Segment seg);
 	public native Segment PriorSegment(Segment seg);
 
-	public native void GetPosition(float ret[3], float distanceFromStart, Segment start = Address_Null);
-	public native void GetClosestPosition(float ret[3], float pos[3], Segment start = Address_Null, float alongLimit = 0.0);
+	public native void GetPosition(float ret[3], float distanceFromStart, Segment start = Segment_Null);
+	public native void GetClosestPosition(float ret[3], float pos[3], Segment start = Segment_Null, float alongLimit = 0.0);
 
 	public native void GetStartPosition(float pos[3]);
 	public native void GetEndPosition(float pos[3]);
@@ -734,9 +773,17 @@ stock Address datamaps_allocatenextbot()
 	return AllocateNextBotCombatCharacter();
 }
 
-stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data)
+enum baseline_cost_flags
 {
-	if(fromArea == Address_Null) {
+	cost_flags_none = 0,
+	cost_flags_mod = (1 << 0),
+	cost_flags_safest = (1 << 1),
+	cost_flags_discrete = (1 << 2),
+};
+
+stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, baseline_cost_flags flags)
+{
+	if(fromArea == CNavArea_Null) {
 		return 0.0;
 	} else {
 		ILocomotion locomotion = bot.LocomotionInterface;
@@ -746,7 +793,7 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 		}
 
 		float dist = 0.0;
-		if(ladder != Address_Null) {
+		if(ladder != CNavLadder_Null) {
 			dist = ladder.Length;
 		} else if(length > 0.0) {
 			dist = length;
@@ -775,9 +822,67 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 			return -1.0;
 		}
 
-		int timeMod = RoundToFloor( GetGameTime() / 10.0 ) + 1;
+		float preference = 1.0;
+
 		int entity = bot.Entity;
-		float preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+
+		if(flags & cost_flags_mod) {
+			int timeMod = RoundToFloor( GetGameTime() / 10.0 ) + 1;
+			preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+		}
+
+		TFTeam team = view_as<TFTeam>(GetEntProp(entity, Prop_Data, "m_iTeamNum"));
+
+		if(flags & cost_flags_safest) {
+			CTFNavArea tfarea = view_as<CTFNavArea>(area);
+
+			if(tfarea.InCombat) {
+				static const float combatDangerCost = 4.0;
+				dist *= combatDangerCost * tfarea.CombatIntensity;
+			}
+
+			static const float sentryDangerCost = 5.0;
+			switch(team) {
+				case TFTeam_Red: {
+					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+						dist *= sentryDangerCost;
+					}
+				}
+				case TFTeam_Blue: {
+					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+						dist *= sentryDangerCost;
+					}
+				}
+			}
+		}
+
+		if(flags & cost_flags_discrete) {
+			TFTeam enemy_team = TFTeam_Unassigned;
+			switch(team) {
+				case TFTeam_Red: { enemy_team = TFTeam_Blue; }
+				case TFTeam_Blue: { enemy_team = TFTeam_Red; }
+			}
+
+			int obj = -1;
+			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
+				TFTeam obj_team = view_as<TFTeam>(GetEntProp(entity, Prop_Data, "m_iTeamNum"));
+				if(team == TFTeam_Unassigned ||
+					enemy_team == TFTeam_Unassigned ||
+					obj_team == TFTeam_Unassigned ||
+					obj_team == enemy_team) {
+					UpdateEntityLastKnownArea(obj);
+
+					if(GetEntityLastKnownArea(obj) == area) {
+						static const float enemyBuildingCost = 10.0;
+						dist *= enemyBuildingCost;
+					}
+				}
+			}
+
+			static const float teammateCost = 10.0;
+			dist += dist * teammateCost * area.GetPlayerCount(team);
+		}
+
 		float cost = dist * preference;
 
 		if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
