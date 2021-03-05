@@ -18,6 +18,32 @@ typeset nextbot_functions
 	function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
 };
 
+enum NavAttributeType
+{
+	NAV_MESH_INVALID		= 0,
+	NAV_MESH_CROUCH			= 0x00000001,				// must crouch to use this node/area
+	NAV_MESH_JUMP			= 0x00000002,				// must jump to traverse this area (only used during generation)
+	NAV_MESH_PRECISE		= 0x00000004,				// do not adjust for obstacles, just move along area
+	NAV_MESH_NO_JUMP		= 0x00000008,				// inhibit discontinuity jumping
+	NAV_MESH_STOP			= 0x00000010,				// must stop when entering this area
+	NAV_MESH_RUN			= 0x00000020,				// must run to traverse this area
+	NAV_MESH_WALK			= 0x00000040,				// must walk to traverse this area
+	NAV_MESH_AVOID			= 0x00000080,				// avoid this area unless alternatives are too dangerous
+	NAV_MESH_TRANSIENT		= 0x00000100,				// area may become blocked, and should be periodically checked
+	NAV_MESH_DONT_HIDE		= 0x00000200,				// area should not be considered for hiding spot generation
+	NAV_MESH_STAND			= 0x00000400,				// bots hiding in this area should stand
+	NAV_MESH_NO_HOSTAGES	= 0x00000800,				// hostages shouldn't use this area
+	NAV_MESH_STAIRS			= 0x00001000,				// this area represents stairs, do not attempt to climb or jump them - just walk up
+	NAV_MESH_NO_MERGE		= 0x00002000,				// don't merge this area with adjacent areas
+	NAV_MESH_OBSTACLE_TOP	= 0x00004000,				// this nav area is the climb point on the tip of an obstacle
+	NAV_MESH_CLIFF			= 0x00008000,				// this nav area is adjacent to a drop of at least CliffHeight
+	NAV_MESH_FIRST_CUSTOM	= 0x00010000,				// apps may define custom app-specific bits starting with this value
+	NAV_MESH_LAST_CUSTOM	= 0x04000000,				// apps must not define custom app-specific bits higher than with this value
+	NAV_MESH_FUNC_COST		= 0x20000000,				// area has designer specified cost controlled by func_nav_cost entities
+	NAV_MESH_HAS_ELEVATOR	= 0x40000000,				// area is in an elevator's path
+	NAV_MESH_NAV_BLOCKER	= 0x80000000				// area is blocked by nav blocker ( Alas, needed to hijack a bit in the attributes to get within a cache line [7/24/2008 tom])
+};
+
 methodmap CNavArea
 {
 	property float CostSoFar
@@ -30,9 +56,76 @@ methodmap CNavArea
 		public native get();
 	}
 
+	public native bool HasAttributes(NavAttributeType bits);
+	public native float ComputeFuncNavCost(int entity);
 	public native void GetCenter(float pos[3]);
 	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
+	public native int GetPlayerCount(int team = 0);
 };
+
+enum TFNavAttributeType
+{
+	TF_NAV_INVALID						= 0x00000000,
+	TF_NAV_BLOCKED						= 0x00000001,			// blocked for some TF-specific reason
+	TF_NAV_SPAWN_ROOM_RED				= 0x00000002,
+	TF_NAV_SPAWN_ROOM_BLUE				= 0x00000004,
+	TF_NAV_SPAWN_ROOM_EXIT				= 0x00000008,
+	TF_NAV_HAS_AMMO						= 0x00000010,
+	TF_NAV_HAS_HEALTH					= 0x00000020,
+	TF_NAV_CONTROL_POINT				= 0x00000040,
+	TF_NAV_BLUE_SENTRY_DANGER			= 0x00000080,			// sentry can potentially fire upon enemies in this area
+	TF_NAV_RED_SENTRY_DANGER			= 0x00000100,
+	TF_NAV_BLUE_SETUP_GATE				= 0x00000800,			// this area is blocked until the setup period is over
+	TF_NAV_RED_SETUP_GATE				= 0x00001000,			// this area is blocked until the setup period is over
+	TF_NAV_BLOCKED_AFTER_POINT_CAPTURE	= 0x00002000,			// this area becomes blocked after the first point is capped
+	TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE  = 0x00004000,			// this area is blocked until the first point is capped, then is unblocked
+	TF_NAV_BLUE_ONE_WAY_DOOR			= 0x00008000,
+	TF_NAV_RED_ONE_WAY_DOOR				= 0x00010000,
+ 	TF_NAV_WITH_SECOND_POINT			= 0x00020000,			// modifier for BLOCKED_*_POINT_CAPTURE
+ 	TF_NAV_WITH_THIRD_POINT				= 0x00040000,			// modifier for BLOCKED_*_POINT_CAPTURE
+  	TF_NAV_WITH_FOURTH_POINT			= 0x00080000,			// modifier for BLOCKED_*_POINT_CAPTURE
+ 	TF_NAV_WITH_FIFTH_POINT				= 0x00100000,			// modifier for BLOCKED_*_POINT_CAPTURE
+	TF_NAV_SNIPER_SPOT					= 0x00200000,			// this is a good place for a sniper to lurk
+	TF_NAV_SENTRY_SPOT					= 0x00400000,			// this is a good place to build a sentry
+	TF_NAV_ESCAPE_ROUTE					= 0x00800000,			// for Raid mode
+	TF_NAV_ESCAPE_ROUTE_VISIBLE			= 0x01000000,			// all areas that have visibility to the escape route
+	TF_NAV_NO_SPAWNING					= 0x02000000,			// don't spawn bots in this area
+ 	TF_NAV_RESCUE_CLOSET				= 0x04000000,			// for respawning friends in Raid mode
+ 	TF_NAV_BOMB_CAN_DROP_HERE			= 0x08000000,			// the bomb can be dropped here and reached by the invaders in MvM
+	TF_NAV_DOOR_NEVER_BLOCKS			= 0x10000000,
+	TF_NAV_DOOR_ALWAYS_BLOCKS			= 0x20000000,
+	TF_NAV_UNBLOCKABLE					= 0x40000000,			// this area cannot be blocked
+};
+
+#define TF_NAV_PERSISTENT_ATTRIBUTES TF_NAV_SNIPER_SPOT|TF_NAV_SENTRY_SPOT|TF_NAV_NO_SPAWNING| \
+											TF_NAV_BLUE_SETUP_GATE|TF_NAV_RED_SETUP_GATE|TF_NAV_BLOCKED_AFTER_POINT_CAPTURE| \
+											TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE|TF_NAV_BLUE_ONE_WAY_DOOR \
+											|TF_NAV_RED_ONE_WAY_DOOR|TF_NAV_DOOR_NEVER_BLOCKS|TF_NAV_DOOR_ALWAYS_BLOCKS \
+											|TF_NAV_UNBLOCKABLE|TF_NAV_WITH_SECOND_POINT|TF_NAV_WITH_THIRD_POINT \
+											|TF_NAV_WITH_FOURTH_POINT|TF_NAV_WITH_FIFTH_POINT|TF_NAV_RESCUE_CLOSET
+
+methodmap CTFNavArea < CNavArea
+{
+	property bool InCombat
+	{
+		public native get();
+	}
+
+	property float CombatIntensity
+	{
+		public native get();
+	}
+
+	public native bool HasAttributeTF(TFNavAttributeType bits);
+};
+
+methodmap CNavMesh
+{
+	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
+	public native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
+};
+
+public const CNavMesh TheNavMesh;
 
 methodmap CNavLadder
 {
@@ -632,6 +725,9 @@ methodmap CTFPathFollower < PathFollower
 };
 
 native Address AllocateNextBotCombatCharacter();
+native bool EntityIsCombatCharacter(int entity);
+native CNavArea GetEntityLastKnownArea(int entity);
+native void UpdateEntityLastKnownArea(int entity);
 
 stock Address datamaps_allocatenextbot()
 {
@@ -674,7 +770,7 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 			}
 
 			static const float jumpPenalty = 5.0;
-			dist += jumpPenalty * dist;
+			dist *= jumpPenalty * dist;
 		} else if(deltaZ < -locomotion.DeathDropHeight) {
 			return -1.0;
 		}
@@ -683,6 +779,10 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 		int entity = bot.Entity;
 		float preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
 		float cost = dist * preference;
+
+		if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
+			cost *= area.ComputeFuncNavCost(entity);
+		}
 
 		return cost + fromArea.CostSoFar;
 	}

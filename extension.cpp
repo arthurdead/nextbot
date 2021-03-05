@@ -68,6 +68,7 @@ SMEXT_LINK(&g_Sample);
 
 ICvar *icvar = nullptr;
 CGlobalVars *gpGlobals = nullptr;
+CBaseEntityList *g_pEntityList = nullptr;
 
 class INextBot;
 class CNavArea;
@@ -84,6 +85,8 @@ CNavMesh *TheNavMesh = nullptr;
 
 ConVar nav_authorative("nav_authorative", "0");
 ConVar path_expensive_optimize("path_expensive_optimize", "1");
+
+ConVar *tf_nav_combat_decay_rate = nullptr;
 
 int sizeofPath = 0;
 int sizeofPathFollower = 0;
@@ -110,8 +113,10 @@ void *NavAreaBuildPathPtr = nullptr;
 int CBaseEntityMyNextBotPointer = 0;
 int CBaseEntityMyCombatCharacterPointer = 0;
 int CBaseCombatCharacterGetLastKnownArea = 0;
+int CBaseCombatCharacterUpdateLastKnownArea = 0;
 int CBaseEntityWorldSpaceCenter = 0;
 int CBaseEntityEyeAngles = 0;
+int CFuncNavCostGetCostMultiplier = 0;
 
 int m_vecAbsOriginOffset = 0;
 int m_iTeamNumOffset = 0;
@@ -268,6 +273,12 @@ public:
 		return (this->*void_to_func<CNavArea *(CBaseCombatCharacter::*)()>(vtable[CBaseCombatCharacterGetLastKnownArea]))();
 	}
 	
+	void UpdateLastKnownArea()
+	{
+		void **vtable = *(void ***)this;
+		(this->*void_to_func<void (CBaseCombatCharacter::*)()>(vtable[CBaseCombatCharacterUpdateLastKnownArea]))();
+	}
+	
 	void OnNavAreaRemoved(CNavArea *) {}
 };
 
@@ -278,6 +289,95 @@ public:
 
 #include <nav_mesh.h>
 #include <nav_area.h>
+
+class CFuncNavCost : public CBaseEntity
+{
+public:
+	float GetCostMultiplier( CBaseCombatCharacter *who ) const
+	{
+		void **vtable = *(void ***)this;
+		return (this->*void_to_func<float (CFuncNavCost::*)(CBaseCombatCharacter *) const>(vtable[CFuncNavCostGetCostMultiplier]))(who);
+	}
+};
+
+// work-around since client header doesn't like inlined gpGlobals->curtime
+float IntervalTimer::Now( void ) const
+{
+	return gpGlobals->curtime;
+}
+
+// work-around since client header doesn't like inlined gpGlobals->curtime
+float CountdownTimer::Now( void ) const
+{
+	return gpGlobals->curtime;
+}
+
+enum
+{
+	TF_TEAM_RED = LAST_SHARED_TEAM+1,
+	TF_TEAM_BLUE,
+	TF_TEAM_COUNT
+};
+
+class CTFNavArea : public CNavArea
+{
+public:
+	bool HasAttributeTF( int flags ) const { return ( m_attributeFlags & flags ) ? true : false; }
+	float GetCombatIntensity( void ) const;
+	bool IsInCombat( void ) const { return GetCombatIntensity() > 0.01f; }
+	
+	float m_distanceFromSpawnRoom[ TF_TEAM_COUNT ];
+	CUtlVector< CTFNavArea * > m_invasionAreaVector[ TF_TEAM_COUNT ];	// use our team as index to get list of areas the enemy is invading from
+	unsigned int m_invasionSearchMarker;
+
+	unsigned int m_attributeFlags;
+
+	CUtlVector< CHandle< CBaseCombatCharacter > > m_potentiallyVisibleActor[ TF_TEAM_COUNT ];
+
+	float m_combatIntensity;
+	IntervalTimer m_combatTimer;
+
+	static unsigned int m_masterTFMark;
+	unsigned int m_TFMark;					// this area's mark
+
+	// Raid mode -------------------------------------------------
+	int m_wanderCount;						// how many wandering defenders to populate here
+	// Raid mode -------------------------------------------------
+
+	float m_distanceToBombTarget;
+};
+
+float CTFNavArea::GetCombatIntensity( void ) const
+{
+	if ( !m_combatTimer.HasStarted() )
+	{
+		return 0.0f;
+	}
+
+	float actualIntensity = m_combatIntensity - m_combatTimer.GetElapsedTime() * tf_nav_combat_decay_rate->GetFloat();
+
+	if ( actualIntensity < 0.0f )
+	{
+		actualIntensity = 0.0f;
+	}
+
+	return actualIntensity;
+}
+
+float CNavArea::ComputeFuncNavCost( CBaseCombatCharacter *who ) const
+{
+	float funcCost = 1.0f;
+
+	for( int i=0; i<m_funcNavCostVector.Count(); ++i )
+	{
+		if ( m_funcNavCostVector[i] != NULL )
+		{
+			funcCost *= m_funcNavCostVector[i]->GetCostMultiplier( who );
+		}
+	}
+
+	return funcCost;
+}
 
 bool CNavArea::IsConnected( const CNavArea *area, NavDirType dir ) const
 {
@@ -2015,10 +2115,102 @@ cell_t CNavAreaComputeAdjacentConnectionHeightChange(IPluginContext *pContext, c
 	return sp_ftoc(area->ComputeAdjacentConnectionHeightChange(other));
 }
 
+cell_t CNavAreaHasAttributes(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->HasAttributes((NavAttributeType)params[2]);
+}
+
+cell_t CNavAreaComputeFuncNavCost(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc(area->ComputeFuncNavCost(pCombat));
+}
+
+cell_t CNavAreaGetPlayerCount(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->GetPlayerCount(params[2]);
+}
+
+cell_t CTFNavAreaInCombatget(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return area->IsInCombat();
+}
+
+cell_t CTFNavAreaCombatIntensityget(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return sp_ftoc(area->GetCombatIntensity());
+}
+
+cell_t CTFNavAreaHasAttributeTF(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return area->HasAttributeTF((int)params[2]);
+}
+
 cell_t CNavLadderLengthget(IPluginContext *pContext, const cell_t *params)
 {
 	CNavLadder *area = (CNavLadder *)params[1];
 	return sp_ftoc(area->m_length);
+}
+
+cell_t CNavMeshGetNearestNavAreaVector(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return (cell_t)area->GetNearestNavArea(pos, params[3], sp_ctof(params[4]), params[5], params[6], params[7]);
+}
+
+cell_t CNavMeshGetGroundHeightNative(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	cell_t *heightaddr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	
+	Vector normal{};
+	
+	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
+	
+	float height = 0.0f;
+	bool ret = area->GetGroundHeight(pos, &height, &normal);
+	
+	addr = nullptr;
+	pContext->LocalToPhysAddr(params[4], &addr);
+	
+	if(addr != pNullVec) {
+		addr[0] = sp_ftoc(normal.x);
+		addr[1] = sp_ftoc(normal.y);
+		addr[2] = sp_ftoc(normal.z);
+	}
+	
+	*heightaddr = sp_ftoc(height);
+	
+	return ret;
 }
 
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
@@ -3533,6 +3725,54 @@ cell_t AllocateNextBotCombatCharacter(IPluginContext *pContext, const cell_t *pa
 	return (cell_t)NextBotCombatCharacter::create();
 }
 
+cell_t EntityIsCombatCharacter(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	
+	return (pCombat != nullptr);
+}
+
+cell_t GetEntityLastKnownArea(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	return (cell_t)pCombat->GetLastKnownArea();
+}
+
+cell_t UpdateEntityLastKnownArea(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	pCombat->UpdateLastKnownArea();
+	return 0;
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -3576,6 +3816,14 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.ID.get", CNavAreaIDget},
 	{"CNavArea.GetCenter", CNavAreaGetCenter},
 	{"CNavArea.ComputeAdjacentConnectionHeightChange", CNavAreaComputeAdjacentConnectionHeightChange},
+	{"CNavArea.HasAttributes", CNavAreaHasAttributes},
+	{"CNavArea.ComputeFuncNavCost", CNavAreaComputeFuncNavCost},
+	{"CNavArea.GetPlayerCount", CNavAreaGetPlayerCount},
+	{"CTFNavArea.InCombat.get", CTFNavAreaInCombatget},
+	{"CTFNavArea.CombatIntensity.get", CTFNavAreaCombatIntensityget},
+	{"CTFNavArea.HasAttributeTF", CTFNavAreaHasAttributeTF},
+	{"CNavMesh.GetNearestNavAreaVector", CNavMeshGetNearestNavAreaVector},
+	{"CNavMesh.GetGroundHeight", CNavMeshGetGroundHeightNative},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
@@ -3698,6 +3946,9 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.UpdatePosition", CKnownEntityUpdatePosition},
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
+	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
+	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
+	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
 	{NULL, NULL}
 };
 
@@ -3708,6 +3959,7 @@ bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	GET_V_IFACE_CURRENT(GetEngineFactory, icvar, ICvar, CVAR_INTERFACE_VERSION);
 	g_pCVar = icvar;
 	ConVar_Register(0, this);
+	tf_nav_combat_decay_rate = g_pCVar->FindVar("tf_nav_combat_decay_rate");
 	return true;
 }
 
@@ -3773,6 +4025,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
 	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::UpdateLastKnownArea", &CBaseCombatCharacterUpdateLastKnownArea);
+	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);
 	
 	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMesh);
 	
@@ -3787,6 +4041,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_iTeamNum", &info);
 	m_iTeamNumOffset = info.actual_offset;
 	
+	g_pEntityList = reinterpret_cast<CBaseEntityList *>(gamehelpers->GetGlobalEntityList());
+	
 	PathHandleType = handlesys->CreateType("Path", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	CTFPathFollowerHandleType = handlesys->CreateType("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
@@ -3796,6 +4052,18 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	sharesys->RegisterLibrary(myself, "nextbot");
 
 	return true;
+}
+
+void Sample::OnPluginLoaded(IPlugin *plugin)
+{
+	IPluginRuntime *runtime = plugin->GetRuntime();
+	
+	uint32_t idx = (uint32_t)-1;
+	if(runtime->FindPubvarByName("TheNavMesh", &idx) == SP_ERROR_NONE) {
+		sp_pubvar_t *TheNavMeshVar = nullptr;
+		runtime->GetPubvarByIndex(idx, &TheNavMeshVar);
+		*TheNavMeshVar->offs == (cell_t)TheNavMesh;
+	}
 }
 
 void Sample::OnPluginUnloaded(IPlugin *plugin)

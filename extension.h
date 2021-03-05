@@ -47,6 +47,7 @@ class Sample : public SDKExtension, public IPluginsListener, public IHandleTypeD
 {
 public:
 	virtual void OnHandleDestroy(HandleType_t type, void *object);
+	virtual void OnPluginLoaded(IPlugin *plugin);
 	virtual void OnPluginUnloaded(IPlugin *plugin);
 	
 	virtual bool RegisterConCommandBase(ConCommandBase *pCommand);
