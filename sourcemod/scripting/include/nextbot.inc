@@ -422,6 +422,8 @@ methodmap CKnownEntity
 	public native void GetLastKnownPosition(float pos[3]);
 };
 
+#define CKnownEntity_Null view_as<CKnownEntity>(Address_Null)
+
 enum FieldOfViewCheckType
 {
 	USE_FOV,
