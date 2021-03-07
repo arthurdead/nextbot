@@ -777,9 +777,14 @@ stock Address datamaps_allocatenextbot(int size_modifier)
 }
 
 #if defined datamaps_included
-stock Handle register_nextbot_factory(const char[] classname)
+stock CustomSendtable sendtable_from_nextbot_factory(CustomEntityFactory factory)
 {
-	return register_entity_factory_ex(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
+	return CustomSendtable.from_factory(factory, "NextBotCombatCharacter");
+}
+
+stock CustomEntityFactory register_nextbot_factory(const char[] classname)
+{
+	return EntityFactoryDictionary.register_function(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
 }
 #endif
 
