@@ -765,15 +765,23 @@ methodmap CTFPathFollower < PathFollower
 	}
 };
 
-native Address AllocateNextBotCombatCharacter();
+native Address AllocateNextBotCombatCharacter(int size_modifier);
+native int GetNextBotCombatCharacterSize();
 native bool EntityIsCombatCharacter(int entity);
 native CNavArea GetEntityLastKnownArea(int entity);
 native void UpdateEntityLastKnownArea(int entity);
 
-stock Address datamaps_allocatenextbot()
+stock Address datamaps_allocatenextbot(int size_modifier)
 {
-	return AllocateNextBotCombatCharacter();
+	return AllocateNextBotCombatCharacter(size_modifier);
 }
+
+#if defined datamaps_included
+stock Handle register_nextbot_factory(const char[] classname)
+{
+	return register_entity_factory_ex(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
+}
+#endif
 
 enum baseline_cost_flags
 {

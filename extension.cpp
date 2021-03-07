@@ -129,6 +129,42 @@ T void_to_func(void *ptr)
 	return f;
 }
 
+template <typename R, typename T, typename ...Args>
+R call_vfunc(T *pThisPtr, size_t offset, Args ...args)
+{
+	class VEmptyClass {};
+	
+	void **this_ptr = *reinterpret_cast<void ***>(&pThisPtr);
+	void **vtable = *reinterpret_cast<void ***>(pThisPtr);
+	void *vfunc = vtable[offset];
+	
+	union
+	{
+		R (VEmptyClass::*mfpnew)(Args...);
+#ifndef PLATFORM_POSIX
+		void *addr;
+	} u;
+	u.addr = vfunc;
+#else
+		struct  
+		{
+			void *addr;
+			intptr_t adjustor;
+		} s;
+	} u;
+	u.s.addr = vfunc;
+	u.s.adjustor = 0;
+#endif
+	
+	return (R)(reinterpret_cast<VEmptyClass *>(this_ptr)->*u.mfpnew)(args...);
+}
+
+template <typename R, typename T, typename ...Args>
+R call_vfunc(const T *pThisPtr, size_t offset, Args ...args)
+{
+	return call_vfunc<R, T, Args...>(const_cast<T *>(pThisPtr), offset, args...);
+}
+
 extern "C"
 {
 __attribute__((__visibility__("default"), __cdecl__)) double __pow_finite(double a, double b)
@@ -200,14 +236,12 @@ public:
 	
 	INextBot *MyNextBotPointer()
 	{
-		void **vtable = *(void ***)this;
-		return (this->*void_to_func<INextBot *(CBaseEntity::*)()>(vtable[CBaseEntityMyNextBotPointer]))();
+		return call_vfunc<INextBot *>(this, CBaseEntityMyNextBotPointer);
 	}
 	
 	CBaseCombatCharacter *MyCombatCharacterPointer()
 	{
-		void **vtable = *(void ***)this;
-		return (this->*void_to_func<CBaseCombatCharacter *(CBaseEntity::*)()>(vtable[CBaseEntityMyCombatCharacterPointer]))();
+		return call_vfunc<CBaseCombatCharacter *>(this, CBaseEntityMyCombatCharacterPointer);
 	}
 	
 	const Vector &GetAbsOrigin()
@@ -229,14 +263,12 @@ public:
 	
 	const Vector &WorldSpaceCenter( ) const
 	{
-		void **vtable = *(void ***)this;
-		return (this->*void_to_func<const Vector & (CBaseEntity::*)() const>(vtable[CBaseEntityWorldSpaceCenter]))();
+		return call_vfunc<const Vector &>(this, CBaseEntityWorldSpaceCenter);
 	}
 	
 	const QAngle &EyeAngles( void )
 	{
-		void **vtable = *(void ***)this;
-		return (this->*void_to_func<const QAngle & (CBaseEntity::*)()>(vtable[CBaseEntityEyeAngles]))();
+		return call_vfunc<const QAngle &>(this, CBaseEntityEyeAngles);
 	}
 	
 	void SetAbsOrigin( const Vector& origin )
@@ -269,14 +301,12 @@ class CBaseCombatCharacter : public CBaseEntity
 public:
 	CNavArea *GetLastKnownArea()
 	{
-		void **vtable = *(void ***)this;
-		return (this->*void_to_func<CNavArea *(CBaseCombatCharacter::*)()>(vtable[CBaseCombatCharacterGetLastKnownArea]))();
+		return call_vfunc<CNavArea *>(this, CBaseCombatCharacterGetLastKnownArea);
 	}
 	
 	void UpdateLastKnownArea()
 	{
-		void **vtable = *(void ***)this;
-		(this->*void_to_func<void (CBaseCombatCharacter::*)()>(vtable[CBaseCombatCharacterUpdateLastKnownArea]))();
+		call_vfunc<void>(this, CBaseCombatCharacterUpdateLastKnownArea);
 	}
 	
 	void OnNavAreaRemoved(CNavArea *) {}
@@ -293,10 +323,9 @@ public:
 class CFuncNavCost : public CBaseEntity
 {
 public:
-	float GetCostMultiplier( CBaseCombatCharacter *who ) const
+	float GetCostMultiplier(CBaseCombatCharacter *who) const
 	{
-		void **vtable = *(void ***)this;
-		return (this->*void_to_func<float (CFuncNavCost::*)(CBaseCombatCharacter *) const>(vtable[CFuncNavCostGetCostMultiplier]))(who);
+		return call_vfunc<float, CFuncNavCost, CBaseCombatCharacter *>(this, CFuncNavCostGetCostMultiplier, who);
 	}
 };
 
@@ -1286,9 +1315,9 @@ public:
 class NextBotCombatCharacter : public CBaseCombatCharacter, INextBot
 {
 public:
-	static NextBotCombatCharacter *create()
+	static NextBotCombatCharacter *create(size_t size_modifier)
 	{
-		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter);
+		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
 		(bytes->*void_to_func<void(NextBotCombatCharacter::*)()>(NextBotCombatCharacterCTOR))();
 		return bytes;
 	}
@@ -3735,7 +3764,12 @@ cell_t CKnownEntityGetLastKnownPosition(IPluginContext *pContext, const cell_t *
 
 cell_t AllocateNextBotCombatCharacter(IPluginContext *pContext, const cell_t *params)
 {
-	return (cell_t)NextBotCombatCharacter::create();
+	return (cell_t)NextBotCombatCharacter::create(params[1]);
+}
+
+cell_t GetNextBotCombatCharacterSize(IPluginContext *pContext, const cell_t *params)
+{
+	return sizeofNextBotCombatCharacter;
 }
 
 cell_t EntityIsCombatCharacter(IPluginContext *pContext, const cell_t *params)
@@ -3961,6 +3995,7 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.UpdatePosition", CKnownEntityUpdatePosition},
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
+	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
 	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
