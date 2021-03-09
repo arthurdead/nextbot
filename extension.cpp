@@ -273,7 +273,7 @@ public:
 	
 	void SetAbsOrigin( const Vector& origin )
 	{
-		return (this->*void_to_func<void(CBaseEntity::*)(const Vector&)>(CBaseEntitySetAbsOrigin))(origin);
+		(this->*void_to_func<void(CBaseEntity::*)(const Vector&)>(CBaseEntitySetAbsOrigin))(origin);
 	}
 	
 	int GetHealth() { return 0; }
