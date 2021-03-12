@@ -129,14 +129,28 @@ T void_to_func(void *ptr)
 	return f;
 }
 
+template <typename T>
+void *func_to_void(T ptr)
+{
+	union { T f; void *p; };
+	f = ptr;
+	return p;
+}
+
+template <typename T>
+int vfunc_index(T func)
+{
+	SourceHook::MemFuncInfo info{};
+	SourceHook::GetFuncInfo<T>(func, info);
+	return info.vtblindex;
+}
+
 template <typename R, typename T, typename ...Args>
-R call_vfunc(T *pThisPtr, size_t offset, Args ...args)
+R call_mfunc(T *pThisPtr, void *offset, Args ...args)
 {
 	class VEmptyClass {};
 	
 	void **this_ptr = *reinterpret_cast<void ***>(&pThisPtr);
-	void **vtable = *reinterpret_cast<void ***>(pThisPtr);
-	void *vfunc = vtable[offset];
 	
 	union
 	{
@@ -144,7 +158,7 @@ R call_vfunc(T *pThisPtr, size_t offset, Args ...args)
 #ifndef PLATFORM_POSIX
 		void *addr;
 	} u;
-	u.addr = vfunc;
+	u.addr = offset;
 #else
 		struct  
 		{
@@ -152,11 +166,26 @@ R call_vfunc(T *pThisPtr, size_t offset, Args ...args)
 			intptr_t adjustor;
 		} s;
 	} u;
-	u.s.addr = vfunc;
+	u.s.addr = offset;
 	u.s.adjustor = 0;
 #endif
 	
 	return (R)(reinterpret_cast<VEmptyClass *>(this_ptr)->*u.mfpnew)(args...);
+}
+
+template <typename R, typename T, typename ...Args>
+R call_mfunc(const T *pThisPtr, void *offset, Args ...args)
+{
+	return call_mfunc<R, T, Args...>(const_cast<T *>(pThisPtr), offset, args...);
+}
+
+template <typename R, typename T, typename ...Args>
+R call_vfunc(T *pThisPtr, size_t offset, Args ...args)
+{
+	void **vtable = *reinterpret_cast<void ***>(pThisPtr);
+	void *vfunc = vtable[offset];
+	
+	return call_mfunc<R, T, Args...>(pThisPtr, vfunc, args...);
 }
 
 template <typename R, typename T, typename ...Args>
@@ -273,7 +302,7 @@ public:
 	
 	void SetAbsOrigin( const Vector& origin )
 	{
-		(this->*void_to_func<void(CBaseEntity::*)(const Vector&)>(CBaseEntitySetAbsOrigin))(origin);
+		call_mfunc<void, CBaseEntity, const Vector &>(this, CBaseEntitySetAbsOrigin, origin);
 	}
 	
 	int GetHealth() { return 0; }
@@ -585,12 +614,12 @@ float CNavArea::GetZ( float x, float y ) const RESTRICT
 
 CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround, int team ) const
 {
-	return (this->*void_to_func<CNavArea *(CNavMesh::*)(const Vector &, bool, float, bool, bool, int) const>(CNavMeshGetNearestNavArea))(pos, anyZ, maxDist, checkLOS, checkGround, team);
+	return call_mfunc<CNavArea *, CNavMesh, const Vector &, bool, float, bool, bool, int>(this, CNavMeshGetNearestNavArea, pos, anyZ, maxDist, checkLOS, checkGround, team);
 }
 
 bool CNavMesh::GetGroundHeight( const Vector &pos, float *height, Vector *normal ) const
 {
-	return (this->*void_to_func<bool(CNavMesh::*)(const Vector &, float *, Vector *) const>(CNavMeshGetGroundHeight))(pos, height, normal);
+	return call_mfunc<bool, CNavMesh, const Vector &, float *, Vector *>(this, CNavMeshGetGroundHeight, pos, height, normal);
 }
 
 template< typename CostFunctor >
@@ -1318,7 +1347,7 @@ public:
 	static NextBotCombatCharacter *create(size_t size_modifier)
 	{
 		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
-		(bytes->*void_to_func<void(NextBotCombatCharacter::*)()>(NextBotCombatCharacterCTOR))();
+		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
 		return bytes;
 	}
 };
@@ -1377,7 +1406,7 @@ public:
 	static Path *create()
 	{
 		Path *bytes = (Path *)calloc(1, sizeofPath);
-		(bytes->*void_to_func<void(Path::*)()>(PathCTOR))();
+		call_mfunc<void>(bytes, PathCTOR);
 		return bytes;
 	}
 	
@@ -1698,17 +1727,17 @@ public:
 	
 	bool ComputePathDetails( INextBot *bot, const Vector &start )
 	{
-		return (this->*void_to_func<bool(Path::*)(INextBot *, const Vector &)>(PathComputePathDetails))(bot, start);
+		return call_mfunc<bool, Path, INextBot *, const Vector &>(this, PathComputePathDetails, bot, start);
 	}
 	
 	bool BuildTrivialPath( INextBot *bot, const Vector &goal )
 	{
-		return (this->*void_to_func<bool(Path::*)(INextBot *, const Vector &)>(PathBuildTrivialPath))(bot, goal);
+		return call_mfunc<bool, Path, INextBot *, const Vector &>(this, PathBuildTrivialPath, bot, goal);
 	}
 	
 	int FindNextOccludedNode( INextBot *bot, int anchorIndex )
 	{
-		return (this->*void_to_func<int(Path::*)(INextBot *, int)>(PathFindNextOccludedNode))(bot, anchorIndex);
+		return call_mfunc<int, Path, INextBot *, int>(this, PathFindNextOccludedNode, bot, anchorIndex);
 	}
 	
 	void Optimize( INextBot *bot )
@@ -1746,7 +1775,7 @@ public:
 
 	void PostProcess()
 	{
-		(this->*void_to_func<void(Path::*)()>(PathPostProcess))();
+		call_mfunc<void>(this, PathPostProcess);
 	}
 };
 
@@ -1761,7 +1790,7 @@ public:
 	static PathFollower *create()
 	{
 		PathFollower *bytes = (PathFollower *)calloc(1, sizeofPathFollower);
-		(bytes->*void_to_func<void(PathFollower::*)()>(PathFollowerCTOR))();
+		call_mfunc<void>(bytes, PathFollowerCTOR);
 		return bytes;
 	}
 	
@@ -1818,7 +1847,7 @@ public:
 	static CTFPathFollower *create()
 	{
 		CTFPathFollower *bytes = (CTFPathFollower *)calloc(1, sizeofCTFPathFollower);
-		(bytes->*void_to_func<void(CTFPathFollower::*)()>(CTFPathFollowerCTOR))();
+		call_mfunc<void>(bytes, CTFPathFollowerCTOR);
 		return bytes;
 	}
 	
@@ -1862,37 +1891,39 @@ public:
 		float fricforward = 0.0f;
 		float fricsideway = 3.0f;
 		float yaw = 250.0f;
+		
+		void *dtorPtr = nullptr;
 	};
 	
 	void dtor();
 	
 	float HookGetMaxJumpHeight()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().jump); }
+	{ return getvars().jump; }
 	float HookGetStepHeight()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().step); }
+	{ return getvars().step; }
 	float HookGetDeathDropHeight()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().death); }
+	{ return getvars().death; }
 	float HookGetRunSpeed()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().run); }
+	{ return getvars().run; }
 	float HookGetWalkSpeed()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().walk); }
+	{ return getvars().walk; }
 	float HookGetMaxAcceleration()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().accel); }
+	{ return getvars().accel; }
 	float HookGetMaxDeceleration()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().deaccel); }
+	{ return getvars().deaccel; }
 	float HookGetSpeedLimit()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().limit); }
+	{ return getvars().limit; }
 	float HookGetTraversableSlopeLimit()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().slope); }
+	{ return getvars().slope; }
 	
 	float HookGetGravity()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().gravity); }
+	{ return getvars().gravity; }
 	float HookGetFrictionForward()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricforward); }
+	{ return getvars().fricforward; }
 	float HookGetFrictionSideways()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricsideway); }
+	{ return getvars().fricsideway; }
 	float HookGetMaxYawRate()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().yaw); }
+	{ return getvars().yaw; }
 	
 	unsigned char *vars_ptr()
 	{ return (((unsigned char *)this) + sizeofNextBotGroundLocomotion); }
@@ -1902,45 +1933,31 @@ public:
 	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg);
 };
 
-SH_DECL_MANUALHOOK0_void(NextBotGroundLocomotionDtor, 0, 0, 0)
-
-SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetDeathDropHeight, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetRunSpeed, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetWalkSpeed, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetMaxAcceleration, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetMaxDeceleration, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetSpeedLimit, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(ILocomotion, GetTraversableSlopeLimit, SH_NOATTRIB, 0, float);
-
-SH_DECL_HOOK0(NextBotGroundLocomotion, GetGravity, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionForward, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionSideways, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(NextBotGroundLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
-
 NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *bot, bool reg)
 {
 	NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeofNextBotGroundLocomotion + sizeof(vars_t));
-	(bytes->*void_to_func<void(NextBotGroundLocomotion::*)(INextBot *)>(NextBotGroundLocomotionCTOR))(bot);
+	call_mfunc<void>(bytes, NextBotGroundLocomotionCTOR);
 	new (bytes->vars_ptr()) vars_t();
 	
-	SH_ADD_MANUALHOOK(NextBotGroundLocomotionDtor, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::dtor), false);
+	void **vtable = *(void ***)bytes;
 	
-	SH_ADD_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxJumpHeight), false);
-	SH_ADD_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetStepHeight), false);
-	SH_ADD_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetDeathDropHeight), false);
-	SH_ADD_HOOK(ILocomotion, GetRunSpeed, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetRunSpeed), false);
-	SH_ADD_HOOK(ILocomotion, GetWalkSpeed, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetWalkSpeed), false);
-	SH_ADD_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxAcceleration), false);
-	SH_ADD_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxDeceleration), false);
-	SH_ADD_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetSpeedLimit), false);
-	SH_ADD_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit), false);
+	bytes->getvars().dtorPtr = vtable[0];
+	vtable[0] = func_to_void(&NextBotGroundLocomotionCustom::dtor);
 	
-	SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetGravity), false);
-	SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
-	SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionSideways), false);
-	SH_ADD_HOOK(NextBotGroundLocomotion, GetMaxYawRate, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxYawRate), false);
+	vtable[vfunc_index(&ILocomotion::GetMaxJumpHeight)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxJumpHeight);
+	vtable[vfunc_index(&ILocomotion::GetStepHeight)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetStepHeight);
+	vtable[vfunc_index(&ILocomotion::GetDeathDropHeight)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetDeathDropHeight);
+	vtable[vfunc_index(&ILocomotion::GetRunSpeed)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetRunSpeed);
+	vtable[vfunc_index(&ILocomotion::GetWalkSpeed)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetWalkSpeed);
+	vtable[vfunc_index(&ILocomotion::GetMaxAcceleration)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxAcceleration);
+	vtable[vfunc_index(&ILocomotion::GetMaxDeceleration)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxDeceleration);
+	vtable[vfunc_index(&ILocomotion::GetSpeedLimit)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetSpeedLimit);
+	vtable[vfunc_index(&ILocomotion::GetTraversableSlopeLimit)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit);
+
+	vtable[vfunc_index(&NextBotGroundLocomotion::GetGravity)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetGravity);
+	vtable[vfunc_index(&NextBotGroundLocomotion::GetFrictionForward)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetFrictionForward);
+	vtable[vfunc_index(&NextBotGroundLocomotion::GetFrictionSideways)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetFrictionSideways);
+	vtable[vfunc_index(&NextBotGroundLocomotion::GetMaxYawRate)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxYawRate);
 	
 	if(!reg) {
 		bot->m_componentList = bytes->m_nextComponent;
@@ -1952,26 +1969,11 @@ NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *b
 
 void NextBotGroundLocomotionCustom::dtor()
 {
-	SH_REMOVE_MANUALHOOK(NextBotGroundLocomotionDtor, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::dtor), false);
-	
-	SH_REMOVE_HOOK(ILocomotion, GetMaxJumpHeight, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetMaxJumpHeight), false);
-	SH_REMOVE_HOOK(ILocomotion, GetStepHeight, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetStepHeight), false);
-	SH_REMOVE_HOOK(ILocomotion, GetDeathDropHeight, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetDeathDropHeight), false);
-	SH_REMOVE_HOOK(ILocomotion, GetRunSpeed, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetRunSpeed), false);
-	SH_REMOVE_HOOK(ILocomotion, GetWalkSpeed, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetWalkSpeed), false);
-	SH_REMOVE_HOOK(ILocomotion, GetMaxAcceleration, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetMaxAcceleration), false);
-	SH_REMOVE_HOOK(ILocomotion, GetMaxDeceleration, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetMaxDeceleration), false);
-	SH_REMOVE_HOOK(ILocomotion, GetSpeedLimit, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetSpeedLimit), false);
-	SH_REMOVE_HOOK(ILocomotion, GetTraversableSlopeLimit, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit), false);
-	
-	SH_REMOVE_HOOK(NextBotGroundLocomotion, GetGravity, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetGravity), false);
-	SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionForward, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
-	SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionSideways, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetFrictionSideways), false);
-	SH_REMOVE_HOOK(NextBotGroundLocomotion, GetMaxYawRate, this, SH_MEMBER(this, &NextBotGroundLocomotionCustom::HookGetMaxYawRate), false);
+	void *dtorPtr = getvars().dtorPtr;
 	
 	getvars().~vars_t();
 	
-	RETURN_META(MRES_IGNORED);
+	call_mfunc<void>(this, dtorPtr);
 }
 
 HandleType_t PathHandleType = 0;
