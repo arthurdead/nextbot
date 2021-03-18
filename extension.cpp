@@ -110,16 +110,16 @@ void *CBaseEntitySetAbsOrigin = nullptr;
 
 void *NavAreaBuildPathPtr = nullptr;
 
-int CBaseEntityMyNextBotPointer = 0;
-int CBaseEntityMyCombatCharacterPointer = 0;
-int CBaseCombatCharacterGetLastKnownArea = 0;
-int CBaseCombatCharacterUpdateLastKnownArea = 0;
-int CBaseEntityWorldSpaceCenter = 0;
-int CBaseEntityEyeAngles = 0;
-int CFuncNavCostGetCostMultiplier = 0;
+int CBaseEntityMyNextBotPointer = -1;
+int CBaseEntityMyCombatCharacterPointer = -1;
+int CBaseCombatCharacterGetLastKnownArea = -1;
+int CBaseCombatCharacterUpdateLastKnownArea = -1;
+int CBaseEntityWorldSpaceCenter = -1;
+int CBaseEntityEyeAngles = -1;
+int CFuncNavCostGetCostMultiplier = -1;
 
-int m_vecAbsOriginOffset = 0;
-int m_iTeamNumOffset = 0;
+int m_vecAbsOriginOffset = -1;
+int m_iTeamNumOffset = -1;
 
 template <typename T>
 T void_to_func(void *ptr)
@@ -275,7 +275,7 @@ public:
 	
 	const Vector &GetAbsOrigin()
 	{
-		if(m_vecAbsOriginOffset == 0) {
+		if(m_vecAbsOriginOffset == -1) {
 			datamap_t *map = gamehelpers->GetDataMap(this);
 			sm_datatable_info_t info{};
 			gamehelpers->FindDataMapInfo(map, "m_vecAbsOrigin", &info);
