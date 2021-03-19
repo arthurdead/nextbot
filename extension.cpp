@@ -1933,13 +1933,17 @@ public:
 	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg);
 };
 
+#include <sourcehook/sh_memory.h>
+
 NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *bot, bool reg)
 {
 	NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeofNextBotGroundLocomotion + sizeof(vars_t));
-	call_mfunc<void>(bytes, NextBotGroundLocomotionCTOR);
+	call_mfunc<void, NextBotGroundLocomotion, INextBot *>(bytes, NextBotGroundLocomotionCTOR, bot);
 	new (bytes->vars_ptr()) vars_t();
 	
 	void **vtable = *(void ***)bytes;
+	
+	SourceHook::SetMemAccess(vtable, sizeof(void **), SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 	
 	bytes->getvars().dtorPtr = vtable[0];
 	vtable[0] = func_to_void(&NextBotGroundLocomotionCustom::dtor);
