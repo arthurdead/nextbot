@@ -567,6 +567,8 @@ methodmap IBodyCustom < IBody
 	public native void SetHullMaxs(float vec[3]);
 };
 
+native void UpdateEntityLastKnownArea(int entity);
+
 methodmap INextBot
 {
 	public native INextBot(int entity);
@@ -591,12 +593,42 @@ methodmap INextBot
 		public native get();
 	}
 
+	public native bool BeginUpdate();
+	public native void Update();
+	public native void EndUpdate();
+
+	public native void Reset();
+
+	public void DoThink(int entity)
+	{
+		static ConVar NextBotStop = null;
+		if(NextBotStop == null) {
+			NextBotStop = FindConVar("nb_stop");
+		}
+
+		if(this.BeginUpdate()) {
+
+			UpdateEntityLastKnownArea(entity);
+
+			if(!NextBotStop.BoolValue && !(GetEntityFlags(entity) & FL_FROZEN)) {
+				this.Update();
+			}
+
+			this.EndUpdate();
+		}
+	}
+
 	//public native void RegisterComponent(INextBotComponent comp);
 	//public native void UnregisterComponent(INextBotComponent comp);
 
 	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
 	//public native IVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
+};
+
+methodmap INextBotCustom < INextBot
+{
+	
 };
 
 enum SegmentType
@@ -765,11 +797,14 @@ methodmap CTFPathFollower < PathFollower
 	}
 };
 
-native Address AllocateNextBotCombatCharacter(int size_modifier);
-native int GetNextBotCombatCharacterSize();
 native bool EntityIsCombatCharacter(int entity);
 native CNavArea GetEntityLastKnownArea(int entity);
-native void UpdateEntityLastKnownArea(int entity);
+native INextBotCustom MakeEntityNextBot(int entity);
+
+#tryinclude <datamaps>
+
+native Address AllocateNextBotCombatCharacter(int size_modifier);
+native int GetNextBotCombatCharacterSize();
 
 stock Address datamaps_allocatenextbot(int size_modifier)
 {

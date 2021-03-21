@@ -70,6 +70,9 @@ ICvar *icvar = nullptr;
 CGlobalVars *gpGlobals = nullptr;
 CBaseEntityList *g_pEntityList = nullptr;
 
+class IEngineTrace *enginetrace = nullptr;
+class IStaticPropMgrServer *staticpropmgr = nullptr;
+
 class INextBot;
 class CNavArea;
 class CNavLadder;
@@ -88,15 +91,12 @@ ConVar path_expensive_optimize("path_expensive_optimize", "1");
 
 ConVar *tf_nav_combat_decay_rate = nullptr;
 
-int sizeofPath = 0;
-int sizeofPathFollower = 0;
 int sizeofNextBotCombatCharacter = 0;
-int sizeofCTFPathFollower = 0;
-int sizeofNextBotGroundLocomotion = 0;
 
 void *PathCTOR = nullptr;
 void *PathFollowerCTOR = nullptr;
 void *NextBotCombatCharacterCTOR = nullptr;
+void *INextBotCTOR = nullptr;
 void *CTFPathFollowerCTOR = nullptr;
 void *NextBotGroundLocomotionCTOR = nullptr;
 
@@ -107,6 +107,12 @@ void *PathPostProcess = nullptr;
 void *CNavMeshGetGroundHeight = nullptr;
 void *CNavMeshGetNearestNavArea = nullptr;
 void *CBaseEntitySetAbsOrigin = nullptr;
+void *INextBotBeginUpdatePtr = nullptr;
+void *INextBotEndUpdatePtr = nullptr;
+void *CBaseEntityCalcAbsoluteVelocity = nullptr;
+void *NextBotGroundLocomotionResolveCollision = nullptr;
+void *CBaseEntitySetGroundEntity = nullptr;
+void *CTraceFilterSimpleShouldHitEntity = nullptr;
 
 void *NavAreaBuildPathPtr = nullptr;
 
@@ -120,6 +126,13 @@ int CFuncNavCostGetCostMultiplier = -1;
 
 int m_vecAbsOriginOffset = -1;
 int m_iTeamNumOffset = -1;
+int m_vecAbsVelocityOffset = -1;
+int m_iEFlagsOffset = -1;
+int m_fFlagsOffset = -1;
+int m_hGroundEntityOffset = -1;
+int m_MoveTypeOffset = -1;
+
+ConVar *NextBotStop = nullptr;
 
 template <typename T>
 T void_to_func(void *ptr)
@@ -256,6 +269,8 @@ __attribute__((__visibility__("default"), __cdecl__)) double __acos_finite(doubl
 
 #include <collisionproperty.h>
 
+void SetEdictStateChanged(CBaseEntity *pEntity, int offset);
+
 class CBaseEntity : public IServerEntity
 {
 public:
@@ -305,6 +320,79 @@ public:
 		call_mfunc<void, CBaseEntity, const Vector &>(this, CBaseEntitySetAbsOrigin, origin);
 	}
 	
+	int GetIEFlags()
+	{
+		if(m_iEFlagsOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_iEFlags", &info);
+			m_iEFlagsOffset = info.actual_offset;
+		}
+		
+		return *(int *)((unsigned char *)this + m_iEFlagsOffset);
+	}
+	
+	void SetMoveType(MoveType_t val)
+	{
+		if(m_MoveTypeOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_MoveType", &info);
+			m_MoveTypeOffset = info.actual_offset;
+		}
+		
+		*(unsigned char *)((unsigned char *)this + m_MoveTypeOffset) = val;
+	}
+	
+	int GetFlags()
+	{
+		if(m_fFlagsOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_fFlags", &info);
+			m_fFlagsOffset = info.actual_offset;
+		}
+		
+		return *(int *)((unsigned char *)this + m_fFlagsOffset);
+	}
+	
+	void CalcAbsoluteVelocity()
+	{
+		call_mfunc<void, CBaseEntity>(this, CBaseEntityCalcAbsoluteVelocity);
+	}
+	
+	const Vector &GetAbsVelocity()
+	{
+		if(m_vecAbsVelocityOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_vecAbsVelocity", &info);
+			m_vecAbsVelocityOffset = info.actual_offset;
+		}
+		
+		if (GetIEFlags() & EFL_DIRTY_ABSVELOCITY)
+		{
+			CalcAbsoluteVelocity();
+		}
+		
+		return *(Vector *)(((unsigned char *)this) + m_vecAbsVelocityOffset);
+	}
+	
+	bool IsWorld()
+	{
+		return gamehelpers->EntityToBCompatRef(this) == 0;
+	}
+	
+	EHANDLE GetGroundEntity()
+	{
+		return *(EHANDLE *)((unsigned char *)this + m_hGroundEntityOffset);
+	}
+	
+	void SetGroundEntity(CBaseEntity *pEntity)
+	{
+		call_mfunc<void, CBaseEntity, CBaseEntity *>(this, CBaseEntitySetGroundEntity, pEntity);
+	}
+	
 	int GetHealth() { return 0; }
 	int m_takedamage;
 	CCollisionProperty		*CollisionProp() { return nullptr; }
@@ -315,6 +403,14 @@ public:
 	int ObjectCaps() { return 0; }
 	bool HasSpawnFlags(int) { return 0; }
 };
+
+void SetEdictStateChanged(CBaseEntity *pEntity, int offset)
+{
+	IServerNetworkable *pNet = pEntity->GetNetworkable();
+	edict_t *edict = pNet->GetEdict();
+	
+	gamehelpers->SetEdictStateChanged(edict, offset);
+}
 
 inline bool FClassnameIs(CBaseEntity *pEntity, const char *szClassname)
 { 
@@ -735,6 +831,11 @@ public:
 
 	virtual INextBot *GetBot( void ) const { return m_bot; }
 	
+	float GetUpdateInterval() 
+	{ 
+		return m_curInterval; 
+	}
+	
 	float m_lastUpdateTime;
 	float m_curInterval;
 
@@ -751,8 +852,8 @@ public:
 	
 	virtual bool IsRemovedOnReset( void ) const = 0;	// remove this bot when the NextBot manager calls Reset
 	
-	virtual CBaseCombatCharacter *GetEntity( void ) const	= 0;
-	virtual class NextBotCombatCharacter *GetNextBotCombatCharacter( void ) const = 0;
+	virtual CBaseCombatCharacter *GetEntity( void )	= 0;
+	virtual class NextBotCombatCharacter *GetNextBotCombatCharacter( void ) = 0;
 	
 	// interfaces are never NULL - return base no-op interfaces at a minimum
 	virtual ILocomotion *	GetLocomotionInterface( void ) const = 0;
@@ -765,6 +866,79 @@ public:
 	 */
 	virtual bool SetPosition( const Vector &pos ) = 0;
 	virtual const Vector &GetPosition( void ) const = 0;				// get the global position of the bot
+	
+	virtual bool IsEnemy( const CBaseEntity *them ) const = 0;			// return true if given entity is our enemy
+	virtual bool IsFriend( const CBaseEntity *them ) const = 0;			// return true if given entity is our friend
+	virtual bool IsSelf( const CBaseEntity *them ) const = 0;			// return true if 'them' is actually me
+
+	/**
+	 * Can we climb onto this entity?
+	 */	
+	virtual bool IsAbleToClimbOnto( const CBaseEntity *object ) const = 0;
+
+	/**
+	 * Can we break this entity?
+	 */	
+	virtual bool IsAbleToBreak( const CBaseEntity *object ) const = 0;
+
+	/**
+	 * Sometimes we want to pass through other NextBots. OnContact() will always
+	 * be invoked, but collision resolution can be skipped if this
+	 * method returns false.
+	 */
+	virtual bool IsAbleToBlockMovementOf( const INextBot *botInMotion ) const = 0;
+
+	/**
+	 * Should we ever care about noticing physical contact with this entity?
+	 */
+	virtual bool ShouldTouch( const CBaseEntity *object ) const = 0;
+
+	/**
+	 * This immobile system is used to track the global state of "am I actually moving or not".
+	 * The OnStuck() event is only emitted when following a path, and paths can be recomputed, etc.
+	 */
+	virtual bool IsImmobile( void ) const = 0;					// return true if we haven't moved in awhile
+	virtual float GetImmobileDuration( void ) const = 0;		// how long have we been immobile
+	virtual void ClearImmobileStatus( void ) = 0;		
+	virtual float GetImmobileSpeedThreshold( void ) const = 0;	// return units/second below which this actor is considered "immobile"
+
+	/**
+	 * Get the last PathFollower we followed. This method gives other interfaces a
+	 * single accessor to the most recent Path being followed by the myriad of 
+	 * different PathFollowers used in the various behaviors the bot may be doing.
+	 */
+	virtual const PathFollower *GetCurrentPath( void ) const = 0;
+	virtual void SetCurrentPath( const PathFollower *path ) = 0;
+	virtual void NotifyPathDestruction( const PathFollower *path ) = 0;		// this PathFollower is going away, which may or may not be ours
+
+	// between distance utility methods
+	virtual bool IsRangeLessThan( CBaseEntity *subject, float range ) const = 0;
+	virtual bool IsRangeLessThan( const Vector &pos, float range ) const = 0;
+	virtual bool IsRangeGreaterThan( CBaseEntity *subject, float range ) const = 0;
+	virtual bool IsRangeGreaterThan( const Vector &pos, float range ) const = 0;
+	virtual float GetRangeTo( CBaseEntity *subject ) const = 0;
+	virtual float GetRangeTo( const Vector &pos ) const = 0;
+	virtual float GetRangeSquaredTo( CBaseEntity *subject ) const = 0;
+	virtual float GetRangeSquaredTo( const Vector &pos ) const = 0;
+
+	// event propagation
+	virtual INextBotEventResponder *FirstContainedResponder( void ) const = 0;
+	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const = 0;
+
+	virtual bool IsDebugging( unsigned int type ) const = 0;		// return true if this bot is debugging any of the given types
+	virtual const char *GetDebugIdentifier( void ) const = 0;		// return the name of this bot for debugging purposes
+	virtual bool IsDebugFilterMatch( const char *name ) const = 0;	// return true if we match the given debug symbol
+	virtual void DisplayDebugText( const char *text ) const = 0;
+	
+	bool BeginUpdate()
+	{
+		return call_mfunc<bool>(this, INextBotBeginUpdatePtr);
+	}
+	
+	void EndUpdate()
+	{
+		call_mfunc<void>(this, INextBotEndUpdatePtr);
+	}
 	
 	void RegisterComponent( INextBotComponent *comp )
 	{
@@ -824,186 +998,86 @@ public:
 	mutable IVision		*m_baseVision;
 	//mutable IAttention	*m_baseAttention;
 
-	//CUtlVector< NextBotDebugLineType * > m_debugHistory;
+	CUtlVector< struct NextBotDebugLineType * > m_debugHistory;
 };
 
-INextBotComponent::INextBotComponent( INextBot *bot, bool reg )
+#include <sourcehook/sh_memory.h>
+
+SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0)
+SH_DECL_MANUALHOOK0(MyNextBotPointer, 0, 0, 0, INextBot *)
+SH_DECL_MANUALHOOK4_void(PerformCustomPhysics, 0, 0, 0, Vector *, Vector *, QAngle *, QAngle *)
+SH_DECL_MANUALHOOK1(IsAreaTraversable, 0, 0, 0, bool, const CNavArea *)
+SH_DECL_MANUALHOOK0_void(Spawn, 0, 0, 0)
+
+class INextBotCustom : public INextBot
 {
-	m_curInterval = TICK_INTERVAL;
-	m_lastUpdateTime = 0;
-	m_bot = bot;
+public:
+	struct vars_t
+	{
+		EHANDLE m_lastAttacker{};
+		bool m_didModelChange = false;
+		CBaseEntity *pEntity = nullptr;
+	};
 	
-	// register this component with the bot
-	if(reg) {
-		bot->RegisterComponent( this );
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + sizeof(INextBot)); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+	
+	void dtor()
+	{
+		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &INextBotCustom::dtor), false);
+		
+		getvars().~vars_t();
+		
+		RETURN_META(MRES_IGNORED);
 	}
-}
-
-INextBotComponent::~INextBotComponent()
-{
-	m_bot->UnregisterComponent( this );
-}
-
-enum QueryResultType : int;
-class CKnownEntity;
-
-class IContextualQuery
-{
-public:
-	virtual ~IContextualQuery() = 0;
-
-	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const = 0;		// if the desired item was available right now, should we pick it up?
-	virtual QueryResultType			ShouldHurry( const INextBot *me ) const = 0;							// are we in a hurry?
-	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const = 0;							// is it time to retreat?
-	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const = 0;	// should we attack "them"?
-	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const = 0;		// return true if we should wait for 'blocker' that is across our path somewhere up ahead.
-
-	virtual Vector					SelectTargetPoint( const INextBot *me, const CBaseCombatCharacter *subject ) const = 0;		// given a subject, return the world space position we should aim at
-
-	/**
-	 * Allow bot to approve of positions game movement tries to put him into.
-	 * This is most useful for bots derived from CBasePlayer that go through
-	 * the player movement system.
-	 */
-	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const = 0;
-
-	virtual const CKnownEntity *	SelectMoreDangerousThreat( const INextBot *me, 
-															   const CBaseCombatCharacter *subject,
-															   const CKnownEntity *threat1, 
-															   const CKnownEntity *threat2 ) const = 0;	// return the more dangerous of the two threats to 'subject', or NULL if we have no opinion
-};
-
-class IIntention : public INextBotComponent, public IContextualQuery
-{
-public:
 	
-};
-
-class CKnownEntity;
-
-class IForEachKnownEntity
-{
-public:
-	virtual bool Inspect( const CKnownEntity &known ) = 0;
-};
-
-class INextBotEntityFilter
-{
-public:
-	// return true if the given entity passes this filter
-	virtual bool IsAllowed( CBaseEntity *entity ) = 0;
-};
-
-enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
-
-class CKnownEntity
-{
-public:
-	virtual ~CKnownEntity() = 0;
-	virtual void Destroy( void ) = 0;
-	virtual void UpdatePosition( void ) = 0;
-	virtual CBaseEntity *GetEntity( void ) const = 0;
-	virtual const Vector &GetLastKnownPosition( void ) const = 0;
-	virtual bool HasLastKnownPositionBeenSeen( void ) const = 0;
-	virtual void MarkLastKnownPositionAsSeen( void ) = 0;
-	virtual const CNavArea *GetLastKnownArea( void ) const = 0;
-	virtual float GetTimeSinceLastKnown( void ) const = 0;
-	virtual float GetTimeSinceBecameKnown( void ) const = 0;
-	virtual void UpdateVisibilityStatus( bool visible ) = 0;
-	virtual bool IsVisibleInFOVNow( void ) const = 0;
-	virtual bool IsVisibleRecently( void ) const = 0;
-	virtual float GetTimeSinceBecameVisible( void ) const = 0;
-	virtual float GetTimeWhenBecameVisible( void ) const = 0;
-	virtual float GetTimeSinceLastSeen( void ) const = 0;
-	virtual bool WasEverVisible( void ) const = 0;
-	virtual bool IsObsolete( void ) const = 0;
-	virtual bool operator==( const CKnownEntity &other ) const = 0;
-	virtual bool Is( CBaseEntity *who ) const = 0;
-};
-
-class IVision : public INextBotComponent
-{
-public:
-	virtual ~IVision() = 0;
-
-	virtual void Reset( void ) = 0;									// reset to initial state
-	virtual void Update( void ) = 0;								// update internal state
-
-	//-- attention/short term memory interface follows ------------------------------------------
-
-	//
-	// WARNING: Do not keep CKnownEntity pointers returned by these methods, as they can be invalidated/freed 
-	//
-
-	/**
-	 * Iterate each interesting entity we are aware of.
-	 * If functor returns false, stop iterating and return false.
-	 * NOTE: known.GetEntity() is guaranteed to be non-NULL
-	 */
-	virtual bool ForEachKnownEntity( IForEachKnownEntity &func ) = 0;
-
-	virtual void CollectKnownEntities( CUtlVector< CKnownEntity > *knownVector ) = 0;	// populate given vector with all currently known entities
-
-	virtual const CKnownEntity *GetPrimaryKnownThreat( bool onlyVisibleThreats = false ) const = 0;	// return the biggest threat to ourselves that we are aware of
-	virtual float GetTimeSinceVisible( int team ) const = 0;				// return time since we saw any member of the given team
-
-	virtual const CKnownEntity *GetClosestKnown( int team = TEAM_ANY ) const = 0;	// return the closest known entity
-	virtual int GetKnownCount( int team, bool onlyVisible = false, float rangeLimit = -1.0f ) const = 0;		// return the number of entities on the given team known to us closer than rangeLimit
-
-	virtual const CKnownEntity *GetClosestKnown( const INextBotEntityFilter &filter ) const = 0;	// return the closest known entity that passes the given filter
-
-	virtual const CKnownEntity *GetKnown( const CBaseEntity *entity ) const = 0;		// given an entity, return our known version of it (or NULL if we don't know of it)
-
-	// Introduce a known entity into the system. Its position is assumed to be known
-	// and will be updated, and it is assumed to not yet have been seen by us, allowing for learning
-	// of known entities by being told about them, hearing them, etc.
-	virtual void AddKnownEntity( CBaseEntity *entity ) = 0;
-
-	virtual void ForgetEntity( CBaseEntity *forgetMe ) = 0;			// remove the given entity from our awareness (whether we know if it or not)
-	virtual void ForgetAllKnownEntities( void ) = 0;
-
-	//-- physical vision interface follows ------------------------------------------------------
-
-	/**
-	 * Populate "potentiallyVisible" with the set of all entities we could potentially see. 
-	 * Entities in this set will be tested for visibility/recognition in IVision::Update()
-	 */
-	virtual void CollectPotentiallyVisibleEntities( CUtlVector< CBaseEntity * > *potentiallyVisible ) = 0;
-
-	virtual float GetMaxVisionRange( void ) const = 0;				// return maximum distance vision can reach
-	virtual float GetMinRecognizeTime( void ) const = 0;			// return VISUAL reaction time
-
-	/**
-	 * IsAbleToSee() returns true if the viewer can ACTUALLY SEE the subject or position,
-	 * taking into account blindness, smoke effects, invisibility, etc.
-	 * If 'visibleSpot' is non-NULL, the highest priority spot on the subject that is visible is returned.
-	 */ 
-	virtual bool IsAbleToSee( CBaseEntity *subject, FieldOfViewCheckType checkFOV, Vector *visibleSpot = NULL ) const = 0;
-	virtual bool IsAbleToSee( const Vector &pos, FieldOfViewCheckType checkFOV ) const = 0;
-
-	virtual bool IsIgnored( CBaseEntity *subject ) const = 0;		// return true to completely ignore this entity (may not be in sight when this is called)
-	virtual bool IsVisibleEntityNoticed( CBaseEntity *subject ) const = 0;		// return true if we 'notice' the subject, even though we have LOS to it
-
-	/**
-	 * Check if 'subject' is within the viewer's field of view
-	 */
-	virtual bool IsInFieldOfView( const Vector &pos ) const = 0;
-	virtual bool IsInFieldOfView( CBaseEntity *subject ) const = 0;
-	virtual float GetDefaultFieldOfView( void ) const = 0;			// return default FOV in degrees
-	virtual float GetFieldOfView( void ) const = 0;					// return FOV in degrees
-	virtual void SetFieldOfView( float horizAngle ) = 0;			// angle given in degrees
-
-	virtual bool IsLineOfSightClear( const Vector &pos ) const = 0;	// return true if the ray to the given point is unobstructed
-
-	/**
-	 * Returns true if the ray between the position and the subject is unobstructed.
-	 * A visible spot on the subject is returned in 'visibleSpot'.
-	 */
-	virtual bool IsLineOfSightClearToEntity( const CBaseEntity *subject, Vector *visibleSpot = NULL ) const = 0;
-
-	/// @todo: Implement LookAt system
-	virtual bool IsLookingAt( const Vector &pos, float cosTolerance = 0.95f ) const = 0;					// are we looking at the given position
-	virtual bool IsLookingAt( const CBaseCombatCharacter *actor, float cosTolerance = 0.95f ) const = 0;	// are we looking at the given actor
+	CBaseCombatCharacter *HookGetEntity( void )
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, (CBaseCombatCharacter *)getvars().pEntity);
+	}
+	class NextBotCombatCharacter *HookGetNextBotCombatCharacter( void )
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, nullptr);
+	}
+	
+	void HookEntityDtor()
+	{
+		CBaseEntity *pEntity = META_IFACEPTR(CBaseEntity);
+		
+		SH_REMOVE_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(this, &INextBotCustom::HookEntityDtor), false);
+		SH_REMOVE_MANUALHOOK(MyNextBotPointer, pEntity, SH_MEMBER(this, &INextBotCustom::HookMyNextBotPointer), false);
+		SH_REMOVE_MANUALHOOK(PerformCustomPhysics, pEntity, SH_MEMBER(this, &INextBotCustom::HookPerformCustomPhysics), false);
+		SH_REMOVE_MANUALHOOK(IsAreaTraversable, pEntity, SH_MEMBER(this, &INextBotCustom::HookIsAreaTraversable), false);
+		//SH_REMOVE_MANUALHOOK(Spawn, pEntity, SH_MEMBER(this, &INextBotCustom::HookSpawn), true);
+		
+		delete this;
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	INextBot *HookMyNextBotPointer()
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, this);
+	}
+	
+	bool HookIsAreaTraversable(const CNavArea *area);
+	
+	void HookPerformCustomPhysics( Vector *pNewPosition, Vector *pNewVelocity, QAngle *pNewAngles, QAngle *pNewAngVelocity );
+	
+	void HookSpawn()
+	{
+		CBaseEntity *pEntity = META_IFACEPTR(CBaseEntity);
+		
+		Reset();
+		
+		pEntity->SetMoveType(MOVETYPE_CUSTOM);
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	static INextBotCustom *create(CBaseEntity *pEntity);
 };
 
 class ILocomotion : public INextBotComponent
@@ -1140,6 +1214,106 @@ public:
 
 	virtual void AdjustPosture( const Vector &moveGoal ) = 0;
 	virtual void StuckMonitor( void ) = 0;
+	
+	void TraceHull( const Vector& start, const Vector& end, const Vector &mins, const Vector &maxs, unsigned int fMask, ITraceFilter *pFilter, trace_t *pTrace ) const
+	{
+	//	VPROF_BUDGET( "ILocomotion::TraceHull", "TraceHull" );
+		Ray_t ray;
+		ray.Init( start, end, mins, maxs );
+		enginetrace->TraceRay( ray, fMask, pFilter, pTrace );
+	}
+	
+	Vector m_motionVector;
+	Vector m_groundMotionVector;
+	float m_speed;
+	float m_groundSpeed;
+
+	// stuck monitoring
+	bool m_isStuck;									// if true, we are stuck
+	IntervalTimer m_stuckTimer;						// how long we've been stuck
+	CountdownTimer m_stillStuckTimer;				// for resending stuck events
+	Vector m_stuckPos;								// where we got stuck
+	IntervalTimer m_moveRequestTimer;
+};
+
+void INextBotCustom::HookPerformCustomPhysics( Vector *pNewPosition, Vector *pNewVelocity, QAngle *pNewAngles, QAngle *pNewAngVelocity )
+{
+	ILocomotion *mover = GetLocomotionInterface();
+	if ( mover )
+	{
+		// hack to keep ground entity from being NULL'd when Z velocity is positive
+		getvars().pEntity->SetGroundEntity( mover->GetGround() );
+	}
+	
+	RETURN_META(MRES_SUPERCEDE);
+}
+
+bool INextBotCustom::HookIsAreaTraversable(const CNavArea *area)
+{
+	if ( !area )
+		RETURN_META_VALUE(MRES_SUPERCEDE, false);
+	ILocomotion *mover = GetLocomotionInterface();
+	if ( mover && !mover->IsAreaTraversable( area ) )
+		RETURN_META_VALUE(MRES_SUPERCEDE, false);
+	RETURN_META_VALUE(MRES_SUPERCEDE, SH_MCALL(getvars().pEntity, IsAreaTraversable)(area));
+}
+
+class NextBotGroundLocomotion : public ILocomotion
+{
+public:
+	virtual const Vector &GetAcceleration( void ) = 0;	// return current world space acceleration
+	virtual void SetAcceleration( const Vector &accel ) = 0;	// set world space acceleration
+	virtual void SetVelocity( const Vector &vel ) = 0;		// set world space velocity
+	virtual float GetGravity( void ) = 0;					// return gravity force acting on bot
+	virtual float GetFrictionForward( void ) = 0;			// return magnitude of forward friction
+	virtual float GetFrictionSideways( void ) = 0;		// return magnitude of lateral friction
+	virtual float GetMaxYawRate( void ) = 0;				// return max rate of yaw rotation
+	
+	NextBotCombatCharacter *m_nextBot;
+	
+	Vector m_priorPos;										// last update's position
+	Vector m_lastValidPos;									// last valid position (not interpenetrating)
+	
+	Vector m_acceleration;
+	Vector m_velocity;
+	
+	float m_desiredSpeed;									// speed bot wants to be moving
+	float m_actualSpeed;									// actual speed bot is moving
+
+	float m_maxRunSpeed;
+
+	float m_forwardLean;
+	float m_sideLean;
+	QAngle m_desiredLean;
+	
+	bool m_isJumping;										// if true, we have jumped and have not yet hit the ground
+	bool m_isJumpingAcrossGap;								// if true, we have jumped across a gap and have not yet hit the ground
+	EHANDLE m_ground;										// have to manage this ourselves, since MOVETYPE_CUSTOM always NULLs out GetGroundEntity()
+	Vector m_groundNormal;									// surface normal of the ground we are in contact with
+	bool m_isClimbingUpToLedge;									// true if we are jumping up to an adjacent ledge
+	Vector m_ledgeJumpGoalPos;
+	bool m_isUsingFullFeetTrace;							// true if we're in the air and tracing the lowest StepHeight in ResolveCollision
+
+	const CNavLadder *m_ladder;								// ladder we are currently climbing/descending
+	const CNavArea *m_ladderDismountGoal;					// the area we enter when finished with our ladder move
+	bool m_isGoingUpLadder;									// if false, we're going down
+
+	CountdownTimer m_inhibitObstacleAvoidanceTimer;			// when active, turn off path following feelers
+
+	CountdownTimer m_wiggleTimer;							// for wiggling
+	NavRelativeDirType m_wiggleDirection;
+
+	mutable Vector m_eyePos;								// for use with GetEyes(), etc.
+
+	Vector m_moveVector;									// the direction of our motion in XY plane
+	float m_moveYaw;										// global yaw of movement direction
+
+	Vector m_accumApproachVectors;							// weighted sum of Approach() calls since last update
+	float m_accumApproachWeights;
+	bool m_bRecomputePostureOnCollision;
+
+	CountdownTimer m_ignorePhysicsPropTimer;				// if active, don't collide with physics props (because we got stuck in one)
+	EHANDLE m_ignorePhysicsProp;							// which prop to ignore
 };
 
 class IBody : public INextBotComponent
@@ -1265,6 +1439,701 @@ public:
 	virtual unsigned int GetCollisionGroup( void ) { return COLLISION_GROUP_NONE; }
 };
 
+enum QueryResultType
+{
+	ANSWER_NO,
+	ANSWER_YES,
+	ANSWER_UNDEFINED
+};
+class CKnownEntity;
+
+class IContextualQuery
+{
+public:
+	virtual ~IContextualQuery() = 0;
+
+	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const = 0;		// if the desired item was available right now, should we pick it up?
+	virtual QueryResultType			ShouldHurry( const INextBot *me ) const = 0;							// are we in a hurry?
+	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const = 0;							// is it time to retreat?
+	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const = 0;	// should we attack "them"?
+	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const = 0;		// return true if we should wait for 'blocker' that is across our path somewhere up ahead.
+
+	virtual Vector					SelectTargetPoint( const INextBot *me, const CBaseCombatCharacter *subject ) const = 0;		// given a subject, return the world space position we should aim at
+
+	/**
+	 * Allow bot to approve of positions game movement tries to put him into.
+	 * This is most useful for bots derived from CBasePlayer that go through
+	 * the player movement system.
+	 */
+	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const = 0;
+
+	virtual const CKnownEntity *	SelectMoreDangerousThreat( const INextBot *me, 
+															   const CBaseCombatCharacter *subject,
+															   const CKnownEntity *threat1, 
+															   const CKnownEntity *threat2 ) const = 0;	// return the more dangerous of the two threats to 'subject', or NULL if we have no opinion
+};
+
+class IIntention : public INextBotComponent, public IContextualQuery
+{
+public:
+	
+};
+
+bool IgnoreActorsTraceFilterFunction( IHandleEntity *pServerEntity, int contentsMask )
+{
+	CBaseEntity *entity = EntityFromEntityHandle( pServerEntity );
+	return ( entity->MyCombatCharacterPointer() == NULL );	// includes all bots, npcs, players, and TF2 buildings
+}
+
+CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int collisionGroup,
+									   ShouldHitFunc_t pExtraShouldHitFunc )
+{
+	m_pPassEnt = passedict;
+	m_collisionGroup = collisionGroup;
+	m_pExtraShouldHitCheckFunction = pExtraShouldHitFunc;
+}
+
+bool CTraceFilterSimple::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
+{
+	return call_mfunc<bool, CTraceFilterSimple, IHandleEntity *, int>(this, CTraceFilterSimpleShouldHitEntity, pHandleEntity, contentsMask);
+}
+
+class NextBotTraceFilterIgnoreActors : public CTraceFilterSimple
+{
+public:
+	NextBotTraceFilterIgnoreActors( const IHandleEntity *passentity, int collisionGroup ) : CTraceFilterSimple( passentity, collisionGroup, IgnoreActorsTraceFilterFunction )
+	{
+	}
+};
+
+enum NextBotDebugType 
+{
+	NEXTBOT_DEBUG_NONE = 0,
+	NEXTBOT_BEHAVIOR	= 0x0001,
+	NEXTBOT_LOOK_AT		= 0x0002,
+	NEXTBOT_PATH		= 0x0004,
+	NEXTBOT_ANIMATION	= 0x0008,
+	NEXTBOT_LOCOMOTION	= 0x0010,
+	NEXTBOT_VISION		= 0x0020,
+	NEXTBOT_HEARING		= 0x0040,
+	NEXTBOT_EVENTS		= 0x0080,
+	NEXTBOT_ERRORS		= 0x0100,		// when things go wrong, like being stuck
+
+	NEXTBOT_DEBUG_ALL	= 0xFFFF
+};
+
+SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetDeathDropHeight, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetRunSpeed, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetWalkSpeed, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetMaxAcceleration, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetMaxDeceleration, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetSpeedLimit, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetTraversableSlopeLimit, SH_NOATTRIB, 0, float);
+
+SH_DECL_HOOK0(NextBotGroundLocomotion, GetGravity, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionForward, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionSideways, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(NextBotGroundLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
+
+class NextBotGroundLocomotionCustom : public NextBotGroundLocomotion
+{
+public:
+	struct vars_t
+	{
+		float step = 18.0f;
+		float jump = 180.0f;
+		float death = 200.0f;
+		float run = 150.0f;
+		float walk = 75.0f;
+		float accel = 500.0f;
+		float deaccel = 500.0f;
+		float limit = 99999999.9f;
+		float slope = 0.6f;
+		
+		float gravity = 1000.0f;
+		float fricforward = 0.0f;
+		float fricsideway = 3.0f;
+		float yaw = 250.0f;
+	};
+	
+	void dtor()
+	{
+		getvars().~vars_t();
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	float HookGetMaxJumpHeight()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().jump); }
+	float HookGetStepHeight()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().step); }
+	float HookGetDeathDropHeight()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().death); }
+	float HookGetRunSpeed()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().run); }
+	float HookGetWalkSpeed()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().walk); }
+	float HookGetMaxAcceleration()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().accel); }
+	float HookGetMaxDeceleration()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().deaccel); }
+	float HookGetSpeedLimit()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().limit); }
+	float HookGetTraversableSlopeLimit()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().slope); }
+	
+	float HookGetGravity()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().gravity); }
+	float HookGetFrictionForward()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricforward); }
+	float HookGetFrictionSideways()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricsideway); }
+	float HookGetMaxYawRate()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().yaw); }
+	
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + sizeof(NextBotGroundLocomotion)); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+	
+	void HookReset()
+	{
+		m_bRecomputePostureOnCollision = false;
+		m_ignorePhysicsPropTimer.Invalidate();
+
+		m_nextBot = (NextBotCombatCharacter *)( GetBot()->GetEntity() );
+		
+		m_desiredSpeed = 0.0f;
+		m_velocity = vec3_origin;
+		m_acceleration = vec3_origin;
+
+		m_desiredLean.x = 0.0f;
+		m_desiredLean.y = 0.0f;
+		m_desiredLean.z = 0.0f;
+		
+		m_ladder = NULL;
+
+		m_isJumping = false;
+		m_isJumpingAcrossGap = false;
+		m_ground = NULL;
+		m_groundNormal = Vector( 0, 0, 1.0f );
+		m_isClimbingUpToLedge = false;
+		m_isUsingFullFeetTrace = false;
+
+		m_moveVector = Vector( 1, 0, 0 );
+		
+		m_priorPos = m_bot->GetPosition();
+		m_lastValidPos = m_bot->GetPosition();
+
+		m_inhibitObstacleAvoidanceTimer.Invalidate();
+
+		m_accumApproachVectors = vec3_origin;
+		m_accumApproachWeights = 0.0f;
+	}
+	
+	const Vector &HookGetFeet()
+	{
+		return m_bot->GetPosition();
+	}
+	
+	bool DidJustJump( void )
+	{
+		return IsClimbingOrJumping() && (((CBaseEntity *)m_nextBot)->GetAbsVelocity().z > 0.0f);
+	}
+	
+	void HookApplyAccumulatedApproach( void )
+	{
+		Vector rawPos = GetFeet();
+
+		const float deltaT = GetUpdateInterval();
+
+		if ( deltaT <= 0.0f )
+			return;
+
+		if ( m_accumApproachWeights > 0.0f )
+		{
+			Vector approachDelta = m_accumApproachVectors / m_accumApproachWeights;
+
+			// limit total movement to our max speed
+			float maxMove = GetRunSpeed() * deltaT;
+
+			float desiredMove = approachDelta.NormalizeInPlace();
+			if ( desiredMove > maxMove )
+			{
+				desiredMove = maxMove;
+			}
+
+			rawPos += desiredMove * approachDelta;
+
+			m_accumApproachVectors = vec3_origin;
+			m_accumApproachWeights = 0.0f;
+		}
+
+		// can only move in 2D - geometry moves us up and down
+		Vector pos( rawPos.x, rawPos.y, GetFeet().z );
+			
+		if ( !GetBot()->GetBodyInterface()->IsPostureMobile() )
+		{
+			// body is not in a movable state right now
+			return;
+		}
+
+		Vector currentPos = m_bot->GetPosition();
+
+		// compute unit vector to goal position
+		m_moveVector = pos - currentPos;
+		m_moveVector.z = 0.0f;
+		float change = m_moveVector.NormalizeInPlace();
+
+		const float epsilon = 0.001f;
+		if ( change < epsilon )
+		{
+			// no motion
+			m_forwardLean = 0.0f;
+			m_sideLean = 0.0f;
+			return;
+		}
+
+	/*	
+		// lean forward/backward based on acceleration
+		float desiredLean = m_acceleration / NextBotLeanForwardAccel.GetFloat();
+		QAngle lean = GetDesiredLean();
+		lean.x = NextBotLeanMaxAngle.GetFloat() * clamp( desiredLean, -1.0f, 1.0f );	
+		SetDesiredLean( lean );
+	*/	
+
+		Vector newPos;
+
+		// if we just started a jump, don't snap to the ground - let us get in the air first
+		if ( DidJustJump() || !IsOnGround() )
+		{
+			if ( false && m_isClimbingUpToLedge )	// causes bots to hang in air stuck against edges
+			{
+				// drive towards the approach position in XY to help reach ledge
+				m_moveVector = m_ledgeJumpGoalPos - currentPos;
+				m_moveVector.z = 0.0f;
+				m_moveVector.NormalizeInPlace();
+				
+				m_acceleration += GetMaxAcceleration() * m_moveVector;
+			}
+		}
+		else if ( IsOnGround() )
+		{
+			// on the ground - move towards the approach position
+			m_isClimbingUpToLedge = false;
+			
+			// snap forward movement vector along floor
+			const Vector &groundNormal = GetGroundNormal();
+			
+			Vector left( -m_moveVector.y, m_moveVector.x, 0.0f );
+			m_moveVector = CrossProduct( left, groundNormal );
+			m_moveVector.NormalizeInPlace();
+			
+			// limit maximum forward speed from self-acceleration
+			float forwardSpeed = DotProduct( m_velocity, m_moveVector );
+			
+			float maxSpeed = MIN( m_desiredSpeed, GetSpeedLimit() );
+			
+			if ( forwardSpeed < maxSpeed )
+			{
+				float ratio = ( forwardSpeed <= 0.0f ) ? 0.0f : ( forwardSpeed / maxSpeed );
+				float governor = 1.0f - ( ratio * ratio * ratio * ratio );
+				
+				// accelerate towards goal
+				m_acceleration += governor * GetMaxAcceleration() * m_moveVector;
+			}
+		}
+	}
+	
+	Vector ResolveCollision( const Vector &from, const Vector &to, int recursionLimit )
+	{
+		return call_mfunc<Vector, NextBotGroundLocomotion, const Vector &, const Vector &, int>(this, NextBotGroundLocomotionResolveCollision, from, to, recursionLimit);
+	}
+	
+	void HookUpdatePosition( const Vector &newPos )
+	{
+		if ( NextBotStop->GetBool() || (((CBaseEntity *)m_nextBot)->GetFlags() & FL_FROZEN) != 0 || newPos == m_bot->GetPosition() )
+		{
+			return;
+		}
+
+		// avoid very nearby Actors to simulate "mushy" collisions between actors in contact with each other
+		//Vector adjustedNewPos = ResolveZombieCollisions( newPos );
+		Vector adjustedNewPos = newPos;
+
+		// check for collisions during move and resolve them	
+		const int recursionLimit = 3;
+		Vector safePos = ResolveCollision( m_bot->GetPosition(), adjustedNewPos, recursionLimit );
+
+		// set the bot's position
+		if ( GetBot()->GetIntentionInterface()->IsPositionAllowed( GetBot(), safePos ) != ANSWER_NO )
+		{
+			m_bot->SetPosition( safePos );
+		}
+	}
+	
+	void HookUpdateGroundConstraint( void )
+	{
+		// if we're up on the upward arc of our jump, don't interfere by snapping to ground
+		// don't do ground constraint if we're climbing a ladder
+		if ( DidJustJump() || IsAscendingOrDescendingLadder() )
+		{
+			m_isUsingFullFeetTrace = false;
+			return;
+		}
+			
+		IBody *body = GetBot()->GetBodyInterface();
+		if ( body == NULL )
+		{
+			return;
+		}
+
+		float halfWidth = body->GetHullWidth()/2.0f;
+		
+		// since we only care about ground collisions, keep hull short to avoid issues with low ceilings
+		/// @TODO: We need to also check actual hull height to avoid interpenetrating the world
+		float hullHeight = GetStepHeight();
+		
+		// always need tolerance even when jumping/falling to make sure we detect ground penetration
+		// must be at least step height to avoid 'falling' down stairs
+		const float stickToGroundTolerance = GetStepHeight() + 0.01f;
+
+		trace_t ground;
+		NextBotTraceFilterIgnoreActors filter( ((CBaseEntity *)m_nextBot), body->GetCollisionGroup() );
+
+		TraceHull( m_bot->GetPosition() + Vector( 0, 0, GetStepHeight() + 0.001f ),
+						m_bot->GetPosition() + Vector( 0, 0, -stickToGroundTolerance ), 
+						Vector( -halfWidth, -halfWidth, 0 ), 
+						Vector( halfWidth, halfWidth, hullHeight ), 
+						body->GetSolidMask(), &filter, &ground );
+
+		if ( ground.startsolid )
+		{
+			// we're inside the ground - bad news
+			if ( GetBot()->IsDebugging( NEXTBOT_LOCOMOTION ) && !( gpGlobals->framecount % 60 ) )
+			{
+				DevMsg( "%3.2f: Inside ground, ( %.0f, %.0f, %.0f )\n", gpGlobals->curtime, m_bot->GetPosition().x, m_bot->GetPosition().y, m_bot->GetPosition().z );
+			}
+			return;
+		}
+
+		if ( ground.fraction < 1.0f )
+		{
+			// there is ground below us
+			m_groundNormal = ground.plane.normal;
+
+			m_isUsingFullFeetTrace = false;
+			
+			// zero velocity normal to the ground
+			float normalVel = DotProduct( m_groundNormal, m_velocity );
+			m_velocity -= normalVel * m_groundNormal;
+			
+			// check slope limit
+			if ( ground.plane.normal.z < GetTraversableSlopeLimit() )
+			{
+				// too steep to stand here
+
+				// too steep to be ground - treat it like a wall hit
+				if ( ( m_velocity.x * ground.plane.normal.x + m_velocity.y * ground.plane.normal.y ) <= 0.0f )
+				{
+					GetBot()->OnContact( ground.m_pEnt, &ground );			
+				}
+				
+				// we're contacting some kind of ground
+				// zero accelerations normal to the ground
+
+				float normalAccel = DotProduct( m_groundNormal, m_acceleration );
+				m_acceleration -= normalAccel * m_groundNormal;
+
+				if ( GetBot()->IsDebugging( NEXTBOT_LOCOMOTION ) )
+				{
+					DevMsg( "%3.2f: NextBotGroundLocomotion - Too steep to stand here\n", gpGlobals->curtime );
+					//NDebugOverlay::Line( GetFeet(), GetFeet() + 20.0f * ground.plane.normal, 255, 150, 0, true, 5.0f );
+				}
+
+				// clear out upward velocity so we don't walk up lightpoles
+				m_velocity.z = MIN( 0, m_velocity.z );
+				m_acceleration.z = MIN( 0, m_acceleration.z );
+
+				return;
+			}
+			
+			// inform other components of collision if we didn't land on the 'world'
+			if ( ground.m_pEnt && !ground.m_pEnt->IsWorld() )
+			{
+				GetBot()->OnContact( ground.m_pEnt, &ground );
+			}
+
+			// snap us to the ground 
+			m_bot->SetPosition( ground.endpos );
+
+			if ( !IsOnGround() )
+			{
+				// just landed
+				((CBaseEntity *)m_nextBot)->SetGroundEntity( ground.m_pEnt );
+				m_ground = ground.m_pEnt;
+
+				// landing stops any jump in progress
+				m_isJumping = false;
+				m_isJumpingAcrossGap = false;
+
+				GetBot()->OnLandOnGround( ground.m_pEnt );
+			}
+		}
+		else
+		{
+			// not on the ground
+			if ( IsOnGround() )
+			{
+				GetBot()->OnLeaveGround( ((CBaseEntity *)m_nextBot)->GetGroundEntity() );
+				if ( !IsClimbingUpToLedge() && !IsJumpingAcrossGap() )
+				{
+					m_isUsingFullFeetTrace = true; // We're in the air and there's space below us, so use the full trace
+					m_acceleration.z -= GetGravity(); // start our gravity now
+				}
+			}		
+		}
+	}
+	
+	static bool vtable_assigned;
+	
+	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg)
+	{
+		NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeof(NextBotGroundLocomotion) + sizeof(vars_t));
+		call_mfunc<void, NextBotGroundLocomotion, INextBot *>(bytes, NextBotGroundLocomotionCTOR, bot);
+		new (bytes->vars_ptr()) vars_t();
+		
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::dtor), false);
+	
+		SH_ADD_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxJumpHeight), false);
+		SH_ADD_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetStepHeight), false);
+		SH_ADD_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetDeathDropHeight), false);
+		SH_ADD_HOOK(ILocomotion, GetRunSpeed, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetRunSpeed), false);
+		SH_ADD_HOOK(ILocomotion, GetWalkSpeed, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetWalkSpeed), false);
+		SH_ADD_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxAcceleration), false);
+		SH_ADD_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxDeceleration), false);
+		SH_ADD_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetSpeedLimit), false);
+		SH_ADD_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit), false);
+		
+		SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetGravity), false);
+		SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
+		SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionSideways), false);
+		SH_ADD_HOOK(NextBotGroundLocomotion, GetMaxYawRate, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxYawRate), false);
+		
+		if(!vtable_assigned) {
+			void **vtable = *(void ***)bytes;
+		
+			SourceHook::SetMemAccess(vtable, sizeof(void **), SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+			
+			vtable[vfunc_index(&NextBotGroundLocomotion::Reset)] = func_to_void(&NextBotGroundLocomotionCustom::HookReset);
+			vtable[vfunc_index(&NextBotGroundLocomotion::GetFeet)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetFeet);
+			
+			vtable_assigned = true;
+		}
+		
+		if(!reg) {
+			bot->m_componentList = bytes->m_nextComponent;
+			bytes->m_nextComponent = nullptr;
+		}
+		
+		return bytes;
+	}
+};
+
+bool NextBotGroundLocomotionCustom::vtable_assigned = false;
+
+DETOUR_DECL_MEMBER0(ApplyAccumulatedApproach, void)
+{
+	((NextBotGroundLocomotionCustom *)this)->HookApplyAccumulatedApproach();
+}
+
+DETOUR_DECL_MEMBER1(UpdatePosition, void, const Vector &, pos)
+{
+	((NextBotGroundLocomotionCustom *)this)->HookUpdatePosition(pos);
+}
+
+DETOUR_DECL_MEMBER0(UpdateGroundConstraint, void)
+{
+	((NextBotGroundLocomotionCustom *)this)->HookUpdateGroundConstraint();
+}
+
+SH_DECL_HOOK0(INextBot, GetEntity, SH_NOATTRIB, 0, CBaseCombatCharacter *);
+SH_DECL_HOOK0(INextBot, GetNextBotCombatCharacter, SH_NOATTRIB, 0, NextBotCombatCharacter *);
+
+INextBotCustom *INextBotCustom::create(CBaseEntity *pEntity)
+{
+	INextBotCustom *bytes = (INextBotCustom *)calloc(1, sizeof(INextBot));
+	call_mfunc<void>(bytes, INextBotCTOR);
+	new (bytes->vars_ptr()) vars_t();
+	
+	bytes->getvars().pEntity = pEntity;
+	
+	SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &INextBotCustom::dtor), false);
+	
+	SH_ADD_HOOK(INextBot, GetEntity, bytes, SH_MEMBER(bytes, &INextBotCustom::HookGetEntity), false);
+	SH_ADD_HOOK(INextBot, GetNextBotCombatCharacter, bytes, SH_MEMBER(bytes, &INextBotCustom::HookGetNextBotCombatCharacter), false);
+	
+	SH_ADD_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(bytes, &INextBotCustom::HookEntityDtor), false);
+	SH_ADD_MANUALHOOK(MyNextBotPointer, pEntity, SH_MEMBER(bytes, &INextBotCustom::HookMyNextBotPointer), false);
+	SH_ADD_MANUALHOOK(PerformCustomPhysics, pEntity, SH_MEMBER(bytes, &INextBotCustom::HookPerformCustomPhysics), false);
+	//SH_ADD_MANUALHOOK(Spawn, pEntity, SH_MEMBER(bytes, &INextBotCustom::HookSpawn), true);
+	
+	if(pEntity->MyCombatCharacterPointer()) {
+		SH_ADD_MANUALHOOK(IsAreaTraversable, pEntity, SH_MEMBER(bytes, &INextBotCustom::HookIsAreaTraversable), false);
+	}
+	
+	bytes->Reset();
+	pEntity->SetMoveType(MOVETYPE_CUSTOM);
+	
+	return bytes;
+}
+
+INextBotComponent::INextBotComponent( INextBot *bot, bool reg )
+{
+	m_curInterval = TICK_INTERVAL;
+	m_lastUpdateTime = 0;
+	m_bot = bot;
+	
+	// register this component with the bot
+	if(reg) {
+		bot->RegisterComponent( this );
+	}
+}
+
+INextBotComponent::~INextBotComponent()
+{
+	m_bot->UnregisterComponent( this );
+}
+
+class CKnownEntity;
+
+class IForEachKnownEntity
+{
+public:
+	virtual bool Inspect( const CKnownEntity &known ) = 0;
+};
+
+class INextBotEntityFilter
+{
+public:
+	// return true if the given entity passes this filter
+	virtual bool IsAllowed( CBaseEntity *entity ) = 0;
+};
+
+enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
+
+class CKnownEntity
+{
+public:
+	virtual ~CKnownEntity() = 0;
+	virtual void Destroy( void ) = 0;
+	virtual void UpdatePosition( void ) = 0;
+	virtual CBaseEntity *GetEntity( void ) const = 0;
+	virtual const Vector &GetLastKnownPosition( void ) const = 0;
+	virtual bool HasLastKnownPositionBeenSeen( void ) const = 0;
+	virtual void MarkLastKnownPositionAsSeen( void ) = 0;
+	virtual const CNavArea *GetLastKnownArea( void ) const = 0;
+	virtual float GetTimeSinceLastKnown( void ) const = 0;
+	virtual float GetTimeSinceBecameKnown( void ) const = 0;
+	virtual void UpdateVisibilityStatus( bool visible ) = 0;
+	virtual bool IsVisibleInFOVNow( void ) const = 0;
+	virtual bool IsVisibleRecently( void ) const = 0;
+	virtual float GetTimeSinceBecameVisible( void ) const = 0;
+	virtual float GetTimeWhenBecameVisible( void ) const = 0;
+	virtual float GetTimeSinceLastSeen( void ) const = 0;
+	virtual bool WasEverVisible( void ) const = 0;
+	virtual bool IsObsolete( void ) const = 0;
+	virtual bool operator==( const CKnownEntity &other ) const = 0;
+	virtual bool Is( CBaseEntity *who ) const = 0;
+};
+
+class IVision : public INextBotComponent
+{
+public:
+	virtual ~IVision() = 0;
+
+	virtual void Reset( void ) = 0;									// reset to initial state
+	virtual void Update( void ) = 0;								// update internal state
+
+	//-- attention/short term memory interface follows ------------------------------------------
+
+	//
+	// WARNING: Do not keep CKnownEntity pointers returned by these methods, as they can be invalidated/freed 
+	//
+
+	/**
+	 * Iterate each interesting entity we are aware of.
+	 * If functor returns false, stop iterating and return false.
+	 * NOTE: known.GetEntity() is guaranteed to be non-NULL
+	 */
+	virtual bool ForEachKnownEntity( IForEachKnownEntity &func ) = 0;
+
+	virtual void CollectKnownEntities( CUtlVector< CKnownEntity > *knownVector ) = 0;	// populate given vector with all currently known entities
+
+	virtual const CKnownEntity *GetPrimaryKnownThreat( bool onlyVisibleThreats = false ) const = 0;	// return the biggest threat to ourselves that we are aware of
+	virtual float GetTimeSinceVisible( int team ) const = 0;				// return time since we saw any member of the given team
+
+	virtual const CKnownEntity *GetClosestKnown( int team = TEAM_ANY ) const = 0;	// return the closest known entity
+	virtual int GetKnownCount( int team, bool onlyVisible = false, float rangeLimit = -1.0f ) const = 0;		// return the number of entities on the given team known to us closer than rangeLimit
+
+	virtual const CKnownEntity *GetClosestKnown( const INextBotEntityFilter &filter ) const = 0;	// return the closest known entity that passes the given filter
+
+	virtual const CKnownEntity *GetKnown( const CBaseEntity *entity ) const = 0;		// given an entity, return our known version of it (or NULL if we don't know of it)
+
+	// Introduce a known entity into the system. Its position is assumed to be known
+	// and will be updated, and it is assumed to not yet have been seen by us, allowing for learning
+	// of known entities by being told about them, hearing them, etc.
+	virtual void AddKnownEntity( CBaseEntity *entity ) = 0;
+
+	virtual void ForgetEntity( CBaseEntity *forgetMe ) = 0;			// remove the given entity from our awareness (whether we know if it or not)
+	virtual void ForgetAllKnownEntities( void ) = 0;
+
+	//-- physical vision interface follows ------------------------------------------------------
+
+	/**
+	 * Populate "potentiallyVisible" with the set of all entities we could potentially see. 
+	 * Entities in this set will be tested for visibility/recognition in IVision::Update()
+	 */
+	virtual void CollectPotentiallyVisibleEntities( CUtlVector< CBaseEntity * > *potentiallyVisible ) = 0;
+
+	virtual float GetMaxVisionRange( void ) const = 0;				// return maximum distance vision can reach
+	virtual float GetMinRecognizeTime( void ) const = 0;			// return VISUAL reaction time
+
+	/**
+	 * IsAbleToSee() returns true if the viewer can ACTUALLY SEE the subject or position,
+	 * taking into account blindness, smoke effects, invisibility, etc.
+	 * If 'visibleSpot' is non-NULL, the highest priority spot on the subject that is visible is returned.
+	 */ 
+	virtual bool IsAbleToSee( CBaseEntity *subject, FieldOfViewCheckType checkFOV, Vector *visibleSpot = NULL ) const = 0;
+	virtual bool IsAbleToSee( const Vector &pos, FieldOfViewCheckType checkFOV ) const = 0;
+
+	virtual bool IsIgnored( CBaseEntity *subject ) const = 0;		// return true to completely ignore this entity (may not be in sight when this is called)
+	virtual bool IsVisibleEntityNoticed( CBaseEntity *subject ) const = 0;		// return true if we 'notice' the subject, even though we have LOS to it
+
+	/**
+	 * Check if 'subject' is within the viewer's field of view
+	 */
+	virtual bool IsInFieldOfView( const Vector &pos ) const = 0;
+	virtual bool IsInFieldOfView( CBaseEntity *subject ) const = 0;
+	virtual float GetDefaultFieldOfView( void ) const = 0;			// return default FOV in degrees
+	virtual float GetFieldOfView( void ) const = 0;					// return FOV in degrees
+	virtual void SetFieldOfView( float horizAngle ) = 0;			// angle given in degrees
+
+	virtual bool IsLineOfSightClear( const Vector &pos ) const = 0;	// return true if the ray to the given point is unobstructed
+
+	/**
+	 * Returns true if the ray between the position and the subject is unobstructed.
+	 * A visible spot on the subject is returned in 'visibleSpot'.
+	 */
+	virtual bool IsLineOfSightClearToEntity( const CBaseEntity *subject, Vector *visibleSpot = NULL ) const = 0;
+
+	/// @todo: Implement LookAt system
+	virtual bool IsLookingAt( const Vector &pos, float cosTolerance = 0.95f ) const = 0;					// are we looking at the given position
+	virtual bool IsLookingAt( const CBaseCombatCharacter *actor, float cosTolerance = 0.95f ) const = 0;	// are we looking at the given actor
+};
+
 class IBodyCustom : public IBody
 {
 public:
@@ -1341,7 +2210,7 @@ public:
 	}
 };
 
-class NextBotCombatCharacter : public CBaseCombatCharacter, INextBot
+class NextBotCombatCharacter : public CBaseCombatCharacter, public INextBot
 {
 public:
 	static NextBotCombatCharacter *create(size_t size_modifier)
@@ -1405,7 +2274,7 @@ public:
 	
 	static Path *create()
 	{
-		Path *bytes = (Path *)calloc(1, sizeofPath);
+		Path *bytes = (Path *)calloc(1, sizeof(Path));
 		call_mfunc<void>(bytes, PathCTOR);
 		return bytes;
 	}
@@ -1789,7 +2658,7 @@ class PathFollower : public Path
 public:
 	static PathFollower *create()
 	{
-		PathFollower *bytes = (PathFollower *)calloc(1, sizeofPathFollower);
+		PathFollower *bytes = (PathFollower *)calloc(1, sizeof(PathFollower));
 		call_mfunc<void>(bytes, PathFollowerCTOR);
 		return bytes;
 	}
@@ -1846,7 +2715,7 @@ class CTFPathFollower : public PathFollower
 public:
 	static CTFPathFollower *create()
 	{
-		CTFPathFollower *bytes = (CTFPathFollower *)calloc(1, sizeofCTFPathFollower);
+		CTFPathFollower *bytes = (CTFPathFollower *)calloc(1, sizeof(CTFPathFollower));
 		call_mfunc<void>(bytes, CTFPathFollowerCTOR);
 		return bytes;
 	}
@@ -1859,126 +2728,6 @@ public:
 		return m_minLookAheadRange;
 	}
 };
-
-class NextBotGroundLocomotion : public ILocomotion
-{
-public:
-	virtual const Vector &GetAcceleration( void ) = 0;	// return current world space acceleration
-	virtual void SetAcceleration( const Vector &accel ) = 0;	// set world space acceleration
-	virtual void SetVelocity( const Vector &vel ) = 0;		// set world space velocity
-	virtual float GetGravity( void ) = 0;					// return gravity force acting on bot
-	virtual float GetFrictionForward( void ) = 0;			// return magnitude of forward friction
-	virtual float GetFrictionSideways( void ) = 0;		// return magnitude of lateral friction
-	virtual float GetMaxYawRate( void ) = 0;				// return max rate of yaw rotation
-};
-
-class NextBotGroundLocomotionCustom : public NextBotGroundLocomotion
-{
-public:
-	struct vars_t
-	{
-		float step = 18.0f;
-		float jump = 180.0f;
-		float death = 200.0f;
-		float run = 150.0f;
-		float walk = 75.0f;
-		float accel = 500.0f;
-		float deaccel = 500.0f;
-		float limit = 99999999.9f;
-		float slope = 0.6f;
-		
-		float gravity = 1000.0f;
-		float fricforward = 0.0f;
-		float fricsideway = 3.0f;
-		float yaw = 250.0f;
-		
-		void *dtorPtr = nullptr;
-	};
-	
-	void dtor();
-	
-	float HookGetMaxJumpHeight()
-	{ return getvars().jump; }
-	float HookGetStepHeight()
-	{ return getvars().step; }
-	float HookGetDeathDropHeight()
-	{ return getvars().death; }
-	float HookGetRunSpeed()
-	{ return getvars().run; }
-	float HookGetWalkSpeed()
-	{ return getvars().walk; }
-	float HookGetMaxAcceleration()
-	{ return getvars().accel; }
-	float HookGetMaxDeceleration()
-	{ return getvars().deaccel; }
-	float HookGetSpeedLimit()
-	{ return getvars().limit; }
-	float HookGetTraversableSlopeLimit()
-	{ return getvars().slope; }
-	
-	float HookGetGravity()
-	{ return getvars().gravity; }
-	float HookGetFrictionForward()
-	{ return getvars().fricforward; }
-	float HookGetFrictionSideways()
-	{ return getvars().fricsideway; }
-	float HookGetMaxYawRate()
-	{ return getvars().yaw; }
-	
-	unsigned char *vars_ptr()
-	{ return (((unsigned char *)this) + sizeofNextBotGroundLocomotion); }
-	vars_t &getvars()
-	{ return *(vars_t *)vars_ptr(); }
-	
-	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg);
-};
-
-#include <sourcehook/sh_memory.h>
-
-NextBotGroundLocomotionCustom *NextBotGroundLocomotionCustom::create(INextBot *bot, bool reg)
-{
-	NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeofNextBotGroundLocomotion + sizeof(vars_t));
-	call_mfunc<void, NextBotGroundLocomotion, INextBot *>(bytes, NextBotGroundLocomotionCTOR, bot);
-	new (bytes->vars_ptr()) vars_t();
-	
-	void **vtable = *(void ***)bytes;
-	
-	SourceHook::SetMemAccess(vtable, sizeof(void **), SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
-	
-	bytes->getvars().dtorPtr = vtable[0];
-	vtable[0] = func_to_void(&NextBotGroundLocomotionCustom::dtor);
-	
-	vtable[vfunc_index(&ILocomotion::GetMaxJumpHeight)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxJumpHeight);
-	vtable[vfunc_index(&ILocomotion::GetStepHeight)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetStepHeight);
-	vtable[vfunc_index(&ILocomotion::GetDeathDropHeight)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetDeathDropHeight);
-	vtable[vfunc_index(&ILocomotion::GetRunSpeed)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetRunSpeed);
-	vtable[vfunc_index(&ILocomotion::GetWalkSpeed)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetWalkSpeed);
-	vtable[vfunc_index(&ILocomotion::GetMaxAcceleration)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxAcceleration);
-	vtable[vfunc_index(&ILocomotion::GetMaxDeceleration)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxDeceleration);
-	vtable[vfunc_index(&ILocomotion::GetSpeedLimit)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetSpeedLimit);
-	vtable[vfunc_index(&ILocomotion::GetTraversableSlopeLimit)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetTraversableSlopeLimit);
-
-	vtable[vfunc_index(&NextBotGroundLocomotion::GetGravity)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetGravity);
-	vtable[vfunc_index(&NextBotGroundLocomotion::GetFrictionForward)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetFrictionForward);
-	vtable[vfunc_index(&NextBotGroundLocomotion::GetFrictionSideways)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetFrictionSideways);
-	vtable[vfunc_index(&NextBotGroundLocomotion::GetMaxYawRate)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetMaxYawRate);
-	
-	if(!reg) {
-		bot->m_componentList = bytes->m_nextComponent;
-		bytes->m_nextComponent = nullptr;
-	}
-	
-	return bytes;
-}
-
-void NextBotGroundLocomotionCustom::dtor()
-{
-	void *dtorPtr = getvars().dtorPtr;
-	
-	getvars().~vars_t();
-	
-	call_mfunc<void>(this, dtorPtr);
-}
 
 HandleType_t PathHandleType = 0;
 HandleType_t PathFollowerHandleType = 0;
@@ -2315,6 +3064,33 @@ cell_t INextBotEntityget(IPluginContext *pContext, const cell_t *params)
 	INextBot *bot = (INextBot *)params[1];
 	
 	return gamehelpers->EntityToBCompatRef(bot->GetEntity());
+}
+
+cell_t INextBotBeginUpdate(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	return bot->BeginUpdate();
+}
+
+cell_t INextBotUpdate(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	bot->Update();
+	return 0;
+}
+
+cell_t INextBotReset(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	bot->Reset();
+	return 0;
+}
+
+cell_t INextBotEndUpdate(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	bot->EndUpdate();
+	return 0;
 }
 
 cell_t INextBotComponentBotget(IPluginContext *pContext, const cell_t *params)
@@ -3826,6 +4602,23 @@ cell_t UpdateEntityLastKnownArea(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
+cell_t MakeEntityNextBot(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	INextBot *pNextBot = pSubject->MyNextBotPointer();
+	if(pNextBot)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	return (cell_t)INextBotCustom::create(pSubject);
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -3919,6 +4712,10 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
 	{"INextBot.Entity.get", INextBotEntityget},
+	{"INextBot.BeginUpdate", INextBotBeginUpdate},
+	{"INextBot.Update", INextBotUpdate},
+	{"INextBot.EndUpdate", INextBotEndUpdate},
+	{"INextBot.Reset", INextBotReset},
 	{"INextBotComponent.Bot.get", INextBotComponentBotget},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
@@ -4005,6 +4802,7 @@ sp_nativeinfo_t natives[] =
 	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
+	{"MakeEntityNextBot", MakeEntityNextBot},
 	{NULL, NULL}
 };
 
@@ -4012,10 +4810,13 @@ bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool l
 {
 	gpGlobals = ismm->GetCGlobals();
 	GET_V_IFACE_ANY(GetEngineFactory, engine, IVEngineServer, INTERFACEVERSION_VENGINESERVER)
+	GET_V_IFACE_ANY(GetEngineFactory, enginetrace, IEngineTrace, INTERFACEVERSION_ENGINETRACE_SERVER)
+	GET_V_IFACE_ANY(GetEngineFactory, staticpropmgr, IStaticPropMgrServer, INTERFACEVERSION_STATICPROPMGR_SERVER)
 	GET_V_IFACE_CURRENT(GetEngineFactory, icvar, ICvar, CVAR_INTERFACE_VERSION);
 	g_pCVar = icvar;
 	ConVar_Register(0, this);
 	tf_nav_combat_decay_rate = g_pCVar->FindVar("tf_nav_combat_decay_rate");
+	NextBotStop = g_pCVar->FindVar("nb_stop");
 	return true;
 }
 
@@ -4050,21 +4851,22 @@ IGameConfig *g_pGameConf = nullptr;
 
 CDetour *pPathOptimize = nullptr;
 
+CDetour *pApplyAccumulatedApproach = nullptr;
+CDetour *pUpdatePosition = nullptr;
+CDetour *pUpdateGroundConstraint = nullptr;
+
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
 	
-	g_pGameConf->GetOffset("sizeof(Path)", &sizeofPath);
-	g_pGameConf->GetOffset("sizeof(PathFollower)", &sizeofPathFollower);
 	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
-	g_pGameConf->GetOffset("sizeof(CTFPathFollower)", &sizeofCTFPathFollower);
-	g_pGameConf->GetOffset("sizeof(NextBotGroundLocomotion)", &sizeofNextBotGroundLocomotion);
 	
 	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
 	g_pGameConf->GetMemSig("PathFollower::PathFollower", &PathFollowerCTOR);
 	g_pGameConf->GetMemSig("NextBotCombatCharacter::NextBotCombatCharacter", &NextBotCombatCharacterCTOR);
 	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
 	g_pGameConf->GetMemSig("NextBotGroundLocomotion::NextBotGroundLocomotion", &NextBotGroundLocomotionCTOR);
+	g_pGameConf->GetMemSig("INextBot::INextBot", &INextBotCTOR);
 	
 	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
 	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
@@ -4073,10 +4875,28 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
 	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);
 	g_pGameConf->GetMemSig("CBaseEntity::SetAbsOrigin", &CBaseEntitySetAbsOrigin);
+	g_pGameConf->GetMemSig("INextBot::BeginUpdate", &INextBotBeginUpdatePtr);
+	g_pGameConf->GetMemSig("INextBot::EndUpdate", &INextBotEndUpdatePtr);
+	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsoluteVelocity", &CBaseEntityCalcAbsoluteVelocity);
+	g_pGameConf->GetMemSig("NextBotGroundLocomotion::ResolveCollision", &NextBotGroundLocomotionResolveCollision);
+	g_pGameConf->GetMemSig("CBaseEntity::SetGroundEntity", &CBaseEntitySetGroundEntity);
+	g_pGameConf->GetMemSig("CTraceFilterSimple::ShouldHitEntity", &CTraceFilterSimpleShouldHitEntity);
 	
 	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
+	SH_MANUALHOOK_RECONFIGURE(MyNextBotPointer, CBaseEntityMyNextBotPointer, 0, 0);
+	
+	int offset = -1;
+	g_pGameConf->GetOffset("CBaseEntity::PerformCustomPhysics", &offset);
+	SH_MANUALHOOK_RECONFIGURE(PerformCustomPhysics, offset, 0, 0);
+	
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsAreaTraversable", &offset);
+	SH_MANUALHOOK_RECONFIGURE(IsAreaTraversable, offset, 0, 0);
+	
+	g_pGameConf->GetOffset("CBaseEntity::Spawn", &offset);
+	SH_MANUALHOOK_RECONFIGURE(Spawn, offset, 0, 0);
+	
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
 	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
@@ -4093,9 +4913,21 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	pPathOptimize = DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
 	pPathOptimize->EnableDetour();
 	
+	pApplyAccumulatedApproach = DETOUR_CREATE_MEMBER(ApplyAccumulatedApproach, "NextBotGroundLocomotion::ApplyAccumulatedApproach")
+	pApplyAccumulatedApproach->EnableDetour();
+	
+	pUpdatePosition = DETOUR_CREATE_MEMBER(UpdatePosition, "NextBotGroundLocomotion::UpdatePosition")
+	pUpdatePosition->EnableDetour();
+	
+	pUpdateGroundConstraint = DETOUR_CREATE_MEMBER(UpdateGroundConstraint, "NextBotGroundLocomotion::UpdateGroundConstraint")
+	pUpdateGroundConstraint->EnableDetour();
+	
 	sm_sendprop_info_t info{};
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_iTeamNum", &info);
 	m_iTeamNumOffset = info.actual_offset;
+	
+	gamehelpers->FindSendPropInfo("CBaseEntity", "m_hGroundEntity", &info);
+	m_hGroundEntityOffset = info.actual_offset;
 	
 	g_pEntityList = reinterpret_cast<CBaseEntityList *>(gamehelpers->GetGlobalEntityList());
 	
@@ -4150,6 +4982,9 @@ void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 void Sample::SDK_OnUnload()
 {
 	pPathOptimize->Destroy();
+	pApplyAccumulatedApproach->Destroy();
+	pUpdatePosition->Destroy();
+	pUpdateGroundConstraint->Destroy();
 	plsys->RemovePluginsListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());

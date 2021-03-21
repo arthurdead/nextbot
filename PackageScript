@@ -38,6 +38,10 @@ CopyFiles('sourcemod/gamedata', 'addons/sourcemod/gamedata',
   [ 'nextbot.txt']
 )
 
+CopyFiles('sourcemod/extensions', 'addons/sourcemod/extensions',
+  [ 'nextbot.autoload']
+)
+
 # Config Files
 #CopyFiles('configs', 'addons/sourcemod/configs',
 #  [ 'configfile.cfg',

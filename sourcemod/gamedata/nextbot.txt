@@ -79,6 +79,56 @@
 				"library"	"server"
 				"linux"		"@_ZN11CBaseEntity12SetAbsOriginERK6Vector"
 			}
+			"INextBot::INextBot"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8INextBotC1Ev"
+			}
+			"INextBot::BeginUpdate"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8INextBot11BeginUpdateEv"
+			}
+			"INextBot::EndUpdate"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8INextBot9EndUpdateEv"
+			}
+			"NextBotGroundLocomotion::ApplyAccumulatedApproach"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion24ApplyAccumulatedApproachEv"
+			}
+			"NextBotGroundLocomotion::UpdatePosition"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion14UpdatePositionERK6Vector"
+			}
+			"NextBotGroundLocomotion::UpdateGroundConstraint"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion22UpdateGroundConstraintEv"
+			}
+			"CBaseEntity::CalcAbsoluteVelocity"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11CBaseEntity20CalcAbsoluteVelocityEv"
+			}
+			"NextBotGroundLocomotion::ResolveCollision"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion16ResolveCollisionERK6VectorS2_i"
+			}
+			"CBaseEntity::SetGroundEntity"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11CBaseEntity15SetGroundEntityEPS_"
+			}
+			"CTraceFilterSimple::ShouldHitEntity"
+			{
+				"library" "server"
+				"linux" "@_ZN18CTraceFilterSimple15ShouldHitEntityEP13IHandleEntityi"
+			}
 		}
 		"Offsets"
 		{
@@ -110,25 +160,21 @@
 			{
 				"linux" "192"
 			}
-			"sizeof(PathFollower)"
+			"CBaseEntity::PerformCustomPhysics"
 			{
-				"linux" "20480"
+				"linux" "170"
 			}
-			"sizeof(Path)"
+			"CBaseCombatCharacter::IsAreaTraversable"
 			{
-				"linux" "18260"
+				"linux" "317"
+			}
+			"CBaseEntity::Spawn"
+			{
+				"linux" "23"
 			}
 			"sizeof(NextBotCombatCharacter)"
 			{
 				"linux" "4320"
-			}
-			"sizeof(CTFPathFollower)"
-			{
-				"linux" "20488"
-			}
-			"sizeof(NextBotGroundLocomotion)"
-			{
-				"linux" "316"
 			}
 		}
 	}
