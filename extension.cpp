@@ -86,8 +86,8 @@ class IRestore;
 
 CNavMesh *TheNavMesh = nullptr;
 
-ConVar nav_authorative("nav_authorative", "0");
-ConVar path_expensive_optimize("path_expensive_optimize", "1");
+ConVar nav_authorative("nav_authorative", "1");
+ConVar path_expensive_optimize("path_expensive_optimize", "0");
 
 ConVar *tf_nav_combat_decay_rate = nullptr;
 
@@ -140,6 +140,14 @@ T void_to_func(void *ptr)
 	union { T f; void *p; };
 	p = ptr;
 	return f;
+}
+
+template <typename R, typename T>
+R func_to_func(T ptr)
+{
+	union { T f; R p; };
+	f = ptr;
+	return p;
 }
 
 template <typename T>
@@ -277,6 +285,11 @@ public:
 	DECLARE_CLASS_NOBASE( CBaseEntity );
 	DECLARE_SERVERCLASS();
 	DECLARE_DATADESC();
+	
+	int entindex()
+	{
+		return gamehelpers->EntityToBCompatRef(this);
+	}
 	
 	INextBot *MyNextBotPointer()
 	{
@@ -727,7 +740,12 @@ bool NavAreaBuildPath( CNavArea *startArea, CNavArea *goalArea, const Vector *go
 class CBaseCombatWeapon;
 class Path;
 struct animevent_t;
-enum MoveToFailureType : int;
+enum MoveToFailureType
+{
+	FAIL_NO_PATH_EXISTS,
+	FAIL_STUCK,
+	FAIL_FELL_OFF,
+};
 struct AI_Response;
 using AIConcept_t = int;
 
@@ -2346,7 +2364,7 @@ public:
 	
 	virtual bool ComputeWithOpenGoal( INextBot *bot, const IPathCost &costFunc, const IPathOpenGoalSelector &goalSelector, float maxSearchRadius = 0.0f ) = 0;
 	
-	virtual void ComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos ) const = 0;
+	virtual void ComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos ) = 0;
 	
 	enum { MAX_PATH_SEGMENTS = 256 };
 	Segment m_path[ MAX_PATH_SEGMENTS ];
@@ -2375,7 +2393,7 @@ public:
 	int m_adjAreaIndex;
 	
 	template <typename CostFunctor>
-	bool Compute(INextBot *bot, CBaseCombatCharacter *subject, CostFunctor &costFunc, float maxPathLength, bool includeGoalIfPathFails)
+	bool Compute(INextBot *bot, CBaseCombatCharacter *subject, CostFunctor &costFunc, float maxPathLength, bool includeGoalIfPathFails = true)
 	{
 		Invalidate();
 		
@@ -2483,7 +2501,7 @@ public:
 	}
 	
 	template <typename CostFunctor>
-	bool Compute(INextBot *bot, const Vector &goal, CostFunctor &costFunc, float maxPathLength, bool includeGoalIfPathFails)
+	bool Compute(INextBot *bot, const Vector &goal, CostFunctor &costFunc, float maxPathLength, bool includeGoalIfPathFails = true)
 	{
 		Invalidate();
 		
@@ -2646,6 +2664,68 @@ public:
 	{
 		call_mfunc<void>(this, PathPostProcess);
 	}
+	
+	void AssemblePrecomputedPath( INextBot *bot, const Vector &goal, CNavArea *endArea )
+	{
+		const Vector &start = bot->GetPosition();
+
+		// get count
+		int count = 0;
+		CNavArea *area;
+		for( area = endArea; area; area = area->GetParent() )
+		{
+			++count;
+		}
+
+		// save room for endpoint
+		if ( count > MAX_PATH_SEGMENTS-1 )
+		{
+			count = MAX_PATH_SEGMENTS-1;
+		}
+		else if ( count == 0 )
+		{
+			return;
+		}
+
+		if ( count == 1 )
+		{
+			BuildTrivialPath( bot, goal );
+			return;
+		}
+
+		// assemble path
+		m_segmentCount = count;
+		for( area = endArea; count && area; area = area->GetParent() )
+		{
+			--count;
+			m_path[ count ].area = area;
+			m_path[ count ].how = area->GetParentHow();
+			m_path[ count ].type = ON_GROUND;
+		}
+
+		// append actual goal position
+		m_path[ m_segmentCount ].area = endArea;
+		m_path[ m_segmentCount ].pos = goal;
+		m_path[ m_segmentCount ].ladder = NULL;
+		m_path[ m_segmentCount ].how = NUM_TRAVERSE_TYPES;
+		m_path[ m_segmentCount ].type = ON_GROUND;
+		++m_segmentCount;
+
+		// compute path positions
+		if ( ComputePathDetails( bot, start ) == false )
+		{
+			Invalidate();
+			OnPathChanged( bot, NO_PATH );
+			return;
+		}
+
+		// remove redundant nodes and clean up path
+		Optimize( bot );
+
+		PostProcess();
+
+		OnPathChanged( bot, COMPLETE_PATH );
+	}
 };
 
 DETOUR_DECL_MEMBER1(PathOptimize, void, INextBot *, bot)
@@ -2708,6 +2788,1200 @@ public:
 	{
 		return m_minLookAheadRange;
 	}
+	
+	bool IsAtGoal( INextBot *bot ) const
+	{
+		ILocomotion *mover = bot->GetLocomotionInterface();
+		IBody *body = bot->GetBodyInterface();
+
+		//
+		// m_goal is the node we are moving toward along the path
+		// current is the node just behind us
+		//
+		const Segment *current = PriorSegment( m_goal );
+		Vector toGoal = m_goal->pos - mover->GetFeet();
+
+	// 	if ( m_goal->type == JUMP_OVER_GAP && !mover->IsOnGround() )
+	// 	{
+	// 		// jumping over a gap, don't skip ahead until we land
+	// 		return false;
+	// 	}
+
+		if ( current == NULL )
+		{
+			// passed goal
+			return true;
+		}
+		else if ( m_goal->type == DROP_DOWN )
+		{
+			// m_goal is the top of the drop-down, and the following segment is the landing point
+			const Segment *landing = NextSegment( m_goal );
+
+			if ( landing == NULL )
+			{
+				// passed goal or corrupt path
+				return true;
+			}		
+			else
+			{
+				// did we reach the ground
+				if ( mover->GetFeet().z - landing->pos.z < mover->GetStepHeight() )
+				{
+					// reached goal
+					return true;
+				}
+			}
+					
+			/// @todo: it is possible to fall into a bad place and get stuck - should move back onto the path
+			
+		}
+		else if ( m_goal->type == CLIMB_UP )
+		{
+			// once jump is started, assume it is successful, since
+			// nav mesh may be substantially off from actual ground height at landing
+			const Segment *landing = NextSegment( m_goal );
+
+			if ( landing == NULL )
+			{
+				// passed goal or corrupt path
+				return true;
+			}		
+			else if ( /*!mover->IsOnGround() && */ mover->GetFeet().z > m_goal->pos.z + mover->GetStepHeight() )
+			{
+				// we're off the ground, presumably climbing - assume we reached the goal
+				return true;
+			}
+			/* This breaks infected climbing up holes in the ceiling - they can get within 2D range of m_goal before finding a ledge to climb up to
+			else if ( mover->IsOnGround() )
+			{
+				// proximity check
+				// Z delta can be anything, since we may be climbing over a tall fence, a physics prop, etc.
+				const float rangeTolerance = 10.0f;
+				if ( toGoal.AsVector2D().IsLengthLessThan( rangeTolerance ) )
+				{
+					// reached goal
+					return true;
+				}
+			}
+			*/
+		}
+		else
+		{
+			const Segment *next = NextSegment( m_goal );
+
+			if ( next )
+			{
+				// because mover may be off the path, check if it crossed the plane of the goal
+				// check against average of current and next forward vectors
+				Vector2D dividingPlane;
+
+				if ( current->ladder )
+				{
+					dividingPlane = m_goal->forward.AsVector2D();
+				}
+				else
+				{
+					dividingPlane = current->forward.AsVector2D() + m_goal->forward.AsVector2D();
+				}
+
+				if ( DotProduct2D( toGoal.AsVector2D(), dividingPlane ) < 0.0001f &&
+					abs( toGoal.z ) < body->GetStandHullHeight() )
+				{	
+					// only skip higher Z goal if next goal is directly reachable
+					// can't use this for positions below us because we need to be able
+					// to climb over random objects along our path that we can't actually
+					// move *through*
+					if ( toGoal.z < mover->GetStepHeight() && ( mover->IsPotentiallyTraversable( mover->GetFeet(), next->pos ) && !mover->HasPotentialGap( mover->GetFeet(), next->pos ) ) )
+					{
+						// passed goal
+						return true;
+					}
+				}
+			}
+
+			// proximity check
+			// Z delta can be anything, since we may be climbing over a tall fence, a physics prop, etc.
+			if ( toGoal.AsVector2D().IsLengthLessThan( m_goalTolerance ) )
+			{
+				// reached goal
+				return true;
+			}
+		}
+
+		return false;	
+	}
+};
+
+void PathFollower::Update( INextBot *bot )
+{
+	static int vtableindex = -1;
+	if(vtableindex == -1) {
+		vtableindex = vfunc_index(&PathFollower::Update);
+	}
+	
+	void **vtable = *(void ***)this;
+	(this->*void_to_func<void(PathFollower::*)(INextBot *)>(vtable[vtableindex]))(bot);
+}
+
+SH_DECL_HOOK0_void(Path, Invalidate, SH_NOATTRIB, 0);
+
+class ChasePath : public PathFollower
+{
+public:
+	enum SubjectChaseType
+	{
+		LEAD_SUBJECT,
+		DONT_LEAD_SUBJECT
+	};
+	
+	void ctor(SubjectChaseType chaseHow)
+	{
+		m_failTimer.Invalidate();
+		m_throttleTimer.Invalidate();
+		m_lifetimeTimer.Invalidate();
+		m_lastPathSubject = NULL;
+		m_chaseHow = chaseHow;
+	}
+	
+	using IsRepathNeeded_t = bool (ChasePath::*)( INextBot *, CBaseEntity * );
+	using Update_t = void (ChasePath::*)( INextBot *, CBaseEntity *, const IPathCost &, Vector * );
+	
+	struct vars_t
+	{
+		float radius = 500.0f;
+		float maxlen = 0.0f;
+		float life = 0.0f;
+		float tolerancerate = 0.33f;
+		float mintolerance = 0.0f;
+		float repathtime = 0.5f;
+		
+		IsRepathNeeded_t pIsRepathNeeded = nullptr;
+		Update_t pUpdate = nullptr;
+	};
+	
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + sizeof(ChasePath)); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+	
+	void HookInvalidate()
+	{
+		m_throttleTimer.Invalidate();
+		m_lifetimeTimer.Invalidate();
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	void dtor()
+	{
+		getvars().~vars_t();
+		
+		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &ChasePath::dtor), false);
+		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &ChasePath::HookInvalidate), false);
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	Vector PredictSubjectPosition( INextBot *bot, CBaseEntity *subject )
+	{
+		ILocomotion *mover = bot->GetLocomotionInterface();
+
+		const Vector &subjectPos = subject->GetAbsOrigin();
+
+		Vector to = subjectPos - bot->GetPosition();
+		to.z = 0.0f;
+		float flRangeSq = to.LengthSqr();
+
+		// don't lead if subject is very far away
+		float flLeadRadiusSq = GetLeadRadius();
+		flLeadRadiusSq *= flLeadRadiusSq;
+		if ( flRangeSq > flLeadRadiusSq )
+			return subjectPos;
+
+		// Normalize in place
+		float range = sqrt( flRangeSq );
+		to /= ( range + 0.0001f );	// avoid divide by zero
+
+		// estimate time to reach subject, assuming maximum speed
+		float leadTime = 0.5f + ( range / ( mover->GetRunSpeed() + 0.0001f ) );
+		
+		// estimate amount to lead the subject	
+		Vector lead = leadTime * subject->GetAbsVelocity();
+		lead.z = 0.0f;
+
+		if ( DotProduct( to, lead ) < 0.0f )
+		{
+			// the subject is moving towards us - only pay attention 
+			// to his perpendicular velocity for leading
+			Vector2D to2D = to.AsVector2D();
+			to2D.NormalizeInPlace();
+
+			Vector2D perp( -to2D.y, to2D.x );
+
+			float enemyGroundSpeed = lead.x * perp.x + lead.y * perp.y;
+
+			lead.x = enemyGroundSpeed * perp.x;
+			lead.y = enemyGroundSpeed * perp.y;
+		}
+
+		// compute our desired destination
+		Vector pathTarget = subjectPos + lead;
+
+		// validate this destination
+
+		// don't lead through walls
+		if ( lead.LengthSqr() > 36.0f )
+		{
+			float fraction;
+			if ( !mover->IsPotentiallyTraversable( subjectPos, pathTarget, ILocomotion::IMMEDIATELY, &fraction ) )
+			{
+				// tried to lead through an unwalkable area - clip to walkable space
+				pathTarget = subjectPos + fraction * ( pathTarget - subjectPos );
+			}
+		}
+
+		// don't lead over cliffs
+		CNavArea *leadArea = NULL;
+
+		CBaseCombatCharacter *pBCC = subject->MyCombatCharacterPointer();
+		if ( pBCC && CloseEnough( pathTarget, subjectPos, 3.0 ) )
+		{
+			pathTarget = subjectPos;
+			leadArea = pBCC->GetLastKnownArea(); // can return null?
+		}
+		else
+		{
+			struct CacheEntry_t
+			{
+				CacheEntry_t() : pArea(NULL) {}
+				Vector target;
+				CNavArea *pArea;
+			};
+
+			static int iServer;
+			static CacheEntry_t cache[4];
+			static int iNext;
+			int i;
+
+			bool bFound = false;
+			if ( iServer != gpGlobals->serverCount )
+			{
+				for ( i = 0; i < ARRAYSIZE(cache); i++ )
+				{
+					cache[i].pArea = NULL;
+				}
+				iServer = gpGlobals->serverCount;
+			}
+			else
+			{
+				for ( i = 0; i < ARRAYSIZE(cache); i++ )
+				{
+					if ( cache[i].pArea && CloseEnough( cache[i].target, pathTarget, 2.0 ) )
+					{
+						pathTarget = cache[i].target;
+						leadArea = cache[i].pArea;
+						bFound = true;
+						break;
+					}
+				}
+			}
+
+			if ( !bFound )
+			{
+				leadArea = TheNavMesh->GetNearestNavArea( pathTarget );
+				if ( leadArea )
+				{
+					cache[iNext].target = pathTarget;
+					cache[iNext].pArea = leadArea;
+					iNext = ( iNext + 1 ) % ARRAYSIZE( cache );
+				}
+			}
+		}
+
+
+		if ( !leadArea || leadArea->GetZ( pathTarget.x, pathTarget.y ) < pathTarget.z - mover->GetMaxJumpHeight() )
+		{
+			// would fall off a cliff
+			return subjectPos;		
+		}
+		
+		/** This needs more thought - it is preventing bots from using dropdowns
+		if ( mover->HasPotentialGap( subjectPos, pathTarget, &fraction ) )
+		{
+			// tried to lead over a cliff - clip to safe region
+			pathTarget = subjectPos + fraction * ( pathTarget - subjectPos );
+		}
+		*/
+		
+		return pathTarget;
+	}
+	
+	bool IsRepathNeeded( INextBot *bot, CBaseEntity *subject )
+	{
+		// the closer we get, the more accurate our path needs to be
+		Vector to = subject->GetAbsOrigin() - bot->GetPosition();
+
+		float tolerance = getvars().mintolerance + getvars().tolerancerate * to.Length();
+
+		return ( subject->GetAbsOrigin() - GetEndPosition() ).IsLengthGreaterThan( tolerance );
+	}
+	
+	void RefreshPath( INextBot *bot, CBaseEntity *subject, const IPathCost &cost, Vector *pPredictedSubjectPos )
+	{
+		ILocomotion *mover = bot->GetLocomotionInterface();
+
+		// don't change our path if we're on a ladder
+		if ( IsValid() && mover->IsUsingLadder() )
+		{
+			if ( bot->IsDebugging( NEXTBOT_PATH ) )
+			{
+				DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Bot is on a ladder.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+			}
+
+			// don't allow repath until a moment AFTER we have left the ladder
+			m_throttleTimer.Start( 1.0f );
+
+			return;
+		}
+
+		if ( subject == NULL )
+		{
+			if ( bot->IsDebugging( NEXTBOT_PATH ) )
+			{
+				DevMsg( "%3.2f: bot(#%d) CasePath::RefreshPath failed. No subject.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+			}
+			return;
+		}
+
+		if ( !m_failTimer.IsElapsed() )
+		{
+	// 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
+	// 		{
+	// 			DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Fail timer not elapsed.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+	// 		}
+			return;
+		}
+
+		// if our path subject changed, repath immediately
+		if ( subject != m_lastPathSubject )
+		{
+			if ( bot->IsDebugging( NEXTBOT_PATH ) )
+			{
+				DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p to %p).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), m_lastPathSubject.Get(), subject );
+			}
+
+			Invalidate();
+
+			// new subject, fresh attempt
+			m_failTimer.Invalidate();
+		}
+
+		if ( IsValid() && !m_throttleTimer.IsElapsed() )
+		{
+			// require a minimum time between repaths, as long as we have a path to follow
+	// 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
+	// 		{
+	// 			DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Rate throttled.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+	// 		}
+			return;
+		}
+
+		if ( IsValid() && m_lifetimeTimer.HasStarted() && m_lifetimeTimer.IsElapsed() )
+		{
+			// this path's lifetime has elapsed
+			Invalidate();
+		}
+		
+		if ( !IsValid() || (this->*getvars().pIsRepathNeeded)( bot, subject ) )
+		{
+			// the situation has changed - try a new path
+			bool isPath;
+			Vector pathTarget = subject->GetAbsOrigin();
+
+			if ( m_chaseHow == LEAD_SUBJECT )
+			{
+				pathTarget = pPredictedSubjectPos ? *pPredictedSubjectPos : PredictSubjectPosition( bot, subject );
+				isPath = Compute( bot, pathTarget, cost, GetMaxPathLength() );
+			}
+			else if ( subject->MyCombatCharacterPointer() && subject->MyCombatCharacterPointer()->GetLastKnownArea() )
+			{
+				isPath = Compute( bot, subject->MyCombatCharacterPointer(), cost, GetMaxPathLength() );
+			}
+			else
+			{
+				isPath = Compute( bot, pathTarget, cost, GetMaxPathLength() );
+			}
+
+			if ( isPath )
+			{
+				if ( bot->IsDebugging( NEXTBOT_PATH ) )
+				{
+					//const float size = 20.0f;			
+					//NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, RandomInt( 0, 200 ), 255, 255, true, 30.0f );
+
+					DevMsg( "%3.2f: bot(#%d) REPATH\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+				}
+
+				m_lastPathSubject = subject;
+
+				m_throttleTimer.Start( getvars().repathtime );
+
+				// track the lifetime of this new path
+				float lifetime = GetLifetime();
+				if ( lifetime > 0.0f )
+				{
+					m_lifetimeTimer.Start( lifetime );
+				}
+				else
+				{
+					m_lifetimeTimer.Invalidate();
+				}
+			}
+			else
+			{
+				// can't reach subject - throttle retry based on range to subject
+				m_failTimer.Start( 0.005f * ( bot->GetRangeTo( subject ) ) );
+				
+				// allow bot to react to path failure
+				bot->OnMoveToFailure( this, FAIL_NO_PATH_EXISTS );
+
+				if ( bot->IsDebugging( NEXTBOT_PATH ) )
+				{
+					//const float size = 20.0f;	
+					const float dT = 90.0f;		
+					int c = RandomInt( 0, 100 );
+					//NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, c, c, 255, true, dT );
+					//NDebugOverlay::HorzArrow( bot->GetPosition(), pathTarget, 5.0f, 255, c, c, 255, true, dT );
+
+					DevMsg( "%3.2f: bot(#%d) REPATH FAILED\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+				}
+
+				Invalidate();
+			}
+		}
+	}
+	
+	static ChasePath *create(SubjectChaseType chaseHow)
+	{
+		ChasePath *bytes = (ChasePath *)calloc(1, sizeof(ChasePath) + sizeof(vars_t));
+		call_mfunc<void>(bytes, PathFollowerCTOR);
+		bytes->ctor(chaseHow);
+		new (bytes->vars_ptr()) vars_t();
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &ChasePath::dtor), false);
+		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &ChasePath::HookInvalidate), false);
+		bytes->getvars().pIsRepathNeeded = &ChasePath::IsRepathNeeded;
+		bytes->getvars().pUpdate = &ChasePath::Update;
+		return bytes;
+	}
+	
+	float GetLeadRadius( void ) 
+	{ 
+		return getvars().radius; // 1000.0f; 
+	}
+
+	float GetMaxPathLength( void )
+	{
+		// no limit
+		return getvars().maxlen;
+	}
+
+	float GetLifetime( void )
+	{
+		// infinite duration
+		return getvars().life;
+	}
+	
+	void Update( INextBot *bot, CBaseEntity *subject, const IPathCost &cost, Vector *pPredictedSubjectPos )
+	{
+		// maintain the path to the subject
+		RefreshPath( bot, subject, cost, pPredictedSubjectPos );
+
+		// move along the path towards the subject
+		PathFollower::Update( bot );
+	}
+	
+	CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
+	CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
+	CountdownTimer m_lifetimeTimer;
+	EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
+	SubjectChaseType m_chaseHow;
+};
+
+SH_DECL_HOOK6_void(Path, ComputeAreaCrossing, SH_NOATTRIB, 0, INextBot *, const CNavArea *, const Vector &, const CNavArea *, NavDirType, Vector *);
+
+class DirectChasePath : public ChasePath
+{
+public:
+	void dtor()
+	{
+		SH_REMOVE_HOOK(Path, ComputeAreaCrossing, this, SH_MEMBER(this, &DirectChasePath::HookComputeAreaCrossing), false);
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	static DirectChasePath *create(SubjectChaseType chaseHow)
+	{
+		DirectChasePath *bytes = (DirectChasePath *)ChasePath::create(chaseHow);
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &ChasePath::dtor), false);
+		SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &DirectChasePath::HookComputeAreaCrossing), false);
+		bytes->getvars().pIsRepathNeeded = func_to_func<IsRepathNeeded_t>(&DirectChasePath::IsRepathNeeded);
+		bytes->getvars().pUpdate = func_to_func<Update_t>(&DirectChasePath::Update);
+		return bytes;
+	}
+	
+	void Update( INextBot *me, CBaseEntity *victim, const IPathCost &pathCost, Vector *pPredictedSubjectPos = NULL )	// update path to chase target and move bot along path
+	{
+		Assert( !pPredictedSubjectPos );
+		bool bComputedPredictedPosition;
+		Vector vecPredictedPosition;
+		if ( !DirectChase( &bComputedPredictedPosition, &vecPredictedPosition, me, victim ) )
+		{
+			// path around obstacles to reach our victim
+			ChasePath::Update( me, victim, pathCost, bComputedPredictedPosition ? &vecPredictedPosition : NULL );
+		}
+		NotifyVictim( me, victim );
+	}
+	
+	bool IsRepathNeeded( INextBot *bot, CBaseEntity *subject )			// return true if situation has changed enough to warrant recomputing the current path
+	{
+		if ( ChasePath::IsRepathNeeded( bot, subject ) )
+		{
+			return true;
+		}
+
+		return bot->GetLocomotionInterface()->IsStuck() && bot->GetLocomotionInterface()->GetStuckDuration() > 2.0f;
+	}
+	
+	void NotifyVictim( INextBot *me, CBaseEntity *victim )
+	{
+		CBaseCombatCharacter *pBCCVictim = victim->MyCombatCharacterPointer();
+		if ( !pBCCVictim )
+			return;
+		
+		//pBCCVictim->OnPursuedBy( me );
+	}
+	
+	bool DirectChase( bool *pPredictedPositionComputed, Vector *pPredictedPos, INextBot *me, CBaseEntity *victim )		// if there is nothing between us and our victim, run directly at them
+	{
+		*pPredictedPositionComputed = false;
+
+		ILocomotion *mover = me->GetLocomotionInterface();
+
+		if ( me->IsImmobile() || mover->IsScrambling() )
+		{
+			return false;
+		}
+
+		if ( IsDiscontinuityAhead( me, CLIMB_UP ) )
+		{
+			return false;
+		}
+
+		if ( IsDiscontinuityAhead( me, JUMP_OVER_GAP ) )
+		{
+			return false;
+		}
+
+		Vector leadVictimPos = PredictSubjectPosition( me, victim );
+
+		// Don't want to have to compute the predicted position twice.
+		*pPredictedPositionComputed = true;
+		*pPredictedPos = leadVictimPos;
+
+		if ( !mover->IsPotentiallyTraversable( mover->GetFeet(), leadVictimPos  ) )
+		{
+			return false;
+		}
+
+		// the way is clear - move directly towards our victim
+		mover->FaceTowards( leadVictimPos );
+		mover->Approach( leadVictimPos );
+
+		me->GetBodyInterface()->AimHeadTowards( victim );
+
+		// old path is no longer useful since we've moved off of it
+		Invalidate();
+
+		return true;
+	}
+	
+	void HookComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos ) const
+	{
+		Vector center;
+		float halfWidth;
+		from->ComputePortal( to, dir, &center, &halfWidth );
+
+		*crossPos = center;
+		RETURN_META(MRES_SUPERCEDE);
+	}
+};
+
+bool CNavArea::IsOverlapping( const Vector &pos, float tolerance ) const
+{
+	if (pos.x + tolerance >= m_nwCorner.x && pos.x - tolerance <= m_seCorner.x &&
+		pos.y + tolerance >= m_nwCorner.y && pos.y - tolerance <= m_seCorner.y)
+		return true;
+
+	return false;
+}
+
+void CNavArea::GetExtent( Extent *extent ) const
+{
+	extent->lo = m_nwCorner;
+	extent->hi = m_seCorner;
+
+	extent->lo.z = MIN( extent->lo.z, m_nwCorner.z );
+	extent->lo.z = MIN( extent->lo.z, m_seCorner.z );
+	extent->lo.z = MIN( extent->lo.z, m_neZ );
+	extent->lo.z = MIN( extent->lo.z, m_swZ );
+
+	extent->hi.z = MAX( extent->hi.z, m_nwCorner.z );
+	extent->hi.z = MAX( extent->hi.z, m_seCorner.z );
+	extent->hi.z = MAX( extent->hi.z, m_neZ );
+	extent->hi.z = MAX( extent->hi.z, m_swZ );
+}
+
+class RetreatPathBuilder
+{
+public:
+	RetreatPathBuilder( INextBot *me, CBaseEntity *threat, float retreatRange = 500.0f )
+	{
+		m_me = me;
+		m_mover = me->GetLocomotionInterface();
+		
+		m_threat = threat;
+		m_retreatRange = retreatRange;
+	}
+
+	CNavArea *ComputePath( void )
+	{
+		if ( m_mover == NULL )
+			return NULL;
+		
+		CNavArea *startArea = m_me->GetEntity()->GetLastKnownArea();
+
+		if ( startArea == NULL )
+			return NULL;
+
+		CNavArea *retreatFromArea = TheNavMesh->GetNearestNavArea( m_threat->GetAbsOrigin() );
+		if ( retreatFromArea == NULL )
+			return NULL;
+
+		startArea->SetParent( NULL );
+
+		// start search
+#if 0
+		CNavArea::ClearSearchLists();
+#endif
+
+		float initCost = Cost( startArea, NULL, NULL );
+		if ( initCost < 0.0f )
+			return NULL;
+
+		int teamID = m_me->GetEntity()->GetTeamNumber();
+
+		startArea->SetTotalCost( initCost );
+
+#if 0
+		startArea->AddToOpenList();
+#endif
+		
+		// keep track of the area farthest away from the threat
+		CNavArea *farthestArea = NULL;
+		float farthestRange = 0.0f;
+
+		//
+		// Dijkstra's algorithm (since we don't know our goal).
+		// Build a path as far away from the retreat area as possible.
+		// Minimize total path length and danger.
+		// Maximize distance to threat of end of path.
+		//
+#if 0
+		while( !CNavArea::IsOpenListEmpty() )
+		{
+			// get next area to check
+			CNavArea *area = CNavArea::PopOpenList();
+
+			area->AddToClosedList();
+
+			// don't consider blocked areas
+			if ( area->IsBlocked( teamID ) )
+				continue;
+
+			// build adjacent area array
+			CollectAdjacentAreas( area );
+			
+			// search adjacent areas
+			for( int i=0; i<m_adjAreaIndex; ++i )
+			{
+				CNavArea *newArea = m_adjAreaVector[ i ].area;
+				
+				// only visit each area once
+				if ( newArea->IsClosed() )
+					continue;
+				
+				// don't consider blocked areas
+				if ( newArea->IsBlocked( teamID ) )
+					continue;
+
+				// don't use this area if it is out of range
+				if ( ( newArea->GetCenter() - m_me->GetEntity()->GetAbsOrigin() ).IsLengthGreaterThan( m_retreatRange ) )
+					continue;
+				
+				// determine cost of traversing this area
+				float newCost = Cost( newArea, area, m_adjAreaVector[ i ].ladder );
+				
+				// don't use adjacent area if cost functor says it is a dead-end
+				if ( newCost < 0.0f )
+					continue;
+					
+				if ( newArea->IsOpen() && newArea->GetTotalCost() <= newCost )
+				{
+					// we have already visited this area, and it has a better path
+					continue;
+				}
+				else
+				{
+					// whether this area has been visited or not, we now have a better path
+					newArea->SetParent( area, m_adjAreaVector[ i ].how );
+					newArea->SetTotalCost( newCost );
+
+					// use 'cost so far' to hold cumulative cost
+					newArea->SetCostSoFar( newCost );
+
+					// tricky bit here - relying on OpenList being sorted by cost
+					if ( newArea->IsOpen() )
+					{
+						// area already on open list, update the list order to keep costs sorted
+						newArea->UpdateOnOpenList();
+					}
+					else
+					{
+						newArea->AddToOpenList();
+					}
+
+					// keep track of area farthest from threat
+					float threatRange = ( newArea->GetCenter() - m_threat->GetAbsOrigin() ).Length();
+					if ( threatRange > farthestRange )
+					{
+						farthestArea = newArea;
+						farthestRange = threatRange;
+					}
+				}
+			}
+		}
+#endif
+
+		return farthestArea;
+	}
+
+
+	/**
+	 * Build a vector of adjacent areas reachable from the given area
+	 */
+	void CollectAdjacentAreas( CNavArea *area )
+	{
+		m_adjAreaIndex = 0;			
+
+		const NavConnectVector &adjNorth = *area->GetAdjacentAreas( NORTH );		
+		FOR_EACH_VEC( adjNorth, it )
+		{
+			if ( m_adjAreaIndex >= MAX_ADJ_AREAS )
+				break;
+
+			m_adjAreaVector[ m_adjAreaIndex ].area = adjNorth[ it ].area;
+			m_adjAreaVector[ m_adjAreaIndex ].how = GO_NORTH;
+			m_adjAreaVector[ m_adjAreaIndex ].ladder = NULL;
+			++m_adjAreaIndex;
+		}
+
+		const NavConnectVector &adjSouth = *area->GetAdjacentAreas( SOUTH );		
+		FOR_EACH_VEC( adjSouth, it )
+		{
+			if ( m_adjAreaIndex >= MAX_ADJ_AREAS )
+				break;
+
+			m_adjAreaVector[ m_adjAreaIndex ].area = adjSouth[ it ].area;
+			m_adjAreaVector[ m_adjAreaIndex ].how = GO_SOUTH;
+			m_adjAreaVector[ m_adjAreaIndex ].ladder = NULL;
+			++m_adjAreaIndex;
+		}
+
+		const NavConnectVector &adjWest = *area->GetAdjacentAreas( WEST );		
+		FOR_EACH_VEC( adjWest, it )
+		{
+			if ( m_adjAreaIndex >= MAX_ADJ_AREAS )
+				break;
+
+			m_adjAreaVector[ m_adjAreaIndex ].area = adjWest[ it ].area;
+			m_adjAreaVector[ m_adjAreaIndex ].how = GO_WEST;
+			m_adjAreaVector[ m_adjAreaIndex ].ladder = NULL;
+			++m_adjAreaIndex;
+		}
+
+		const NavConnectVector &adjEast = *area->GetAdjacentAreas( EAST );	
+		FOR_EACH_VEC( adjEast, it )
+		{
+			if ( m_adjAreaIndex >= MAX_ADJ_AREAS )
+				break;
+
+			m_adjAreaVector[ m_adjAreaIndex ].area = adjEast[ it ].area;
+			m_adjAreaVector[ m_adjAreaIndex ].how = GO_EAST;
+			m_adjAreaVector[ m_adjAreaIndex ].ladder = NULL;
+			++m_adjAreaIndex;
+		}
+
+		const NavLadderConnectVector &adjUpLadder = *area->GetLadders( CNavLadder::LADDER_UP );
+		FOR_EACH_VEC( adjUpLadder, it )
+		{
+			CNavLadder *ladder = adjUpLadder[ it ].ladder;
+
+			if ( ladder->m_topForwardArea && m_adjAreaIndex < MAX_ADJ_AREAS )
+			{
+				m_adjAreaVector[ m_adjAreaIndex ].area = ladder->m_topForwardArea;
+				m_adjAreaVector[ m_adjAreaIndex ].how = GO_LADDER_UP;
+				m_adjAreaVector[ m_adjAreaIndex ].ladder = ladder;
+				++m_adjAreaIndex;
+			}
+
+			if ( ladder->m_topLeftArea && m_adjAreaIndex < MAX_ADJ_AREAS )
+			{
+				m_adjAreaVector[ m_adjAreaIndex ].area = ladder->m_topLeftArea;
+				m_adjAreaVector[ m_adjAreaIndex ].how = GO_LADDER_UP;
+				m_adjAreaVector[ m_adjAreaIndex ].ladder = ladder;
+				++m_adjAreaIndex;
+			}
+
+			if ( ladder->m_topRightArea && m_adjAreaIndex < MAX_ADJ_AREAS )
+			{
+				m_adjAreaVector[ m_adjAreaIndex ].area = ladder->m_topRightArea;
+				m_adjAreaVector[ m_adjAreaIndex ].how = GO_LADDER_UP;
+				m_adjAreaVector[ m_adjAreaIndex ].ladder = ladder;
+				++m_adjAreaIndex;
+			}
+		}
+
+		const NavLadderConnectVector &adjDownLadder = *area->GetLadders( CNavLadder::LADDER_DOWN );
+		FOR_EACH_VEC( adjDownLadder, it )
+		{
+			CNavLadder *ladder = adjDownLadder[ it ].ladder;
+
+			if ( m_adjAreaIndex >= MAX_ADJ_AREAS )
+				break;
+
+			if ( ladder->m_bottomArea )
+			{
+				m_adjAreaVector[ m_adjAreaIndex ].area = ladder->m_bottomArea;
+				m_adjAreaVector[ m_adjAreaIndex ].how = GO_LADDER_DOWN;
+				m_adjAreaVector[ m_adjAreaIndex ].ladder = ladder;
+				++m_adjAreaIndex;
+			}
+		}
+	}
+	
+	/**
+	 * Cost minimizes path length traveled thus far and "danger" (proximity to threat(s))
+	 */
+	float Cost( CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder )
+	{
+		// check if we can use this area
+		if ( !m_mover->IsAreaTraversable( area ) )
+		{
+			return -1.0f;
+		}
+
+		int teamID = m_me->GetEntity()->GetTeamNumber();
+		if ( area->IsBlocked( teamID ) )
+		{
+			return -1.0f;
+		}
+		
+		const float debugDeltaT = 3.0f;
+
+		float cost;
+
+		const float maxThreatRange = 500.0f;
+		const float dangerDensity = 1000.0f;
+
+		if ( fromArea == NULL )
+		{
+			cost = 0.0f;
+			
+#if 0
+			if ( area->Contains( m_threat->GetAbsOrigin() ) )
+			{
+				// maximum danger - threat is in the area with us
+				cost += 10.0f * dangerDensity;
+				
+				if ( m_me->IsDebugging( NEXTBOT_PATH ) )
+				{
+					//area->DrawFilled( 255, 0, 0, 128 );
+				}
+			}
+			else
+#endif
+			{
+				// danger proportional to range to us
+				float rangeToThreat = ( m_threat->GetAbsOrigin() - m_me->GetEntity()->GetAbsOrigin() ).Length();
+
+				if ( rangeToThreat < maxThreatRange )
+				{
+					cost += dangerDensity * ( 1.0f - ( rangeToThreat / maxThreatRange ) );
+
+					if ( m_me->IsDebugging( NEXTBOT_PATH ) )
+					{
+						//NDebugOverlay::Line( m_me->GetEntity()->GetAbsOrigin(), m_threat->GetAbsOrigin(), 255, 0, 0, true, debugDeltaT );
+					}
+				}				
+			}
+		}
+		else
+		{
+			// compute distance traveled along path so far
+			float dist;
+
+			if ( ladder )
+			{
+				const float ladderCostFactor = 100.0f;
+				dist = ladderCostFactor * ladder->m_length;
+			}
+			else
+			{
+				Vector to = area->GetCenter() - fromArea->GetCenter();
+
+				dist = to.Length();
+
+				// check for vertical discontinuities
+				Vector closeFrom, closeTo;
+				area->GetClosestPointOnArea( fromArea->GetCenter(), &closeTo );
+				fromArea->GetClosestPointOnArea( area->GetCenter(), &closeFrom );
+				
+				float deltaZ = closeTo.z - closeFrom.z;
+
+				if ( deltaZ > m_mover->GetMaxJumpHeight() )
+				{
+					// too high to jump
+					return -1.0f;
+				}
+				else if ( -deltaZ > m_mover->GetDeathDropHeight() )
+				{
+					// too far down to drop
+					return -1.0f;
+				}
+
+				// prefer to maintain our level
+				const float climbCost = 10.0f;
+				dist += climbCost * fabs( deltaZ );
+			}
+
+			cost = dist + fromArea->GetTotalCost();
+
+			
+			// Add in danger cost due to threat
+			// Assume straight line between areas and find closest point
+			// to the threat along that line segment. The distance between
+			// the threat and closest point on the line is the danger cost.		
+			
+			// path danger is CUMULATIVE
+			float dangerCost = fromArea->GetCostSoFar();
+			
+			Vector close;
+			float t;
+			CalcClosestPointOnLineSegment( m_threat->GetAbsOrigin(), area->GetCenter(), fromArea->GetCenter(), close, &t );
+			if ( t < 0.0f )
+			{
+				close = area->GetCenter();
+			}
+			else if ( t > 1.0f )
+			{
+				close = fromArea->GetCenter();
+			}
+
+			float rangeToThreat = ( m_threat->GetAbsOrigin() - close ).Length();
+
+			if ( rangeToThreat < maxThreatRange )
+			{
+				float dangerFactor = 1.0f - ( rangeToThreat / maxThreatRange );
+				dangerCost = dangerDensity * dangerFactor;
+
+				if ( m_me->IsDebugging( NEXTBOT_PATH ) )
+				{
+					//NDebugOverlay::HorzArrow( fromArea->GetCenter(), area->GetCenter(), 5, 255 * dangerFactor, 0, 0, 255, true, debugDeltaT );
+
+					Vector to = close - m_threat->GetAbsOrigin();
+					to.NormalizeInPlace();
+
+					//NDebugOverlay::Line( close, close - 50.0f * to, 255, 0, 0, true, debugDeltaT );
+				}
+			}
+			
+			cost += dangerCost;
+		}
+
+		return cost;
+	}
+	
+private:	
+	INextBot *m_me;
+	ILocomotion *m_mover;
+	
+	CBaseEntity *m_threat;
+	float m_retreatRange;
+
+	enum { MAX_ADJ_AREAS = 64 };
+	
+	struct AdjInfo
+	{
+		CNavArea *area;
+		CNavLadder *ladder;
+		NavTraverseType how;		
+	};
+	
+	AdjInfo m_adjAreaVector[ MAX_ADJ_AREAS ];
+	int m_adjAreaIndex;
+	
+};
+
+class RetreatPath : public PathFollower
+{
+public:
+	CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
+	EHANDLE m_pathThreat;								// the threat of our existing path
+	Vector m_pathThreatPos;								// where the threat was when the path was built
+
+	struct vars_t
+	{
+		float maxlen = 1000.0f;
+	};
+	
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + sizeof(RetreatPath)); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+	
+	void HookInvalidate()
+	{
+		m_throttleTimer.Invalidate();
+		m_pathThreat = NULL;
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	void dtor()
+	{
+		getvars().~vars_t();
+		
+		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &RetreatPath::dtor), false);
+		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &RetreatPath::HookInvalidate), false);
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	void Update( INextBot *bot, CBaseEntity *threat )
+	{
+		if ( threat == NULL )
+		{
+			return;
+		}
+
+		// if our path threat changed, repath immediately
+		if ( threat != m_pathThreat )
+		{
+			if ( bot->IsDebugging( NEXTBOT_PATH ) )
+			{
+				DevMsg( "%3.2f: bot(#%d) Chase path threat changed (from %X to %X).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), m_pathThreat.Get(), threat );
+			}
+
+			Invalidate();
+		}
+
+		// maintain the path away from the threat
+		RefreshPath( bot, threat );
+
+		// move along the path towards the threat
+		PathFollower::Update( bot );
+	}
+	
+	void RefreshPath( INextBot *bot, CBaseEntity *threat )
+	{
+		if ( threat == NULL )
+		{
+			if ( bot->IsDebugging( NEXTBOT_PATH ) )
+			{
+				DevMsg( "%3.2f: bot(#%d) CasePath::RefreshPath failed. No threat.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+			}
+			return;
+		}
+
+		// don't change our path if we're on a ladder
+		ILocomotion *mover = bot->GetLocomotionInterface();
+		if ( IsValid() && mover && mover->IsUsingLadder() )
+		{
+			if ( bot->IsDebugging( NEXTBOT_PATH ) )
+			{
+				DevMsg( "%3.2f: bot(#%d) RetreatPath::RefreshPath failed. Bot is on a ladder.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+			}
+			return;
+		}
+
+		// the closer we get, the more accurate our path needs to be
+		Vector to = threat->GetAbsOrigin() - bot->GetPosition();
+		
+		const float minTolerance = 0.0f;
+		const float toleranceRate = 0.33f;
+		
+		float tolerance = minTolerance + toleranceRate * to.Length();
+
+		if ( !IsValid() || ( threat->GetAbsOrigin() - m_pathThreatPos ).IsLengthGreaterThan( tolerance ) )
+		{
+			if ( !m_throttleTimer.IsElapsed() )
+			{
+				// require a minimum time between repaths, as long as we have a path to follow
+				if ( bot->IsDebugging( NEXTBOT_PATH ) )
+				{
+					DevMsg( "%3.2f: bot(#%d) RetreatPath::RefreshPath failed. Rate throttled.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+				}
+				return;
+			}
+
+			// remember our path threat
+			m_pathThreat = threat;
+			m_pathThreatPos = threat->GetAbsOrigin();
+
+			RetreatPathBuilder retreat( bot, threat, GetMaxPathLength() );
+
+			CNavArea *goalArea = retreat.ComputePath();
+
+			if ( goalArea )
+			{
+				AssemblePrecomputedPath( bot, goalArea->GetCenter(), goalArea );
+			}	
+			else
+			{
+				// all adjacent areas are too far away - just move directly away from threat
+				Vector to = threat->GetAbsOrigin() - bot->GetPosition();
+
+				BuildTrivialPath( bot, bot->GetPosition() - to );
+			}
+				
+			const float minRepathInterval = 0.5f;
+			m_throttleTimer.Start( minRepathInterval );
+		}
+	}
+	
+	float GetMaxPathLength( void )
+	{
+		return getvars().maxlen;
+	}
+	
+	static RetreatPath *create()
+	{
+		RetreatPath *bytes = (RetreatPath *)calloc(1, sizeof(RetreatPath) + sizeof(vars_t));
+		call_mfunc<void>(bytes, PathFollowerCTOR);
+		new (bytes->vars_ptr()) vars_t();
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &RetreatPath::dtor), false);
+		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), false);
+		return bytes;
+	}
 };
 
 class CTFPathFollower : public PathFollower
@@ -2732,6 +4006,9 @@ public:
 HandleType_t PathHandleType = 0;
 HandleType_t PathFollowerHandleType = 0;
 HandleType_t CTFPathFollowerHandleType = 0;
+HandleType_t ChasePathHandleType = 0;
+HandleType_t DirectChasePathHandleType = 0;
+HandleType_t RetreatPathHandleType = 0;
 
 cell_t PathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
@@ -2850,6 +4127,102 @@ cell_t PathFollowerUpdateNative(IPluginContext *pContext, const cell_t *params)
 	INextBot *bot = (INextBot *)params[2];
 	
 	obj->Update(bot);
+	
+	return 0;
+}
+
+cell_t ChasePathUpdateNative(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ChasePath *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], ChasePathHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+	
+	INextBot *bot = (INextBot *)params[2];
+	
+	IPluginFunction *callback = pContext->GetFunctionById(params[4]);
+	SPPathCost cost(bot, callback, params[5]);
+	
+	Vector PredictedSubjectPos;
+	Vector *pPredictedSubjectPos = nullptr;
+	
+	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[6], &addr);
+	
+	if(addr != pNullVec) {
+		PredictedSubjectPos.x = sp_ctof(addr[0]);
+		PredictedSubjectPos.y = sp_ctof(addr[1]);
+		PredictedSubjectPos.z = sp_ctof(addr[2]);
+		pPredictedSubjectPos = &PredictedSubjectPos;
+	}
+	
+	(obj->*obj->getvars().pUpdate)(bot, pSubject, cost, pPredictedSubjectPos);
+	
+	return 0;
+}
+
+cell_t ChasePathPredictSubjectPosition(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ChasePath *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], ChasePathHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+	
+	INextBot *bot = (INextBot *)params[2];
+	
+	Vector PredictedSubjectPos = obj->PredictSubjectPosition(bot, pSubject);
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	addr[0] = sp_ftoc(PredictedSubjectPos.x);
+	addr[1] = sp_ftoc(PredictedSubjectPos.y);
+	addr[2] = sp_ftoc(PredictedSubjectPos.z);
+	
+	return 0;
+}
+
+cell_t RetreatPathUpdateNative(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	RetreatPath *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], RetreatPathHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+	
+	INextBot *bot = (INextBot *)params[2];
+	
+	obj->Update(bot, pSubject);
 	
 	return 0;
 }
@@ -3059,6 +4432,24 @@ cell_t CTFPathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
 	return handlesys->CreateHandle(CTFPathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
 }
 
+cell_t ChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
+{
+	ChasePath *obj = ChasePath::create((ChasePath::SubjectChaseType)params[1]);
+	return handlesys->CreateHandle(ChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+}
+
+cell_t DirectChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
+{
+	DirectChasePath *obj = DirectChasePath::create((ChasePath::SubjectChaseType)params[1]);
+	return handlesys->CreateHandle(DirectChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+}
+
+cell_t RetreatPathCTORNative(IPluginContext *pContext, const cell_t *params)
+{
+	RetreatPath *obj = RetreatPath::create();
+	return handlesys->CreateHandle(RetreatPathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+}
+
 cell_t INextBotEntityget(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *bot = (INextBot *)params[1];
@@ -3084,6 +4475,102 @@ cell_t INextBotReset(IPluginContext *pContext, const cell_t *params)
 	INextBot *bot = (INextBot *)params[1];
 	bot->Reset();
 	return 0;
+}
+
+cell_t INextBotIsRangeLessThanEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc(bot->IsRangeLessThan(pEntity, sp_ctof(params[3])));
+}
+
+cell_t INextBotIsRangeLessThanVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return sp_ftoc(bot->IsRangeLessThan(vec, sp_ctof(params[3])));
+}
+
+cell_t INextBotIsRangeGreaterThanEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc(bot->IsRangeGreaterThan(pEntity, sp_ctof(params[3])));
+}
+
+cell_t INextBotIsRangeGreaterThanVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return sp_ftoc(bot->IsRangeGreaterThan(vec, sp_ctof(params[3])));
+}
+
+cell_t INextBotGetRangeToEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc(bot->GetRangeTo(pEntity));
+}
+
+cell_t INextBotGetRangeToVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return sp_ftoc(bot->GetRangeTo(vec));
+}
+
+cell_t INextBotGetRangeSquaredToEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc(bot->GetRangeSquaredTo(pEntity));
+}
+
+cell_t INextBotGetRangeSquaredToVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return sp_ftoc(bot->GetRangeSquaredTo(vec));
 }
 
 cell_t INextBotEndUpdate(IPluginContext *pContext, const cell_t *params)
@@ -3465,6 +4952,22 @@ cell_t PathFollowerIsDiscontinuityAhead(IPluginContext *pContext, const cell_t *
 	INextBot *bot = (INextBot *)params[2];
 	
 	return obj->IsDiscontinuityAhead(bot, (SegmentType)params[2], sp_ctof(params[3]));
+}
+
+cell_t PathFollowerIsAtGoal(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	PathFollower *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], PathFollowerHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	INextBot *bot = (INextBot *)params[2];
+	
+	return obj->IsAtGoal(bot);
 }
 
 cell_t CTFPathFollowerMinLookAheadDistanceget(IPluginContext *pContext, const cell_t *params)
@@ -4652,11 +6155,15 @@ sp_nativeinfo_t natives[] =
 	{"Segment.GetForward", SegmentGetForward},
 	{"PathFollower.PathFollower", PathFollowerCTORNative},
 	{"PathFollower.Update", PathFollowerUpdateNative},
+	{"ChasePath.Update", ChasePathUpdateNative},
+	{"ChasePath.PredictSubjectPosition", ChasePathPredictSubjectPosition},
+	{"RetreatPath.Update", RetreatPathUpdateNative},
 	{"PathFollower.MinLookAheadDistance.get", PathFollowerMinLookAheadDistanceget},
 	{"PathFollower.MinLookAheadDistance.set", PathFollowerMinLookAheadDistanceset},
 	{"PathFollower.GoalTolerance.get", PathFollowerGoalToleranceget},
 	{"PathFollower.GoalTolerance.set", PathFollowerGoalToleranceset},
 	{"PathFollower.IsDiscontinuityAhead", PathFollowerIsDiscontinuityAhead},
+	{"PathFollower.IsAtGoal", PathFollowerIsAtGoal},
 	{"CTFPathFollower.MinLookAheadDistance.get", CTFPathFollowerMinLookAheadDistanceget},
 	{"CNavArea.CostSoFar.get", CNavAreaCostSoFarget},
 	{"CNavArea.ID.get", CNavAreaIDget},
@@ -4716,8 +6223,19 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.Update", INextBotUpdate},
 	{"INextBot.EndUpdate", INextBotEndUpdate},
 	{"INextBot.Reset", INextBotReset},
+	{"INextBot.IsRangeLessThanEntity", INextBotIsRangeLessThanEntity},
+	{"INextBot.IsRangeLessThanVector", INextBotIsRangeLessThanVector},
+	{"INextBot.IsRangeGreaterThanEntity", INextBotIsRangeGreaterThanEntity},
+	{"INextBot.IsRangeGreaterThanVector", INextBotIsRangeGreaterThanVector},
+	{"INextBot.GetRangeToEntity", INextBotGetRangeToEntity},
+	{"INextBot.GetRangeToVector", INextBotGetRangeToVector},
+	{"INextBot.GetRangeSquaredToEntity", INextBotGetRangeSquaredToEntity},
+	{"INextBot.GetRangeSquaredToVector", INextBotGetRangeSquaredToVector},
 	{"INextBotComponent.Bot.get", INextBotComponentBotget},
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
+	{"ChasePath.ChasePath", ChasePathCTORNative},
+	{"DirectChasePath.DirectChasePath", DirectChasePathCTORNative},
+	{"RetreatPath.RetreatPath", RetreatPathCTORNative},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
 	{"NextBotGroundLocomotion.FrictionForward.get", NextBotGroundLocomotionFrictionForwardget},
 	{"NextBotGroundLocomotion.FrictionSideways.get", NextBotGroundLocomotionFrictionSidewaysget},
@@ -4831,6 +6349,15 @@ void Sample::OnHandleDestroy(HandleType_t type, void *object)
 	} else if(type == CTFPathFollowerHandleType) {
 		CTFPathFollower *obj = (CTFPathFollower *)object;
 		delete obj;
+	} else if(type == ChasePathHandleType) {
+		ChasePath *obj = (ChasePath *)object;
+		delete obj;
+	} else if(type == DirectChasePathHandleType) {
+		DirectChasePath *obj = (DirectChasePath *)object;
+		delete obj;
+	} else if(type == RetreatPathHandleType) {
+		RetreatPath *obj = (RetreatPath *)object;
+		delete obj;
 	}
 }
 
@@ -4854,6 +6381,8 @@ CDetour *pPathOptimize = nullptr;
 CDetour *pApplyAccumulatedApproach = nullptr;
 CDetour *pUpdatePosition = nullptr;
 CDetour *pUpdateGroundConstraint = nullptr;
+
+#include "funnyfile.h"
 
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
@@ -4933,7 +6462,11 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	PathHandleType = handlesys->CreateType("Path", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
-	CTFPathFollowerHandleType = handlesys->CreateType("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	
+	CTFPathFollowerHandleType = ((HandleSystemHack *)handlesys)->__CreateType("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	ChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("ChasePath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	RetreatPathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("RetreatPath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	DirectChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("DirectChasePath", this, ChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
 	plsys->AddPluginsListener(this);
 	
@@ -4989,5 +6522,8 @@ void Sample::SDK_OnUnload()
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());
 	handlesys->RemoveType(CTFPathFollowerHandleType, myself->GetIdentity());
+	handlesys->RemoveType(ChasePathHandleType, myself->GetIdentity());
+	handlesys->RemoveType(DirectChasePathHandleType, myself->GetIdentity());
+	handlesys->RemoveType(RetreatPathHandleType, myself->GetIdentity());
 	gameconfs->CloseGameConfigFile(g_pGameConf);
 }

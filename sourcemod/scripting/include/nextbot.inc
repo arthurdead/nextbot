@@ -615,8 +615,24 @@ methodmap INextBot
 			}
 
 			this.EndUpdate();
+
+			return true;
 		}
+
+		return false;
 	}
+
+	public native float IsRangeLessThanEntity(int entity, float range);
+	public native float IsRangeLessThanVector(float vec[3], float range);
+
+	public native float IsRangeGreaterThanEntity(int entity, float range);
+	public native float IsRangeGreaterThanVector(float vec[3], float range);
+
+	public native float GetRangeToEntity(int entity);
+	public native float GetRangeToVector(float vec[3]);
+
+	public native float GetRangeSquaredToEntity(int entity);
+	public native float GetRangeSquaredToVector(float vec[3]);
 
 	//public native void RegisterComponent(INextBotComponent comp);
 	//public native void UnregisterComponent(INextBotComponent comp);
@@ -784,7 +800,34 @@ methodmap PathFollower < Path
 
 	public native bool IsDiscontinuityAhead(INextBot bot, SegmentType type, float range = -1.0);
 
+	public native bool IsAtGoal(INextBot bot);
+
 	public native void Update(INextBot bot);
+};
+
+enum SubjectChaseType
+{
+	LEAD_SUBJECT,
+	DONT_LEAD_SUBJECT
+};
+
+methodmap ChasePath < PathFollower
+{
+	public native ChasePath(SubjectChaseType chaseHow);
+
+	public native void Update(INextBot bot, int entity, nextbot_functions functor, any data = 0, float predictedpos[3] = NULL_VECTOR);
+};
+
+methodmap DirectChasePath < ChasePath
+{
+	public native DirectChasePath(SubjectChaseType chaseHow);
+};
+
+methodmap RetreatPath < PathFollower
+{
+	public native RetreatPath();
+
+	public native void Update(INextBot bot, int entity);
 };
 
 methodmap CTFPathFollower < PathFollower
