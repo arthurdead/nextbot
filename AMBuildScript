@@ -20,6 +20,7 @@ WinLinuxMac = ['windows', 'linux', 'mac']
 
 PossibleSDKs = {
   'tf2-sdk2013':  SDK('HL2SDK2013', '2.tf2', '11', 'TF2', WinLinuxMac, 'sdk2013'),
+  'l4d2': SDK('HL2SDKL4D2', '2.l4d2', '15', 'LEFT4DEAD2', WinLinuxMac, 'l4d2'),
 }
 
 def ResolveEnvPath(env, folder):
@@ -426,4 +427,4 @@ if builder.backend == 'amb2':
     'PackageScript',
   ]
 
-builder.RunBuildScripts(BuildScripts, { 'Extension': Extension})
+builder.RunBuildScripts(BuildScripts, { 'Extension': Extension, 'ResolveEnvPath': ResolveEnvPath})

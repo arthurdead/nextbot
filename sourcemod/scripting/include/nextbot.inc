@@ -3,16 +3,20 @@
 #endif
 #define nextbot_included
 
-#include <tf2>
-
-#define TFTeam_Any view_as<TFTeam>(-2)
+#define TEAM_ANY -2
 
 typeset nextbot_functions
 {
+#if defined GAME_TF2
 	//IVision.ForEachKnownEntity
 	function bool (CKnownEntity known, any data);
+#elseif defined GAME_L4D2
+	//IVision.ForEachRecognized
+	function bool (RecognizedActor known, any data);
+#endif
 
 	//IVision.GetClosestKnownFilter
+	//IVision.GetClosestRecognizedFilter
 	function bool (int entity, any data);
 
 	//Path.ComputeVector
@@ -41,7 +45,9 @@ enum NavAttributeType
 	NAV_MESH_CLIFF			= 0x00008000,				// this nav area is adjacent to a drop of at least CliffHeight
 	NAV_MESH_FIRST_CUSTOM	= 0x00010000,				// apps may define custom app-specific bits starting with this value
 	NAV_MESH_LAST_CUSTOM	= 0x04000000,				// apps must not define custom app-specific bits higher than with this value
+#if defined GAME_TF2
 	NAV_MESH_FUNC_COST		= 0x20000000,				// area has designer specified cost controlled by func_nav_cost entities
+#endif
 	NAV_MESH_HAS_ELEVATOR	= 0x40000000,				// area is in an elevator's path
 	NAV_MESH_NAV_BLOCKER	= 0x80000000				// area is blocked by nav blocker ( Alas, needed to hijack a bit in the attributes to get within a cache line [7/24/2008 tom])
 };
@@ -59,14 +65,17 @@ methodmap CNavArea
 	}
 
 	public native bool HasAttributes(NavAttributeType bits);
+#if defined GAME_TF2
 	public native float ComputeFuncNavCost(int entity);
+#endif
 	public native void GetCenter(float pos[3]);
 	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
-	public native int GetPlayerCount(TFTeam team = TFTeam_Unassigned);
+	public native int GetPlayerCount(int team = 0);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
 
+#if defined GAME_TF2
 enum TFNavAttributeType
 {
 	TF_NAV_INVALID						= 0x00000000,
@@ -122,10 +131,15 @@ methodmap CTFNavArea < CNavArea
 
 	public native bool HasAttributeTF(TFNavAttributeType bits);
 };
+#endif
 
 methodmap CNavMesh
 {
-	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, TFTeam team = TFTeam_Any);
+#if defined GAME_TF2
+	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
+#elseif defined GAME_L4D2
+	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true);
+#endif
 	public native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
 };
 
@@ -181,6 +195,7 @@ methodmap ILocomotion < INextBotComponent
 		public native get();
 	}
 
+#if defined GAME_TF2
 	property float MaxAcceleration
 	{
 		public native get();
@@ -190,6 +205,7 @@ methodmap ILocomotion < INextBotComponent
 	{
 		public native get();
 	}
+#endif
 
 	property float SpeedLimit
 	{
@@ -268,8 +284,13 @@ methodmap ILocomotion < INextBotComponent
 	public native void DriveTo(float pos[3]);
 };
 
+#if defined GAME_TF2
 methodmap NextBotGoundLocomotion < ILocomotion
+#elseif defined GAME_L4D2
+methodmap ZombieBotLocomotion < ILocomotion
+#endif
 {
+#if defined GAME_TF2
 	property float Gravity
 	{
 		public native get();
@@ -284,6 +305,7 @@ methodmap NextBotGoundLocomotion < ILocomotion
 	{
 		public native get();
 	}
+#endif
 
 	property float MaxYawRate
 	{
@@ -291,7 +313,11 @@ methodmap NextBotGoundLocomotion < ILocomotion
 	}
 };
 
+#if defined GAME_TF2
 methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
+#elseif defined GAME_L4D2
+methodmap ZombieBotLocomotionCustom < ZombieBotLocomotion
+#endif
 {
 	property float StepHeight
 	{
@@ -318,6 +344,7 @@ methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
 		public native set(float height);
 	}
 
+#if defined GAME_TF2
 	property float MaxAcceleration
 	{
 		public native set(float height);
@@ -327,6 +354,7 @@ methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
 	{
 		public native set(float height);
 	}
+#endif
 
 	property float SpeedLimit
 	{
@@ -338,6 +366,7 @@ methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
 		public native set(float height);
 	}
 
+#if defined GAME_TF2
 	property float Gravity
 	{
 		public native set(float height);
@@ -352,20 +381,36 @@ methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
 	{
 		public native set(float height);
 	}
+#endif
 
 	property float MaxYawRate
 	{
 		public native set(float height);
 	}
+
+#if defined GAME_L4D2
+	/*
+	public native void SetAcceleration(float accel[3]);
+	public native void SetVelocity(float accel[3]);
+
+	public native void GetMoveVector(float vec[3]);
+	public native void GetGroundAcceleration(float vec[3]);
+	*/
+#endif
 };
 
+#if defined GAME_TF2
 methodmap CKnownEntity
+#elseif defined GAME_L4D2
+methodmap RecognizedActor
+#endif
 {
 	property int Entity
 	{
 		public native get();
 	}
 
+#if defined GAME_TF2
 	property bool LastKnownPositionBeenSeen
 	{
 		public native get();
@@ -420,9 +465,14 @@ methodmap CKnownEntity
 	public native void Destroy();
 	public native void UpdatePosition();
 	public native void GetLastKnownPosition(float pos[3]);
+#endif
 };
 
+#if defined GAME_TF2
 #define CKnownEntity_Null view_as<CKnownEntity>(Address_Null)
+#elseif defined GAME_L4D2
+#define RecognizedActor_Null view_as<RecognizedActor>(Address_Null)
+#endif
 
 enum FieldOfViewCheckType
 {
@@ -432,10 +482,10 @@ enum FieldOfViewCheckType
 
 methodmap IVision < INextBotComponent
 {
+#if defined GAME_TF2
 	public native bool ForEachKnownEntity(nextbot_functions func, any data = 0);
 	public native void CollectKnownEntities(ArrayList list);
 	public native CKnownEntity GetPrimaryKnownThreat(bool onlyVisibleThreats = false);
-	public native float GetTimeSinceVisible(int team);
 	public native CKnownEntity GetClosestKnownTeam(int team);
 	public native CKnownEntity GetClosestKnownFilter(nextbot_functions func, any data = 0);
 	public native int GetKnownCount(int team, bool onlyVisible = false, float rangeLimit = -1.0);
@@ -444,10 +494,20 @@ methodmap IVision < INextBotComponent
 	public native void ForgetEntity(int entity);
 	public native void ForgetAllKnownEntities();
 	public native void CollectPotentiallyVisibleEntities(ArrayList list);
+#elseif defined GAME_L4D2
+	public native RecognizedActor GetPrimaryRecognizedThreat();
+	public native RecognizedActor GetClosestRecognizedTeam(int team);
+	public native RecognizedActor GetClosestRecognizedFilter(nextbot_functions func, any data = 0);
+#endif
+	public native float GetTimeSinceVisible(int team);
 	public native bool IsAbleToSeeEntity(int entity, FieldOfViewCheckType checkFOV, float visibleSpot[3] = NULL_VECTOR);
 	public native bool IsAbleToSeeVector(float pos[3], FieldOfViewCheckType checkFOV);
 	public native bool IsIgnored(int entity);
+#if defined GAME_L4D2
+	public native bool IsNoticed(int entity);
+#elseif defined GAME_TF2
 	public native bool IsVisibleEntityNoticed(int entity);
+#endif
 	public native bool IsInFieldOfViewVector(float pos[3]);
 	public native bool IsInFieldOfViewEntity(int entity);
 	public native bool IsLineOfSightClear(float pos[3]);
@@ -522,10 +582,12 @@ methodmap IBody < INextBotComponent
 		public native get();
 	}
 
+#if defined GAME_TF2
 	property float CollisionGroup
 	{
 		public native get();
 	}
+#endif
 
 	public native void GetHullMins(float vec[3]);
 	public native void GetHullMaxs(float vec[3]);
@@ -558,10 +620,12 @@ methodmap IBodyCustom < IBody
 		public native set(int height);
 	}
 
+#if defined GAME_TF2
 	property int CollisionGroup
 	{
 		public native set(int height);
 	}
+#endif
 
 	public native void SetHullMins(float vec[3]);
 	public native void SetHullMaxs(float vec[3]);
@@ -599,7 +663,7 @@ methodmap INextBot
 
 	public native void Reset();
 
-	public void DoThink(int entity)
+	public bool DoThink(int entity)
 	{
 		static ConVar NextBotStop = null;
 		if(NextBotStop == null) {
@@ -634,10 +698,16 @@ methodmap INextBot
 	public native float GetRangeSquaredToEntity(int entity);
 	public native float GetRangeSquaredToVector(float vec[3]);
 
-	//public native void RegisterComponent(INextBotComponent comp);
-	//public native void UnregisterComponent(INextBotComponent comp);
+#if defined GAME_L4D2
+	
+#endif
 
+#if defined GAME_TF2
 	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
+#elseif defined GAME_L4D2
+	public native ZombieBotLocomotionCustom AllocateCustomLocomotion();
+#endif
+
 	//public native IVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
 };
@@ -764,6 +834,9 @@ methodmap Path < Handle
 	property int Subject
 	{
 		public native get();
+#if defined GAME_L4D2
+		public native set(int entity);
+#endif
 	}
 
 	property Segment CurrentGoal
@@ -773,8 +846,13 @@ methodmap Path < Handle
 
 	public native void Invalidate();
 
+#if defined GAME_TF2
 	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
 	public native bool ComputeEntity(INextBot bot, int subject, nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+#elseif defined GAME_L4D2
+	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_functions functor, any data = 0, float maxPathLength = 0.0);
+	public native bool ComputeEntity(INextBot bot, int subject, nextbot_functions functor, any data = 0, float maxPathLength = 0.0);
+#endif
 };
 
 methodmap PathFollower < Path
@@ -787,11 +865,13 @@ methodmap PathFollower < Path
 		public native set(float height);
 	}
 
+#if defined GAME_TF2
 	property float GoalTolerance
 	{
 		public native get();
 		public native set(float height);
 	}
+#endif
 
 	property int Hindrance
 	{
@@ -830,6 +910,7 @@ methodmap RetreatPath < PathFollower
 	public native void Update(INextBot bot, int entity);
 };
 
+#if defined GAME_TF2
 methodmap CTFPathFollower < PathFollower
 {
 	public native CTFPathFollower();
@@ -839,6 +920,7 @@ methodmap CTFPathFollower < PathFollower
 		public native get();
 	}
 };
+#endif
 
 native bool EntityIsCombatCharacter(int entity);
 native CNavArea GetEntityLastKnownArea(int entity);
@@ -924,9 +1006,10 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 			preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
 		}
 
-		TFTeam team = view_as<TFTeam>(GetEntProp(entity, Prop_Data, "m_iTeamNum"));
+		int team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
 
 		if(flags & cost_flags_safest) {
+		#if defined GAME_TF2
 			CTFNavArea tfarea = view_as<CTFNavArea>(area);
 
 			if(tfarea.InCombat) {
@@ -936,32 +1019,34 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 
 			static const float sentryDangerCost = 5.0;
 			switch(team) {
-				case TFTeam_Red: {
+				case 2: {
 					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
 						dist *= sentryDangerCost;
 					}
 				}
-				case TFTeam_Blue: {
+				case 3: {
 					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
 						dist *= sentryDangerCost;
 					}
 				}
 			}
+		#endif
 		}
 
 		if(flags & cost_flags_discrete) {
-			TFTeam enemy_team = TFTeam_Unassigned;
+			int enemy_team = 0;
 			switch(team) {
-				case TFTeam_Red: { enemy_team = TFTeam_Blue; }
-				case TFTeam_Blue: { enemy_team = TFTeam_Red; }
+				case 2: { enemy_team = 3; }
+				case 3: { enemy_team = 2; }
 			}
 
+		#if defined GAME_TF2
 			int obj = -1;
 			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-				TFTeam obj_team = view_as<TFTeam>(GetEntProp(entity, Prop_Data, "m_iTeamNum"));
-				if(team == TFTeam_Unassigned ||
-					enemy_team == TFTeam_Unassigned ||
-					obj_team == TFTeam_Unassigned ||
+				int obj_team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
+				if(team == 0 ||
+					enemy_team == 0 ||
+					obj_team == 0 ||
 					obj_team == enemy_team) {
 					UpdateEntityLastKnownArea(obj);
 
@@ -971,6 +1056,15 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 					}
 				}
 			}
+		#elseif defined GAME_L4D2
+			if(enemy_team == 3) {
+				//loop infected
+			}
+
+			if(enemy_team == 2) {
+				//loop survivor
+			}
+		#endif
 
 			static const float teammateCost = 10.0;
 			dist += dist * teammateCost * area.GetPlayerCount(team);
@@ -978,9 +1072,11 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 
 		float cost = dist * preference;
 
+	#if defined GAME_TF2
 		if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
 			cost *= area.ComputeFuncNavCost(entity);
 		}
+	#endif
 
 		return cost + fromArea.CostSoFar;
 	}
@@ -995,9 +1091,11 @@ public void __ext_nextbot_SetNTVOptional()
 	MarkNativeAsOptional("Path.Memory.get");
 	MarkNativeAsOptional("PathFollower.PathFollower");
 	MarkNativeAsOptional("PathFollower.Update");
+#if defined GAME_TF2
 	MarkNativeAsOptional("CTFPathFollower.CTFPathFollower");
 	MarkNativeAsOptional("NextBotGoundLocomotion.NextBotGoundLocomotion");
 	MarkNativeAsOptional("NextBotGoundLocomotion.Memory.get");
+#endif
 }
 #endif
 

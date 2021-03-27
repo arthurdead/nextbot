@@ -1,7 +1,13 @@
 "Games"
 {
-	"tf"
+	"#default"
 	{
+		"#supported"
+		{
+			"game"	"tf"
+			"game"	"left4dead2"
+		}
+
 		"Signatures"
 		{
 			"Path::ComputePathDetails"
@@ -44,16 +50,6 @@
 				"library"	"server"
 				"linux"		"@_ZN22NextBotCombatCharacterC1Ev"
 			}
-			"NextBotGroundLocomotion::NextBotGroundLocomotion"
-			{
-				"library"	"server"
-				"linux"		"@_ZN23NextBotGroundLocomotionC1EP8INextBot"
-			}
-			"CTFPathFollower::CTFPathFollower"
-			{
-				"library"	"server"
-				"linux"		"@_ZN15CTFPathFollowerC1Ev"
-			}
 			"NavAreaBuildPath"
 			{
 				"library"	"server"
@@ -63,11 +59,6 @@
 			{
 				"library"	"server"
 				"linux"		"@_ZNK8CNavMesh15GetGroundHeightERK6VectorPfPS0_"
-			}
-			"CNavMesh::GetNearestNavArea"
-			{
-				"library"	"server"
-				"linux"		"@_ZNK8CNavMesh17GetNearestNavAreaERK6Vectorbfbbi"
 			}
 			"TheNavMesh"
 			{
@@ -94,30 +85,10 @@
 				"library"	"server"
 				"linux"		"@_ZN8INextBot9EndUpdateEv"
 			}
-			"NextBotGroundLocomotion::ApplyAccumulatedApproach"
-			{
-				"library"	"server"
-				"linux"		"@_ZN23NextBotGroundLocomotion24ApplyAccumulatedApproachEv"
-			}
-			"NextBotGroundLocomotion::UpdatePosition"
-			{
-				"library"	"server"
-				"linux"		"@_ZN23NextBotGroundLocomotion14UpdatePositionERK6Vector"
-			}
-			"NextBotGroundLocomotion::UpdateGroundConstraint"
-			{
-				"library"	"server"
-				"linux"		"@_ZN23NextBotGroundLocomotion22UpdateGroundConstraintEv"
-			}
 			"CBaseEntity::CalcAbsoluteVelocity"
 			{
 				"library"	"server"
 				"linux"		"@_ZN11CBaseEntity20CalcAbsoluteVelocityEv"
-			}
-			"NextBotGroundLocomotion::ResolveCollision"
-			{
-				"library"	"server"
-				"linux"		"@_ZN23NextBotGroundLocomotion16ResolveCollisionERK6VectorS2_i"
 			}
 			"CBaseEntity::SetGroundEntity"
 			{
@@ -129,7 +100,88 @@
 				"library" "server"
 				"linux" "@_ZN18CTraceFilterSimple15ShouldHitEntityEP13IHandleEntityi"
 			}
+			"ILocomotion::ILocomotion"
+			{
+				"library" "server"
+				"linux" "@_ZN11ILocomotionC1EP8INextBot"
+			}
 		}
+	}
+	"left4dead2"
+	{
+		"Signatures"
+		{
+			"Path::Compute(CBaseCombatCharacter)"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path7ComputeIK9IPathCostEEbP8INextBotP20CBaseCombatCharacterRT_f"
+			}
+			"Path::Compute(Vector)"
+			{
+				"library"	"server"
+				"linux"		"@_ZN4Path7ComputeIK9IPathCostEEbP8INextBotRK6VectorRT_f"
+			}
+			"CNavMesh::GetNearestNavArea"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8CNavMesh17GetNearestNavAreaERK6Vectorbfbbb"
+			}
+			"ZombieBotLocomotion::ZombieBotLocomotion"
+			{
+				"library"	"server"
+				"linux"		"@_ZN19ZombieBotLocomotionC1EP8INextBot"
+			}
+		}
+		"Offsets"
+		{
+			"CBaseEntity::MyNextBotPointer"
+			{
+				"linux" "82"
+			}
+			"CBaseEntity::MyCombatCharacterPointer"
+			{
+				"linux" "81"
+			}
+			"CBaseEntity::WorldSpaceCenter"
+			{
+				"linux" "162"
+			}
+			"CBaseEntity::EyeAngles"
+			{
+				"linux" "142"
+			}
+			"CBaseCombatCharacter::GetLastKnownArea"
+			{
+				"linux" "331"
+			}
+			"CBaseCombatCharacter::UpdateLastKnownArea"
+			{
+				"linux" "334"
+			}
+			"CBaseEntity::PerformCustomPhysics"
+			{
+				"linux" "180"
+			}
+			"CBaseCombatCharacter::IsAreaTraversable"
+			{
+				"linux" "332"
+			}
+			"CBaseEntity::Spawn"
+			{
+				"linux" "25"
+			}
+			"sizeof(NextBotCombatCharacter)"
+			{
+				"linux" "7604"
+			}
+			"sizeof(ZombieBotLocomotion)"
+			{
+				"linux" "336"
+			}
+		}
+	}
+	"tf"
+	{
 		"Offsets"
 		{
 			"CBaseEntity::MyNextBotPointer"
@@ -175,6 +227,44 @@
 			"sizeof(NextBotCombatCharacter)"
 			{
 				"linux" "4320"
+			}
+		}
+		"Signatures"
+		{
+			"CTFPathFollower::CTFPathFollower"
+			{
+				"library"	"server"
+				"linux"		"@_ZN15CTFPathFollowerC1Ev"
+			}
+			"NextBotGroundLocomotion::NextBotGroundLocomotion"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotionC1EP8INextBot"
+			}
+			"NextBotGroundLocomotion::ApplyAccumulatedApproach"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion24ApplyAccumulatedApproachEv"
+			}
+			"NextBotGroundLocomotion::UpdatePosition"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion14UpdatePositionERK6Vector"
+			}
+			"NextBotGroundLocomotion::UpdateGroundConstraint"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion22UpdateGroundConstraintEv"
+			}
+			"NextBotGroundLocomotion::ResolveCollision"
+			{
+				"library"	"server"
+				"linux"		"@_ZN23NextBotGroundLocomotion16ResolveCollisionERK6VectorS2_i"
+			}
+			"CNavMesh::GetNearestNavArea"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8CNavMesh17GetNearestNavAreaERK6Vectorbfbbi"
 			}
 		}
 	}

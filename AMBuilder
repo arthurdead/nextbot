@@ -33,13 +33,37 @@ else:
 
 project.sources += sourceFiles
 
+def get_sdkPath(envvar, folder):
+  path = ""
+  if builder.options.hl2sdk_root:
+    path = os.path.join(builder.options.hl2sdk_root, folder)
+  else:
+    path = ResolveEnvPath(envvar, folder)
+  path = os.path.abspath(path)
+  return path
+
+hl2sdk_swarm = get_sdkPath('HL2SDKSWARM', 'hl2sdk-swarm')
+
 for sdk_name in Extension.sdks:
   sdk = Extension.sdks[sdk_name]
-
-  project.compiler.cxxincludes += [os.path.join(sdk.path, 'game')]
-  project.compiler.cxxincludes += [os.path.join(sdk.path, 'game/server')]
-  project.compiler.cxxincludes += [os.path.join(sdk.path, 'game/shared')]
   
   binary = Extension.HL2Config(project, projectName + '.ext.' + sdk.ext, sdk)
+
+  if sdk.name == 'l4d2':
+    binary.compiler.cxxincludes += [
+      hl2sdk_swarm,
+      os.path.join(hl2sdk_swarm, 'game'),
+      os.path.join(hl2sdk_swarm, 'public'),
+      os.path.join(hl2sdk_swarm, 'game/server'),
+      os.path.join(hl2sdk_swarm, 'game/shared'),
+    ]
+  elif sdk.name == 'sdk2013':
+    binary.compiler.cxxincludes += [
+      sdk.path,
+      os.path.join(sdk.path, 'game'),
+      os.path.join(sdk.path, 'public'),
+      os.path.join(sdk.path, 'game/server'),
+      os.path.join(sdk.path, 'game/shared'),
+    ]
 
 Extension.extensions = builder.Add(project)
