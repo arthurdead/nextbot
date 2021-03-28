@@ -50,11 +50,6 @@
 				"library"	"server"
 				"linux"		"@_ZN22NextBotCombatCharacterC1Ev"
 			}
-			"NavAreaBuildPath"
-			{
-				"library"	"server"
-				"linux"		"@_Z16NavAreaBuildPathIK9IPathCostEbP8CNavAreaS3_PK6VectorRT_PS3_fib"
-			}
 			"CNavMesh::GetGroundHeight"
 			{
 				"library"	"server"
@@ -100,10 +95,25 @@
 				"library" "server"
 				"linux" "@_ZN18CTraceFilterSimple15ShouldHitEntityEP13IHandleEntityi"
 			}
-			"ILocomotion::ILocomotion"
+			"NDebugOverlay::Line"
 			{
 				"library" "server"
-				"linux" "@_ZN11ILocomotionC1EP8INextBot"
+				"linux" "@_ZN13NDebugOverlay4LineERK6VectorS2_iiibf"
+			}
+			"NDebugOverlay::VertArrow"
+			{
+				"library" "server"
+				"linux" "@_ZN13NDebugOverlay9VertArrowERK6VectorS2_fiiiibf"
+			}
+			"NDebugOverlay::HorzArrow"
+			{
+				"library" "server"
+				"linux" "@_ZN13NDebugOverlay9HorzArrowERK6VectorS2_fiiiibf"
+			}
+			"NDebugOverlay::Triangle"
+			{
+				"library" "server"
+				"linux" "@_ZN13NDebugOverlay8TriangleERK6VectorS2_S2_iiiibf"
 			}
 		}
 	}
@@ -130,6 +140,16 @@
 			{
 				"library"	"server"
 				"linux"		"@_ZN19ZombieBotLocomotionC1EP8INextBot"
+			}
+			"INextBot::IsDebugging"
+			{
+				"library"	"server"
+				"linux"		"@_ZNK8INextBot11IsDebuggingEj"
+			}
+			"NavAreaBuildPath"
+			{
+				"library"	"server"
+				"linux"		"@_Z16NavAreaBuildPathIK9IPathCostEbP8CNavAreaS3_PK6VectorS6_RT_PS3_fib"
 			}
 		}
 		"Offsets"
@@ -265,6 +285,11 @@
 			{
 				"library"	"server"
 				"linux"		"@_ZNK8CNavMesh17GetNearestNavAreaERK6Vectorbfbbi"
+			}
+			"NavAreaBuildPath"
+			{
+				"library"	"server"
+				"linux"		"@_Z16NavAreaBuildPathIK9IPathCostEbP8CNavAreaS3_PK6VectorRT_PS3_fib"
 			}
 		}
 	}

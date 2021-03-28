@@ -589,6 +589,8 @@ methodmap IBody < INextBotComponent
 	}
 #endif
 
+	public native bool IsPostureMobile();
+
 	public native void GetHullMins(float vec[3]);
 	public native void GetHullMaxs(float vec[3]);
 };

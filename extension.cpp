@@ -142,7 +142,6 @@ void *NextBotGroundLocomotionCTOR = nullptr;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 void *ZombieBotLocomotionCTOR = nullptr;
 #endif
-void *ILocomotionCTOR = nullptr;
 
 void *PathComputePathDetails = nullptr;
 void *PathBuildTrivialPath = nullptr;
@@ -162,6 +161,7 @@ void *CTraceFilterSimpleShouldHitEntity = nullptr;
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 void *PathComputeVector = nullptr;
 void *PathComputeEntity = nullptr;
+void *INextBotIsDebugging = nullptr;
 #endif
 
 void *NavAreaBuildPathPtr = nullptr;
@@ -816,11 +816,19 @@ bool CNavMesh::GetGroundHeight( const Vector &pos, float *height, Vector *normal
 	return call_mfunc<bool, CNavMesh, const Vector &, float *, Vector *>(this, CNavMeshGetGroundHeight, pos, height, normal);
 }
 
+#if SOURCE_ENGINE == SE_TF2
 template< typename CostFunctor >
 bool NavAreaBuildPath( CNavArea *startArea, CNavArea *goalArea, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea = NULL, float maxPathLength = 0.0f, int teamID = TEAM_ANY, bool ignoreNavBlockers = false )
 {
 	return (void_to_func<bool(*)(CNavArea *, CNavArea *, const Vector *, CostFunctor &, CNavArea **, float, int, bool)>(NavAreaBuildPathPtr))(startArea, goalArea, goalPos, costFunc, closestArea, maxPathLength, teamID, ignoreNavBlockers);
 }
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+template< typename CostFunctor >
+bool NavAreaBuildPath( CNavArea *startArea, CNavArea *goalArea, const Vector *startPos, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea = NULL, float maxPathLength = 0.0f, int teamID = TEAM_ANY, bool ignoreNavBlockers = false )
+{
+	return (void_to_func<bool(*)(CNavArea *, CNavArea *, const Vector *, const Vector *, CostFunctor &, CNavArea **, float, int, bool)>(NavAreaBuildPathPtr))(startArea, goalArea, startPos, goalPos, costFunc, closestArea, maxPathLength, teamID, ignoreNavBlockers);
+}
+#endif
 
 class CBaseCombatWeapon;
 class Path;
@@ -1647,7 +1655,10 @@ public:
 #if SOURCE_ENGINE == SE_TF2
 	virtual bool IsDebugging( unsigned int type ) const = 0;		// return true if this bot is debugging any of the given types
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bool IsDebugging( unsigned int type ) const { return false; }
+	bool IsDebugging( unsigned int type ) const
+	{
+		return call_mfunc<bool, INextBot, unsigned int>(this, INextBotIsDebugging, type);
+	}
 #endif
 
 	virtual const char *GetDebugIdentifier( void ) const = 0;		// return the name of this bot for debugging purposes
@@ -1736,10 +1747,10 @@ public:
 	
 	mutable IVision		*m_baseVision;
 #else
-	char pad3[sizeof(ILocomotion)];
-	char pad4[sizeof(IBody)];
-	char pad5[sizeof(IIntention)];
-	char pad6[sizeof(IVision)];
+	char pad3[108];
+	char pad4[80];
+	char pad5[24];
+	char pad6[328];
 	
 	ILocomotion &baseLocomotion()
 	{
@@ -1785,12 +1796,6 @@ SH_DECL_MANUALHOOK0(MyNextBotPointer, 0, 0, 0, INextBot *)
 SH_DECL_MANUALHOOK4_void(PerformCustomPhysics, 0, 0, 0, Vector *, Vector *, QAngle *, QAngle *)
 SH_DECL_MANUALHOOK1(IsAreaTraversable, 0, 0, 0, bool, const CNavArea *)
 SH_DECL_MANUALHOOK0_void(Spawn, 0, 0, 0)
-
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-SH_DECL_HOOK0(INextBot, GetLocomotionInterface, const, 0, ILocomotion *)
-SH_DECL_HOOK0(INextBot, GetBodyInterface, const, 0, IBody *)
-SH_DECL_HOOK0(INextBot, GetVisionInterface, const, 0, IVision *)
-#endif
 
 class INextBotCustom : public INextBot
 {
@@ -2134,6 +2139,59 @@ public:
 	}
 };
 
+void *NDebugOverlayLine = nullptr;
+void *NDebugOverlayVertArrow = nullptr;
+void *NDebugOverlayHorzArrow = nullptr;
+void *NDebugOverlayTriangle = nullptr;
+
+namespace NDebugOverlay
+{
+	void Line( const Vector &origin, const Vector &target, int r, int g, int b, bool noDepthTest, float flDuration )
+	{
+		(void_to_func<void(*)(const Vector &, const Vector &, int, int, int, bool, float)>(NDebugOverlayLine))(origin, target, r, g, b, noDepthTest, flDuration);
+	}
+	
+	void VertArrow( const Vector &startPos, const Vector &endPos, float width, int r, int g, int b, int a, bool noDepthTest, float flDuration)
+	{
+		(void_to_func<void(*)(const Vector &, const Vector &, float, int, int, int, int, bool, float)>(NDebugOverlayVertArrow))(startPos, endPos, width, r, g, b, a, noDepthTest, flDuration);
+	}
+	
+	void HorzArrow( const Vector &startPos, const Vector &endPos, float width, int r, int g, int b, int a, bool noDepthTest, float flDuration)
+	{
+		(void_to_func<void(*)(const Vector &, const Vector &, float, int, int, int, int, bool, float)>(NDebugOverlayHorzArrow))(startPos, endPos, width, r, g, b, a, noDepthTest, flDuration);
+	}
+	
+	void Triangle( const Vector &p1, const Vector &p2, const Vector &p3, int r, int g, int b, int a, bool noDepthTest, float duration )
+	{
+		(void_to_func<void(*)(const Vector &, const Vector &, const Vector &, int, int, int, int, bool, float)>(NDebugOverlayTriangle))(p1, p2, p3, r, g, b, a, noDepthTest, duration);
+	}
+}
+
+void CNavArea::DrawFilled( int r, int g, int b, int a, float deltaT, bool noDepthTest, float margin ) const
+{
+	Vector nw = GetCorner( NORTH_WEST ) + Vector( margin, margin, 0.0f );
+	Vector ne = GetCorner( NORTH_EAST ) + Vector( -margin, margin, 0.0f );
+	Vector sw = GetCorner( SOUTH_WEST ) + Vector( margin, -margin, 0.0f );
+	Vector se = GetCorner( SOUTH_EAST ) + Vector( -margin, -margin, 0.0f );
+
+	if ( a == 0 )
+	{
+		NDebugOverlay::Line( nw, ne, r, g, b, true, deltaT );
+		NDebugOverlay::Line( nw, sw, r, g, b, true, deltaT );
+		NDebugOverlay::Line( sw, se, r, g, b, true, deltaT );
+		NDebugOverlay::Line( se, ne, r, g, b, true, deltaT );
+	}
+	else
+	{
+		NDebugOverlay::Triangle( nw, se, ne, r, g, b, a, noDepthTest, deltaT );
+		NDebugOverlay::Triangle( se, nw, sw, r, g, b, a, noDepthTest, deltaT );
+	}
+
+	// backside
+	NDebugOverlay::Triangle( nw, ne, se, r, g, b, a, noDepthTest, deltaT );
+	NDebugOverlay::Triangle( se, sw, nw, r, g, b, a, noDepthTest, deltaT );
+}
+
 #if SOURCE_ENGINE == SE_TF2
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetGravity, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionForward, SH_NOATTRIB, 0, float);
@@ -2417,7 +2475,7 @@ public:
 				if ( GetBot()->IsDebugging( NEXTBOT_LOCOMOTION ) )
 				{
 					DevMsg( "%3.2f: NextBotGroundLocomotion - Too steep to stand here\n", gpGlobals->curtime );
-					//NDebugOverlay::Line( GetFeet(), GetFeet() + 20.0f * ground.plane.normal, 255, 150, 0, true, 5.0f );
+					NDebugOverlay::Line( GetFeet(), GetFeet() + 20.0f * ground.plane.normal, 255, 150, 0, true, 5.0f );
 				}
 
 				// clear out upward velocity so we don't walk up lightpoles
@@ -2895,7 +2953,11 @@ public:
 		// Compute shortest path to subject
 		//
 		CNavArea *closestArea = NULL;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		bool pathResult = NavAreaBuildPath( startArea, subjectArea, &start, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+#elif SOURCE_ENGINE == SE_TF2
 		bool pathResult = NavAreaBuildPath( startArea, subjectArea, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+#endif
 		
 		// Failed?
 		if ( closestArea == NULL ) {
@@ -3007,8 +3069,12 @@ public:
 		// Compute shortest path to goal
 		//
 		CNavArea *closestArea = NULL;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		bool pathResult = NavAreaBuildPath( startArea, goalArea, &start, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+#elif SOURCE_ENGINE == SE_TF2
 		bool pathResult = NavAreaBuildPath( startArea, goalArea, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
-
+#endif
+		
 		// Failed?
 		if ( closestArea == NULL ) {
 			return false;
@@ -3403,8 +3469,7 @@ void PathFollower::Update( INextBot *bot )
 		vtableindex = vfunc_index(&PathFollower::Update);
 	}
 	
-	void **vtable = *(void ***)this;
-	(this->*void_to_func<void(PathFollower::*)(INextBot *)>(vtable[vtableindex]))(bot);
+	call_vfunc<void, PathFollower, INextBot *>(this, vtableindex, bot);
 }
 
 SH_DECL_HOOK0_void(Path, Invalidate, SH_NOATTRIB, 0);
@@ -3648,10 +3713,14 @@ public:
 
 		if ( !m_failTimer.IsElapsed() )
 		{
-	// 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
-	// 		{
-	// 			DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Fail timer not elapsed.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
-	// 		}
+	 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
+	 		{
+				static float lastprint = 0.0f;
+				if(lastprint <= gpGlobals->curtime) {
+					DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Fail timer not elapsed.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+					lastprint = gpGlobals->curtime + 2.0f;
+				}
+	 		}
 			return;
 		}
 
@@ -3672,10 +3741,14 @@ public:
 		if ( IsValid() && !m_throttleTimer.IsElapsed() )
 		{
 			// require a minimum time between repaths, as long as we have a path to follow
-	// 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
-	// 		{
-	// 			DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Rate throttled.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
-	// 		}
+	 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
+	 		{
+				static float lastprint = 0.0f;
+				if(lastprint <= gpGlobals->curtime) {
+					DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Rate throttled.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+					lastprint = gpGlobals->curtime + 2.0f;
+				}
+	 		}
 			return;
 		}
 
@@ -3709,8 +3782,8 @@ public:
 			{
 				if ( bot->IsDebugging( NEXTBOT_PATH ) )
 				{
-					//const float size = 20.0f;			
-					//NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, RandomInt( 0, 200 ), 255, 255, true, 30.0f );
+					const float size = 20.0f;			
+					NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, RandomInt( 0, 200 ), 255, 255, true, 30.0f );
 
 					DevMsg( "%3.2f: bot(#%d) REPATH\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
 				}
@@ -3740,11 +3813,11 @@ public:
 
 				if ( bot->IsDebugging( NEXTBOT_PATH ) )
 				{
-					//const float size = 20.0f;	
+					const float size = 20.0f;	
 					const float dT = 90.0f;		
 					int c = RandomInt( 0, 100 );
-					//NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, c, c, 255, true, dT );
-					//NDebugOverlay::HorzArrow( bot->GetPosition(), pathTarget, 5.0f, 255, c, c, 255, true, dT );
+					NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, c, c, 255, true, dT );
+					NDebugOverlay::HorzArrow( bot->GetPosition(), pathTarget, 5.0f, 255, c, c, 255, true, dT );
 
 					DevMsg( "%3.2f: bot(#%d) REPATH FAILED\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
 				}
@@ -4198,20 +4271,18 @@ public:
 		if ( fromArea == NULL )
 		{
 			cost = 0.0f;
-			
-#if 0
-			if ( area->Contains( m_threat->GetAbsOrigin() ) )
+		
+			/*if ( area->Contains( m_threat->GetAbsOrigin() ) )
 			{
 				// maximum danger - threat is in the area with us
 				cost += 10.0f * dangerDensity;
 				
 				if ( m_me->IsDebugging( NEXTBOT_PATH ) )
 				{
-					//area->DrawFilled( 255, 0, 0, 128 );
+					area->DrawFilled( 255, 0, 0, 128 );
 				}
 			}
-			else
-#endif
+			else*/
 			{
 				// danger proportional to range to us
 				float rangeToThreat = ( m_threat->GetAbsOrigin() - m_me->GetEntity()->GetAbsOrigin() ).Length();
@@ -4222,7 +4293,7 @@ public:
 
 					if ( m_me->IsDebugging( NEXTBOT_PATH ) )
 					{
-						//NDebugOverlay::Line( m_me->GetEntity()->GetAbsOrigin(), m_threat->GetAbsOrigin(), 255, 0, 0, true, debugDeltaT );
+						NDebugOverlay::Line( m_me->GetEntity()->GetAbsOrigin(), m_threat->GetAbsOrigin(), 255, 0, 0, true, debugDeltaT );
 					}
 				}				
 			}
@@ -4298,12 +4369,12 @@ public:
 
 				if ( m_me->IsDebugging( NEXTBOT_PATH ) )
 				{
-					//NDebugOverlay::HorzArrow( fromArea->GetCenter(), area->GetCenter(), 5, 255 * dangerFactor, 0, 0, 255, true, debugDeltaT );
+					NDebugOverlay::HorzArrow( fromArea->GetCenter(), area->GetCenter(), 5, 255 * dangerFactor, 0, 0, 255, true, debugDeltaT );
 
 					Vector to = close - m_threat->GetAbsOrigin();
 					to.NormalizeInPlace();
 
-					//NDebugOverlay::Line( close, close - 50.0f * to, 255, 0, 0, true, debugDeltaT );
+					NDebugOverlay::Line( close, close - 50.0f * to, 255, 0, 0, true, debugDeltaT );
 				}
 			}
 			
@@ -5108,6 +5179,10 @@ cell_t INextBotComponentBotget(IPluginContext *pContext, const cell_t *params)
 }
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
+SH_DECL_HOOK0(INextBot, GetLocomotionInterface, const, 0, ILocomotion *)
+SH_DECL_HOOK0(INextBot, GetBodyInterface, const, 0, IBody *)
+SH_DECL_HOOK0(INextBot, GetVisionInterface, const, 0, IVision *)
+
 struct pointer_holder_t
 {
 	ILocomotion *locomotion = nullptr;
@@ -6016,6 +6091,12 @@ cell_t IBodyGetHullMaxs(IPluginContext *pContext, const cell_t *params)
 	addr[2] = sp_ftoc(ang.z);
 	
 	return 0;
+}
+
+cell_t IBodyIsPostureMobile(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsPostureMobile();
 }
 
 cell_t ILocomotionRun(IPluginContext *pContext, const cell_t *params)
@@ -7165,6 +7246,7 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"IBody.GetHullMins", IBodyGetHullMins},
 	{"IBody.GetHullMaxs", IBodyGetHullMaxs},
+	{"IBody.IsPostureMobile", IBodyIsPostureMobile},
 	{"IBodyCustom.HullWidth.set", IBodyCustomHullWidthset},
 	{"IBodyCustom.HullHeight.set", IBodyCustomHullHeightset},
 	{"IBodyCustom.StandHullHeight.set", IBodyCustomStandHullHeightset},
@@ -7291,7 +7373,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
 #endif
 	g_pGameConf->GetMemSig("INextBot::INextBot", &INextBotCTOR);
-	g_pGameConf->GetMemSig("ILocomotion::ILocomotion", &ILocomotionCTOR);
 	
 	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
 	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
@@ -7314,8 +7395,13 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	g_pGameConf->GetMemSig("Path::Compute(CBaseCombatCharacter)", &PathComputeEntity);
 	g_pGameConf->GetMemSig("Path::Compute(Vector)", &PathComputeVector);
+	g_pGameConf->GetMemSig("INextBot::IsDebugging", &INextBotIsDebugging);
 #endif
 	
+	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
+	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
+	g_pGameConf->GetMemSig("NDebugOverlay::HorzArrow", &NDebugOverlayHorzArrow);
+	g_pGameConf->GetMemSig("NDebugOverlay::Triangle", &NDebugOverlayTriangle);
 	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
