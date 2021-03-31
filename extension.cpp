@@ -157,6 +157,9 @@ void *NavAreaBuildPathPtr = nullptr;
 
 int CBaseEntityMyNextBotPointer = -1;
 int CBaseEntityMyCombatCharacterPointer = -1;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+int CBaseEntityMyInfectedPointer = -1;
+#endif
 int CBaseCombatCharacterGetLastKnownArea = -1;
 int CBaseCombatCharacterUpdateLastKnownArea = -1;
 int CBaseEntityWorldSpaceCenter = -1;
@@ -341,6 +344,13 @@ public:
 	{
 		return call_vfunc<CBaseCombatCharacter *>(this, CBaseEntityMyCombatCharacterPointer);
 	}
+	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	CBaseCombatCharacter *MyInfectedPointer()
+	{
+		return call_vfunc<CBaseCombatCharacter *>(this, CBaseEntityMyInfectedPointer);
+	}
+#endif
 	
 	const Vector &GetAbsOrigin()
 	{
@@ -594,6 +604,36 @@ float CNavArea::ComputeFuncNavCost( CBaseCombatCharacter *who ) const
 	}
 
 	return funcCost;
+}
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+bool CNavArea::IsBlocked( int teamID, bool ignoreNavBlockers ) const
+{
+	if ( ignoreNavBlockers && ( m_attributeFlags & NAV_MESH_NAV_BLOCKER ) )
+	{
+		return false;
+	}
+	
+	#define TEAM_SURVIVOR 2
+	#define NAV_PLAYERCLIP 0
+
+#ifdef TERROR
+	//if ( ( teamID == TEAM_SURVIVOR ) && ( m_attributeFlags & NAV_PLAYERCLIP ) )
+	//	return true;
+#endif
+
+	if ( teamID == TEAM_ANY )
+	{
+		bool isBlocked = false;
+		for ( int i=0; i<MAX_NAV_TEAMS; ++i )
+		{
+			isBlocked |= m_isBlocked[ i ];
+		}
+
+		return isBlocked;
+	}
+
+	int teamIdx = teamID % MAX_NAV_TEAMS;
+	return m_isBlocked[ teamIdx ];
 }
 #endif
 
@@ -1124,10 +1164,7 @@ public:
 		enginetrace->TraceRay( ray, fMask, pFilter, pTrace );
 	}
 	
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	char pad1[16];
-#endif
-	
+#if SOURCE_ENGINE == SE_TF2
 	Vector m_motionVector;
 	Vector m_groundMotionVector;
 	float m_speed;
@@ -1139,6 +1176,9 @@ public:
 	CountdownTimer m_stillStuckTimer;				// for resending stuck events
 	Vector m_stuckPos;								// where we got stuck
 	IntervalTimer m_moveRequestTimer;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	char pad1[88];
+#endif
 };
 
 class IBody : public INextBotComponent
@@ -1360,6 +1400,11 @@ public:
 	bool m_isVisible;				// flagged by IVision update as visible or not
 };
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
+class RecognizeInfo
+{
+	
+};
+
 class RecognizedActor
 {
 public:
@@ -1478,20 +1523,20 @@ public:
 	virtual bool IsLookingAt( const Vector &pos, float cosTolerance = 0.95f ) const = 0;					// are we looking at the given position
 	virtual bool IsLookingAt( const CBaseCombatCharacter *actor, float cosTolerance = 0.95f ) const = 0;	// are we looking at the given actor
 	
+#if SOURCE_ENGINE == SE_TF2
 	CountdownTimer m_scanTimer;			// for throttling update rate
 	
 	float m_FOV;						// current FOV in degrees
 	float m_cosHalfFOV;					// the cosine of FOV/2
 	
-#if SOURCE_ENGINE == SE_TF2
 	CUtlVector< CKnownEntity > m_knownEntityVector;		// the set of enemies/friends we are aware of
-#elif SORUCE_ENGINE == SE_LEFT4DEAD2
-	CUtlVector< RecognizedActor > m_knownEntityVector;
-#endif
 	mutable CHandle< CBaseEntity > m_primaryThreat;
 
 	float m_lastVisionUpdateTimestamp;
 	IntervalTimer m_notVisibleTimer[ MAX_TEAMS ];		// for tracking interval since last saw a member of the given team
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	char pad1[308];
+#endif
 };
 
 enum QueryResultType
@@ -1547,7 +1592,7 @@ public:
 class IIntention : public INextBotComponent, public IContextualQuery
 {
 public:
-	
+
 };
 
 class INextBot : public INextBotEventResponder
@@ -1582,6 +1627,10 @@ public:
 	virtual bool IsFriend( const CBaseEntity *them ) const = 0;			// return true if given entity is our friend
 	virtual bool IsSelf( const CBaseEntity *them ) const = 0;			// return true if 'them' is actually me
 
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	virtual bool IsAllowedToClimb() const = 0;
+#endif
+	
 	/**
 	 * Can we climb onto this entity?
 	 */	
@@ -1691,17 +1740,25 @@ public:
 	
 	void ReplaceComponent(INextBotComponent *whom, INextBotComponent *with)
 	{
-		with->m_nextComponent = whom->m_nextComponent;
+		bool found = false;
 		
-		for(INextBotComponent *cur = m_componentList, *prev = nullptr; cur != nullptr; prev = cur, cur = cur->m_nextComponent) {
-			if (cur == whom) {
-				if(prev != nullptr) {
-					prev->m_nextComponent = with;
-				} else {
-					m_componentList = with;
+		if(whom) {
+			for(INextBotComponent *cur = m_componentList, *prev = nullptr; cur != nullptr; prev = cur, cur = cur->m_nextComponent) {
+				if (cur == whom) {
+					with->m_nextComponent = cur->m_nextComponent;
+					if(prev != nullptr) {
+						prev->m_nextComponent = with;
+					} else {
+						m_componentList = with;
+					}
+					found = true;
+					break;
 				}
-				break;
 			}
+		}
+		
+		if(!found) {
+			RegisterComponent(with);
 		}
 	}
 	
@@ -1731,10 +1788,10 @@ public:
 	
 	mutable IVision		*m_baseVision;
 #else
-	char pad3[108];
-	char pad4[80];
-	char pad5[24];
-	char pad6[328];
+	char pad3[sizeof(ILocomotion)];
+	char pad4[sizeof(IBody)];
+	char pad5[sizeof(IIntention)];
+	char pad6[sizeof(IVision)];
 	
 	ILocomotion &baseLocomotion()
 	{
@@ -1941,6 +1998,8 @@ public:
 	virtual void SetAcceleration( const Vector &accel ) = 0;	// set world space acceleration
 	virtual void SetVelocity( const Vector &vel ) = 0;		// set world space velocity
 	virtual const Vector &GetMoveVector( void ) = 0;
+	
+	char pad1[228];
 };
 #endif
 
@@ -2824,10 +2883,6 @@ public:
 
 	IntervalTimer m_ageTimer;					// how old is this path?
 	
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	char pad1[4];
-#endif
-	
 	CHandle< CBaseCombatCharacter > m_subject;	// the subject this path leads to
 	
 	enum { MAX_ADJ_AREAS = 64 };
@@ -3409,8 +3464,26 @@ public:
 		DONT_LEAD_SUBJECT
 	};
 	
+	CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
+	CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
+	CountdownTimer m_lifetimeTimer;
+	EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
+	SubjectChaseType m_chaseHow;
+	
 	void ctor(SubjectChaseType chaseHow)
 	{
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		static void **timervtable = nullptr;
+		if(!timervtable) {
+			static CountdownTimer timerobject;
+			timervtable = *(void ***)&timerobject;
+		}
+		
+		*(void ***)&m_failTimer = timervtable;
+		*(void ***)&m_throttleTimer = timervtable;
+		*(void ***)&m_lifetimeTimer = timervtable;
+#endif
+		
 		m_failTimer.Invalidate();
 		m_throttleTimer.Invalidate();
 		m_lifetimeTimer.Invalidate();
@@ -3610,7 +3683,11 @@ public:
 		{
 			if ( bot->IsDebugging( NEXTBOT_PATH ) )
 			{
-				DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Bot is on a ladder.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+				static float lastprint = 0.0f;
+				if(lastprint <= gpGlobals->curtime) {
+					DevMsg( "%3.2f: bot(#%d) ChasePath::RefreshPath failed. Bot is on a ladder.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+					lastprint = gpGlobals->curtime + 2.0f;
+				}
 			}
 
 			// don't allow repath until a moment AFTER we have left the ladder
@@ -3623,7 +3700,11 @@ public:
 		{
 			if ( bot->IsDebugging( NEXTBOT_PATH ) )
 			{
-				DevMsg( "%3.2f: bot(#%d) CasePath::RefreshPath failed. No subject.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+				static float lastprint = 0.0f;
+				if(lastprint <= gpGlobals->curtime) {
+					DevMsg( "%3.2f: bot(#%d) CasePath::RefreshPath failed. No subject.\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+					lastprint = gpGlobals->curtime + 2.0f;
+				}
 			}
 			return;
 		}
@@ -3646,7 +3727,11 @@ public:
 		{
 			if ( bot->IsDebugging( NEXTBOT_PATH ) )
 			{
-				DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p to %p).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), m_lastPathSubject.Get(), subject );
+				static float lastprint = 0.0f;
+				if(lastprint <= gpGlobals->curtime) {
+					DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p (#%d) to %p (#%d)).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), m_lastPathSubject.Get(), m_lastPathSubject.Get() ? m_lastPathSubject.Get()->entindex() : -1, subject, subject ? subject->entindex() : -1 );
+					lastprint = gpGlobals->curtime + 2.0f;
+				}
 			}
 
 			Invalidate();
@@ -3702,7 +3787,11 @@ public:
 					const float size = 20.0f;			
 					NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, RandomInt( 0, 200 ), 255, 255, true, 30.0f );
 
-					DevMsg( "%3.2f: bot(#%d) REPATH\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+					static float lastprint = 0.0f;
+					if(lastprint <= gpGlobals->curtime) {
+						DevMsg( "%3.2f: bot(#%d) REPATH\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+						lastprint = gpGlobals->curtime + 2.0f;
+					}
 				}
 
 				m_lastPathSubject = subject;
@@ -3723,7 +3812,9 @@ public:
 			else
 			{
 				// can't reach subject - throttle retry based on range to subject
-				m_failTimer.Start( 0.005f * ( bot->GetRangeTo( subject ) ) );
+				float failtime = 0.005f * ( bot->GetRangeTo( subject ) );
+				
+				m_failTimer.Start( failtime );
 				
 				// allow bot to react to path failure
 				bot->OnMoveToFailure( this, FAIL_NO_PATH_EXISTS );
@@ -3736,7 +3827,11 @@ public:
 					NDebugOverlay::VertArrow( bot->GetPosition() + Vector( 0, 0, size ), bot->GetPosition(), size, 255, c, c, 255, true, dT );
 					NDebugOverlay::HorzArrow( bot->GetPosition(), pathTarget, 5.0f, 255, c, c, 255, true, dT );
 
-					DevMsg( "%3.2f: bot(#%d) REPATH FAILED\n", gpGlobals->curtime, bot->GetEntity()->entindex() );
+					static float lastprint = 0.0f;
+					if(lastprint <= gpGlobals->curtime) {
+						DevMsg( "%3.2f: bot(#%d) REPATH FAILED %f\n", gpGlobals->curtime, bot->GetEntity()->entindex(), failtime );
+						lastprint = gpGlobals->curtime + 2.0f;
+					}
 				}
 
 				Invalidate();
@@ -3782,12 +3877,6 @@ public:
 		// move along the path towards the subject
 		PathFollower::Update( bot );
 	}
-	
-	CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
-	CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
-	CountdownTimer m_lifetimeTimer;
-	EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
-	SubjectChaseType m_chaseHow;
 };
 
 SH_DECL_HOOK6_void(Path, ComputeAreaCrossing, SH_NOATTRIB, 0, INextBot *, const CNavArea *, const Vector &, const CNavArea *, NavDirType, Vector *);
@@ -5206,14 +5295,15 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 #endif
 	
 #if SOURCE_ENGINE == SE_TF2
-	if(bot->m_baseLocomotion) {
-		bot->ReplaceComponent(bot->m_baseLocomotion, locomotion);
-		delete bot->m_baseLocomotion;
-	} else {
-		bot->RegisterComponent(locomotion);
-	}
+	bot->ReplaceComponent(bot->m_baseLocomotion, locomotion);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	bot->ReplaceComponent(&bot->baseLocomotion(), locomotion);
+#endif
+	
+#if SOURCE_ENGINE == SE_TF2
+	if(bot->m_baseLocomotion) {
+		delete bot->m_baseLocomotion;
+	}
 #endif
 	
 	locomotion->Reset();
@@ -5243,14 +5333,15 @@ cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params
 	IBodyCustom *locomotion = new IBodyCustom(bot, false);
 	
 #if SOURCE_ENGINE == SE_TF2
-	if(bot->m_baseBody) {
-		bot->ReplaceComponent(bot->m_baseBody, locomotion);
-		delete bot->m_baseBody;
-	} else {
-		bot->RegisterComponent(locomotion);
-	}
+	bot->ReplaceComponent(bot->m_baseBody, locomotion);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	bot->ReplaceComponent(&bot->baseBody(), locomotion);
+#endif
+	
+#if SOURCE_ENGINE == SE_TF2
+	if(bot->m_baseBody) {
+		delete bot->m_baseBody;
+	}
 #endif
 	
 	locomotion->Reset();
@@ -7268,6 +7359,19 @@ CDetour *pPathOptimize = nullptr;
 CDetour *pApplyAccumulatedApproach = nullptr;
 CDetour *pUpdatePosition = nullptr;
 CDetour *pUpdateGroundConstraint = nullptr;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+CDetour *pResolveZombieCollisions = nullptr;
+
+DETOUR_DECL_MEMBER1(ResolveZombieCollisions, Vector, const Vector &, pos)
+{
+	ZombieBotLocomotion *loc = (ZombieBotLocomotion *)this;
+	
+	if(!loc->GetBot()->GetEntity()->MyInfectedPointer()) {
+		return pos;
+	}
+	
+	return DETOUR_MEMBER_CALL(ResolveZombieCollisions)(pos);
+}
 #endif
 
 #include "funnyfile.h"
@@ -7330,6 +7434,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	SH_MANUALHOOK_RECONFIGURE(Spawn, offset, 0, 0);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	g_pGameConf->GetOffset("CBaseEntity::MyInfectedPointer", &CBaseEntityMyInfectedPointer);
+#endif
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
 	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
@@ -7358,6 +7465,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	pUpdateGroundConstraint = DETOUR_CREATE_MEMBER(UpdateGroundConstraint, "NextBotGroundLocomotion::UpdateGroundConstraint")
 	pUpdateGroundConstraint->EnableDetour();
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	pResolveZombieCollisions = DETOUR_CREATE_MEMBER(ResolveZombieCollisions, "ZombieBotLocomotion::ResolveZombieCollisions")
+	pResolveZombieCollisions->EnableDetour();
 #endif
 	
 	sm_sendprop_info_t info{};
@@ -7430,6 +7540,8 @@ void Sample::SDK_OnUnload()
 	pApplyAccumulatedApproach->Destroy();
 	pUpdatePosition->Destroy();
 	pUpdateGroundConstraint->Destroy();
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	pResolveZombieCollisions->Destroy();
 #endif
 	plsys->RemovePluginsListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
