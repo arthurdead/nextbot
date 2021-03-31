@@ -3,7 +3,11 @@
 #endif
 #define nextbot_included
 
-#define TEAM_ANY -2
+#if defined GAME_TF2
+	#define TEAM_ANY -2
+#elseif defined GAME_L4D2
+	#define TEAM_ANY -1
+#endif
 
 typeset nextbot_functions
 {
@@ -138,7 +142,7 @@ methodmap CNavMesh
 #if defined GAME_TF2
 	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
 #elseif defined GAME_L4D2
-	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true);
+	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, bool unknown = false);
 #endif
 	public native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
 };

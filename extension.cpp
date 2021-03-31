@@ -46,7 +46,6 @@
 #define RAD_TELEMETRY_DISABLED
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-#define mallocsize( _p )	( malloc_usable_size( _p ) )
 #include <public/tier1/utlmemory.h>
 #include <public/tier1/utlvector.h>
 #endif
@@ -63,19 +62,13 @@ class IGameEventManager2 *gameeventmanager = nullptr;
 #include <GameEventListener.h>
 #include <eiface.h>
 #include <dt_common.h>
-#include <shared/shareddefs.h>
 
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-class CFlaggedEntitiesEnum : public IPartitionEnumerator
-{
-public:
-	CFlaggedEntitiesEnum( CBaseEntity **pList, int listMax, int flagMask )
-	{}
-	
-	IterationRetval_t EnumElement( IHandleEntity *pHandleEntity )
-	{ return ITERATION_CONTINUE; }
-};
-#endif
+class IEngineTrace *enginetrace = nullptr;
+class IStaticPropMgrServer *staticpropmgr = nullptr;
+
+#include <public/networkvar.h>
+#include <shared/shareddefs.h>
+#include <shared/util_shared.h>
 
 #ifndef FMTFUNCTION
 #define FMTFUNCTION(...)
@@ -101,9 +94,6 @@ ICvar *icvar = nullptr;
 CGlobalVars *gpGlobals = nullptr;
 CBaseEntityList *g_pEntityList = nullptr;
 
-class IEngineTrace *enginetrace = nullptr;
-class IStaticPropMgrServer *staticpropmgr = nullptr;
-
 class INextBot;
 class CNavArea;
 class CNavLadder;
@@ -128,7 +118,6 @@ ConVar *tf_nav_combat_decay_rate = nullptr;
 #endif
 
 int sizeofNextBotCombatCharacter = 0;
-int sizeofZombieBotLocomotion = 0;
 
 void *PathCTOR = nullptr;
 void *PathFollowerCTOR = nullptr;
@@ -805,9 +794,9 @@ CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDi
 	return call_mfunc<CNavArea *, CNavMesh, const Vector &, bool, float, bool, bool, int>(this, CNavMeshGetNearestNavArea, pos, anyZ, maxDist, checkLOS, checkGround, team);
 }
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround ) const
+CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround, bool unk ) const
 {
-	return call_mfunc<CNavArea *, CNavMesh, const Vector &, bool, float, bool, bool, bool>(this, CNavMeshGetNearestNavArea, pos, anyZ, maxDist, checkLOS, checkGround, false);
+	return call_mfunc<CNavArea *, CNavMesh, const Vector &, bool, float, bool, bool, bool>(this, CNavMeshGetNearestNavArea, pos, anyZ, maxDist, checkLOS, checkGround, unk);
 }
 #endif
 
@@ -1134,6 +1123,10 @@ public:
 		ray.Init( start, end, mins, maxs );
 		enginetrace->TraceRay( ray, fMask, pFilter, pTrace );
 	}
+	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	char pad1[16];
+#endif
 	
 	Vector m_motionVector;
 	Vector m_groundMotionVector;
@@ -1727,16 +1720,7 @@ public:
 
 	Vector m_immobileAnchor;
 	CountdownTimer m_immobileCheckTimer;
-	
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	char pad1[4];
-#endif
-	
 	IntervalTimer m_immobileTimer;
-
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	char pad2[4];
-#endif
 	
 #if SOURCE_ENGINE == SE_TF2
 	mutable ILocomotion *m_baseLocomotion;
@@ -1957,52 +1941,6 @@ public:
 	virtual void SetAcceleration( const Vector &accel ) = 0;	// set world space acceleration
 	virtual void SetVelocity( const Vector &vel ) = 0;		// set world space velocity
 	virtual const Vector &GetMoveVector( void ) = 0;
-	
-	NextBotCombatCharacter *m_nextBot;
-	
-	Vector m_priorPos;										// last update's position
-	Vector m_lastValidPos;									// last valid position (not interpenetrating)
-	
-	Vector m_acceleration;
-	Vector m_velocity;
-	
-	float m_desiredSpeed;									// speed bot wants to be moving
-	float m_actualSpeed;									// actual speed bot is moving
-
-	float m_maxRunSpeed;
-
-	float m_forwardLean;
-	float m_sideLean;
-	QAngle m_desiredLean;
-	
-	bool m_isJumping;										// if true, we have jumped and have not yet hit the ground
-	bool m_isJumpingAcrossGap;								// if true, we have jumped across a gap and have not yet hit the ground
-	EHANDLE m_ground;										// have to manage this ourselves, since MOVETYPE_CUSTOM always NULLs out GetGroundEntity()
-	Vector m_groundNormal;									// surface normal of the ground we are in contact with
-	bool m_isClimbingUpToLedge;									// true if we are jumping up to an adjacent ledge
-	Vector m_ledgeJumpGoalPos;
-	bool m_isUsingFullFeetTrace;							// true if we're in the air and tracing the lowest StepHeight in ResolveCollision
-
-	const CNavLadder *m_ladder;								// ladder we are currently climbing/descending
-	const CNavArea *m_ladderDismountGoal;					// the area we enter when finished with our ladder move
-	bool m_isGoingUpLadder;									// if false, we're going down
-
-	CountdownTimer m_inhibitObstacleAvoidanceTimer;			// when active, turn off path following feelers
-
-	CountdownTimer m_wiggleTimer;							// for wiggling
-	NavRelativeDirType m_wiggleDirection;
-
-	mutable Vector m_eyePos;								// for use with GetEyes(), etc.
-
-	Vector m_moveVector;									// the direction of our motion in XY plane
-	float m_moveYaw;										// global yaw of movement direction
-
-	Vector m_accumApproachVectors;							// weighted sum of Approach() calls since last update
-	float m_accumApproachWeights;
-	bool m_bRecomputePostureOnCollision;
-
-	CountdownTimer m_ignorePhysicsPropTimer;				// if active, don't collide with physics props (because we got stuck in one)
-	EHANDLE m_ignorePhysicsProp;							// which prop to ignore
 };
 #endif
 
@@ -2014,7 +1952,6 @@ bool IgnoreActorsTraceFilterFunction( IHandleEntity *pServerEntity, int contents
 
 typedef bool (*ShouldHitFunc_t)( IHandleEntity *pHandleEntity, int contentsMask );
 
-#if SOURCE_ENGINE == SE_TF2
 CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int collisionGroup,
 									   ShouldHitFunc_t pExtraShouldHitFunc )
 {
@@ -2022,13 +1959,6 @@ CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int coll
 	m_collisionGroup = collisionGroup;
 	m_pExtraShouldHitCheckFunction = pExtraShouldHitFunc;
 }
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int collisionGroup )
-{
-	m_pPassEnt = passedict;
-	m_collisionGroup = collisionGroup;
-}
-#endif
 
 bool CTraceFilterSimple::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
 {
@@ -2039,11 +1969,7 @@ class NextBotTraceFilterIgnoreActors : public CTraceFilterSimple
 {
 public:
 	NextBotTraceFilterIgnoreActors( const IHandleEntity *passentity, int collisionGroup )
-#if SOURCE_ENGINE == SE_TF2
 		: CTraceFilterSimple( passentity, collisionGroup, IgnoreActorsTraceFilterFunction )
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-		: CTraceFilterSimple( passentity, collisionGroup )
-#endif
 	{
 	}
 };
@@ -2589,13 +2515,13 @@ public:
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().yaw); }
 	
 	unsigned char *vars_ptr()
-	{ return (((unsigned char *)this) + sizeofZombieBotLocomotion); }
+	{ return (((unsigned char *)this) + sizeof(ZombieBotLocomotion)); }
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
 	static ZombieBotLocomotionCustom *create(INextBot *bot, bool reg)
 	{
-		ZombieBotLocomotionCustom *bytes = (ZombieBotLocomotionCustom *)calloc(1, sizeofZombieBotLocomotion + sizeof(vars_t));
+		ZombieBotLocomotionCustom *bytes = (ZombieBotLocomotionCustom *)calloc(1, sizeof(ZombieBotLocomotion) + sizeof(vars_t));
 		call_mfunc<void, ZombieBotLocomotion, INextBot *>(bytes, ZombieBotLocomotionCTOR, bot);
 		
 		new (bytes->vars_ptr()) vars_t();
@@ -3473,15 +3399,6 @@ void PathFollower::Update( INextBot *bot )
 }
 
 SH_DECL_HOOK0_void(Path, Invalidate, SH_NOATTRIB, 0);
-
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-inline bool CloseEnough( const Vector &a, const Vector &b, float epsilon = EQUAL_EPSILON )
-{
-	return fabs( a.x - b.x ) <= epsilon &&
-		fabs( a.y - b.y ) <= epsilon &&
-		fabs( a.z - b.z ) <= epsilon;
-}
-#endif
 
 class ChasePath : public PathFollower
 {
@@ -4915,11 +4832,7 @@ cell_t CNavMeshGetNearestNavAreaVector(IPluginContext *pContext, const cell_t *p
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
-#if SOURCE_ENGINE == SE_TF2
 	return (cell_t)area->GetNearestNavArea(pos, params[3], sp_ctof(params[4]), params[5], params[6], params[7]);
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	return (cell_t)area->GetNearestNavArea(pos, params[3], sp_ctof(params[4]), params[5], params[6]);
-#endif
 }
 
 cell_t CNavMeshGetGroundHeightNative(IPluginContext *pContext, const cell_t *params)
@@ -7364,7 +7277,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
 	
 	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
-	g_pGameConf->GetOffset("sizeof(ZombieBotLocomotion)", &sizeofZombieBotLocomotion);
 	
 	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
 	g_pGameConf->GetMemSig("PathFollower::PathFollower", &PathFollowerCTOR);

@@ -194,10 +194,6 @@
 			{
 				"linux" "7604"
 			}
-			"sizeof(ZombieBotLocomotion)"
-			{
-				"linux" "336"
-			}
 		}
 	}
 	"tf"
