@@ -468,6 +468,20 @@ public:
 	bool HasSpawnFlags(int) { return 0; }
 };
 
+void CCollisionProperty::CollisionAABBToWorldAABB( const Vector &entityMins, 
+	const Vector &entityMaxs, Vector *pWorldMins, Vector *pWorldMaxs ) const
+{
+	if ( !IsBoundsDefinedInEntitySpace() || (GetCollisionAngles() == vec3_angle) )
+	{
+		VectorAdd( entityMins, GetCollisionOrigin(), *pWorldMins );
+		VectorAdd( entityMaxs, GetCollisionOrigin(), *pWorldMaxs );
+	}
+	else
+	{
+		TransformAABB( CollisionToWorldTransform(), entityMins, entityMaxs, *pWorldMins, *pWorldMaxs );
+	}
+}
+
 void SetEdictStateChanged(CBaseEntity *pEntity, int offset)
 {
 	IServerNetworkable *pNet = pEntity->GetNetworkable();
@@ -1553,46 +1567,299 @@ class CKnownEntity;
 class IContextualQuery
 {
 public:
-	virtual ~IContextualQuery() = 0;
+	virtual ~IContextualQuery() {}
 
-	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const = 0;		// if the desired item was available right now, should we pick it up?
-	virtual QueryResultType			ShouldHurry( const INextBot *me ) const = 0;							// are we in a hurry?
+	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			ShouldHurry( const INextBot *me ) const { return ANSWER_UNDEFINED; }
 #if SOURCE_ENGINE == SE_TF2
-	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const = 0;							// is it time to retreat?
-	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const = 0;	// should we attack "them"?
+	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const { return ANSWER_UNDEFINED; }
 #endif
-	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const = 0;		// return true if we should wait for 'blocker' that is across our path somewhere up ahead.
+	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const { return ANSWER_UNDEFINED; }
 
-	virtual Vector					SelectTargetPoint( const INextBot *me, const CBaseCombatCharacter *subject ) const = 0;		// given a subject, return the world space position we should aim at
+	virtual Vector					SelectTargetPoint( const INextBot *me, CBaseCombatCharacter *subject ) const { return vec3_origin; }
 
 	/**
 	 * Allow bot to approve of positions game movement tries to put him into.
 	 * This is most useful for bots derived from CBasePlayer that go through
 	 * the player movement system.
 	 */
-	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const = 0;
+	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const { return ANSWER_UNDEFINED; }
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual PathFollower * QueryCurrentPath( const INextBot * ) const = 0;
+	virtual PathFollower * QueryCurrentPath( const INextBot * ) const { return NULL; }
 #endif
 	
 #if SOURCE_ENGINE == SE_TF2
 	virtual const CKnownEntity *	SelectMoreDangerousThreat( const INextBot *me, 
-															   const CBaseCombatCharacter *subject,
+															   CBaseCombatCharacter *subject,
 															   const CKnownEntity *threat1, 
-															   const CKnownEntity *threat2 ) const = 0;	// return the more dangerous of the two threats to 'subject', or NULL if we have no opinion
+															   const CKnownEntity *threat2 ) const { return NULL; }
 #elif SORUCE_ENGINE == SE_LEFT4DEAD2
 	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( const INextBot *me, 
-															   const CBaseCombatCharacter *subject,
-															   const CBaseCombatCharacter *threat1, 
-															   const CBaseCombatCharacter *threat2 ) const = 0;
+															   CBaseCombatCharacter *subject,
+															   CBaseCombatCharacter *threat1, 
+															   CBaseCombatCharacter *threat2 ) const { return NULL; }
 #endif
 };
 
 class IIntention : public INextBotComponent, public IContextualQuery
 {
 public:
+	IIntention( INextBot *bot, bool reg ) : INextBotComponent( bot, reg ) { }
+	
+	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				QueryResultType result = query->ShouldPickUp( me, item );
+				if ( result != ANSWER_UNDEFINED )
+				{
+					return result;
+				}
+			}
+		}	
+		return ANSWER_UNDEFINED;
+	}
+	virtual QueryResultType			ShouldHurry( const INextBot *me ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				QueryResultType result = query->ShouldHurry( me );
+				if ( result != ANSWER_UNDEFINED )
+				{
+					return result;
+				}
+			}
+		}	
+		return ANSWER_UNDEFINED;
+	}
+#if SOURCE_ENGINE == SE_TF2
+	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				QueryResultType result = query->ShouldRetreat( me );
+				if ( result != ANSWER_UNDEFINED )
+				{
+					return result;
+				}
+			}
+		}	
+		return ANSWER_UNDEFINED;
+	}
+	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				QueryResultType result = query->ShouldAttack( me, them );
+				if ( result != ANSWER_UNDEFINED )
+				{
+					return result;
+				}
+			}
+		}	
+		return ANSWER_UNDEFINED;
+	}
+#endif
+	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				QueryResultType result = query->IsHindrance( me, blocker );
+				if ( result != ANSWER_UNDEFINED )
+				{
+					return result;
+				}
+			}
+		}	
+		return ANSWER_UNDEFINED;
+	}
 
+	virtual Vector					SelectTargetPoint( const INextBot *me, CBaseCombatCharacter *subject ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				Vector result = query->SelectTargetPoint( me, subject );
+				if ( result != vec3_origin )
+				{
+					return result;
+				}
+			}
+		}	
+
+		// no answer, use a reasonable position
+		Vector threatMins, threatMaxs;
+		subject->CollisionProp()->WorldSpaceAABB( &threatMins, &threatMaxs );
+		Vector targetPoint = subject->GetAbsOrigin();
+		targetPoint.z += 0.7f * ( threatMaxs.z - threatMins.z );
+
+		return targetPoint;
+	}
+
+	/**
+	 * Allow bot to approve of positions game movement tries to put him into.
+	 * This is most useful for bots derived from CBasePlayer that go through
+	 * the player movement system.
+	 */
+	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				QueryResultType result = query->IsPositionAllowed( me, pos );
+				if ( result != ANSWER_UNDEFINED )
+				{
+					return result;
+				}
+			}
+		}	
+		return ANSWER_UNDEFINED;
+	}
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	virtual PathFollower * QueryCurrentPath( const INextBot *me ) const
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				PathFollower *result = query->QueryCurrentPath( me );
+				if ( result )
+				{
+					return result;
+				}
+			}
+		}
+		
+		return nullptr;
+	}
+#endif
+	
+#if SOURCE_ENGINE == SE_TF2
+	virtual const CKnownEntity *	SelectMoreDangerousThreat( const INextBot *me, 
+															   CBaseCombatCharacter *subject,
+															   const CKnownEntity *threat1, 
+															   const CKnownEntity *threat2 ) const
+	{
+		if ( !threat1 || threat1->IsObsolete() )
+		{
+			if ( threat2 && !threat2->IsObsolete() )
+				return threat2;
+
+			return NULL;
+		}
+		else if ( !threat2 || threat2->IsObsolete() )
+		{
+			return threat1;
+		}
+
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				const CKnownEntity *result = query->SelectMoreDangerousThreat( me, subject, threat1, threat2 );
+				if ( result )
+				{
+					return result;
+				}
+			}
+		}
+
+		// no specific decision was made - return closest threat as most dangerous
+		float range1 = ( subject->GetAbsOrigin() - threat1->GetLastKnownPosition() ).LengthSqr();
+		float range2 = ( subject->GetAbsOrigin() - threat2->GetLastKnownPosition() ).LengthSqr();
+
+		if ( range1 < range2 )
+		{
+			return threat1;
+		}
+
+		return threat2;
+	}
+#elif SORUCE_ENGINE == SE_LEFT4DEAD2
+	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( const INextBot *me, 
+															   CBaseCombatCharacter *subject,
+															   CBaseCombatCharacter *threat1, 
+															   CBaseCombatCharacter *threat2 ) const
+	{
+		if ( !threat1 )
+		{
+			if ( threat2 )
+				return threat2;
+
+			return NULL;
+		}
+		else if ( !threat2 )
+		{
+			return threat1;
+		}
+
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			if ( query )
+			{
+				// return the response of the first responder that gives a definitive answer
+				const CBaseCombatCharacter *result = query->SelectMoreDangerousThreat( me, subject, threat1, threat2 );
+				if ( result )
+				{
+					return result;
+				}
+			}
+		}
+
+		// no specific decision was made - return closest threat as most dangerous
+		float range1 = ( subject->GetAbsOrigin() - threat1->GetAbsOrigin() ).LengthSqr();
+		float range2 = ( subject->GetAbsOrigin() - threat2->GetAbsOrigin() ).LengthSqr();
+
+		if ( range1 < range2 )
+		{
+			return threat1;
+		}
+
+		return threat2;
+	}
+#endif
+};
+
+class IIntentionStub : public IIntention
+{
+public:
+	IIntentionStub( INextBot *bot, bool reg ) : IIntention( bot, reg ) {
+
+	}
 };
 
 class INextBot : public INextBotEventResponder
@@ -1725,6 +1992,10 @@ public:
 	
 	void UnregisterComponent( INextBotComponent *comp )
 	{
+		if(!comp) {
+			return;
+		}
+		
 		for(INextBotComponent *cur = m_componentList, *prev = nullptr; cur != nullptr; prev = cur, cur = cur->m_nextComponent) {
 			if (cur == comp) {
 				if(prev != nullptr) {
@@ -1801,6 +2072,16 @@ public:
 	IBody &baseBody()
 	{
 		return (IBody &)pad4;
+	}
+	
+	IIntention &baseIntention()
+	{
+		return (IIntention &)pad5;
+	}
+	
+	IVision &baseVision()
+	{
+		return (IVision &)pad6;
 	}
 #endif
 	
@@ -5184,14 +5465,19 @@ cell_t INextBotComponentBotget(IPluginContext *pContext, const cell_t *params)
 SH_DECL_HOOK0(INextBot, GetLocomotionInterface, const, 0, ILocomotion *)
 SH_DECL_HOOK0(INextBot, GetBodyInterface, const, 0, IBody *)
 SH_DECL_HOOK0(INextBot, GetVisionInterface, const, 0, IVision *)
+SH_DECL_HOOK0(INextBot, GetIntentionInterface, const, 0, IIntention *)
 
 struct pointer_holder_t
 {
 	ILocomotion *locomotion = nullptr;
 	IBody *body = nullptr;
+	IIntention *inte = nullptr;
+	IVision *vis = nullptr;
 	
 	bool hooked_loc = false;
 	bool hooked_bod = false;
+	bool hooked_inte = false;
+	bool hooked_vis = false;
 	
 	INextBot *m_bot = nullptr;
 	
@@ -5215,6 +5501,16 @@ struct pointer_holder_t
 	IBody *HookGetBodyInterface()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, body);
+	}
+	
+	IIntention *HookGetIntentionInterface()
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, inte);
+	}
+	
+	IVision *HookGetVisionInterface()
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, vis);
 	}
 	
 	void set_locomotion(ILocomotion *loc)
@@ -5244,6 +5540,34 @@ struct pointer_holder_t
 		
 		body = loc;
 	}
+	
+	void set_vision(IVision *loc)
+	{
+		if(!hooked_vis) {
+			SH_ADD_HOOK(INextBot, GetVisionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetVisionInterface), false);
+			hooked_vis = true;
+		}
+		
+		if(vis) {
+			delete vis;
+		}
+		
+		vis = loc;
+	}
+	
+	void set_intention(IIntention *loc)
+	{
+		if(!hooked_inte) {
+			SH_ADD_HOOK(INextBot, GetIntentionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetIntentionInterface), false);
+			hooked_inte = true;
+		}
+		
+		if(inte) {
+			delete inte;
+		}
+		
+		inte = loc;
+	}
 };
 
 void pointer_holder_t::dtor(INextBot *bot)
@@ -5254,6 +5578,14 @@ void pointer_holder_t::dtor(INextBot *bot)
 	
 	if(hooked_bod) {
 		SH_REMOVE_HOOK(INextBot, GetBodyInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetBodyInterface), false);
+	}
+	
+	if(hooked_vis) {
+		SH_REMOVE_HOOK(INextBot, GetVisionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetVisionInterface), false);
+	}
+	
+	if(hooked_inte) {
+		SH_REMOVE_HOOK(INextBot, GetIntentionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetIntentionInterface), false);
 	}
 	
 	delete this;
@@ -5280,6 +5612,14 @@ pointer_holder_t::~pointer_holder_t()
 		delete body;
 	}
 	
+	if(vis) {
+		delete vis;
+	}
+	
+	if(inte) {
+		delete inte;
+	}
+	
 	pointermap.erase(m_bot);
 }
 #endif
@@ -5294,11 +5634,25 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 	ZombieBotLocomotionCustom *locomotion = ZombieBotLocomotionCustom::create(bot, false);
 #endif
 	
+	ILocomotion *old = bot->GetLocomotionInterface();
+	
 #if SOURCE_ENGINE == SE_TF2
-	bot->ReplaceComponent(bot->m_baseLocomotion, locomotion);
+	bot->UnregisterComponent(bot->m_baseLocomotion);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bot->ReplaceComponent(&bot->baseLocomotion(), locomotion);
+	bot->UnregisterComponent(&bot->baseLocomotion());
 #endif
+	
+	bot->ReplaceComponent(old, locomotion);
+	
+	if(old) {
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		if(old != &bot->baseLocomotion()) {
+			delete old;
+		}
+#elif SOURCE_ENGINE == SE_TF2
+		delete old;
+#endif
+	}
 	
 #if SOURCE_ENGINE == SE_TF2
 	if(bot->m_baseLocomotion) {
@@ -5332,11 +5686,25 @@ cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params
 	
 	IBodyCustom *locomotion = new IBodyCustom(bot, false);
 	
+	IBody *old = bot->GetBodyInterface();
+	
 #if SOURCE_ENGINE == SE_TF2
-	bot->ReplaceComponent(bot->m_baseBody, locomotion);
+	bot->UnregisterComponent(bot->m_baseBody);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bot->ReplaceComponent(&bot->baseBody(), locomotion);
+	bot->UnregisterComponent(&bot->baseBody());
 #endif
+	
+	bot->ReplaceComponent(old, locomotion);
+	
+	if(old) {
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		if(old != &bot->baseBody()) {
+			delete old;
+		}
+#elif SOURCE_ENGINE == SE_TF2
+		delete old;
+#endif
+	}
 	
 #if SOURCE_ENGINE == SE_TF2
 	if(bot->m_baseBody) {
@@ -5359,6 +5727,58 @@ cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params
 	}
 	
 	holder->set_body(locomotion);
+#endif
+	
+	return (cell_t)locomotion;
+}
+
+cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	IIntentionStub *locomotion = new IIntentionStub(bot, false);
+	
+	IIntention *old = bot->GetIntentionInterface();
+	
+#if SOURCE_ENGINE == SE_TF2
+	bot->UnregisterComponent(bot->m_baseIntention);
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	bot->UnregisterComponent(&bot->baseIntention());
+#endif
+	
+	bot->ReplaceComponent(old, locomotion);
+	
+	if(old) {
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		if(old != &bot->baseIntention()) {
+			delete old;
+		}
+#elif SOURCE_ENGINE == SE_TF2
+		delete old;
+#endif
+	}
+	
+#if SOURCE_ENGINE == SE_TF2
+	if(bot->m_baseIntention) {
+		delete bot->m_baseIntention;
+	}
+#endif
+	
+	locomotion->Reset();
+	
+#if SOURCE_ENGINE == SE_TF2
+	bot->m_baseIntention = locomotion;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	pointer_holder_t *holder = nullptr;
+	
+	pointer_holder_map_t::iterator it{pointermap.find(bot)};
+	if(it != pointermap.end()) {
+		holder = it->second;
+	} else {
+		holder = new pointer_holder_t{bot};
+	}
+	
+	holder->set_intention(locomotion);
 #endif
 	
 	return (cell_t)locomotion;
@@ -7147,6 +7567,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
+	{"INextBot.StubIntention", INextBotStubIntention},
 	{"INextBot.Entity.get", INextBotEntityget},
 	{"INextBot.BeginUpdate", INextBotBeginUpdate},
 	{"INextBot.Update", INextBotUpdate},

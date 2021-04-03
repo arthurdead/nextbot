@@ -164,7 +164,12 @@ methodmap CFuncElevator
 
 };
 
-methodmap INextBotComponent
+methodmap INextBotEventResponder
+{
+
+};
+
+methodmap INextBotComponent < INextBotEventResponder
 {
 	property INextBot Bot
 	{
@@ -637,9 +642,14 @@ methodmap IBodyCustom < IBody
 	public native void SetHullMaxs(float vec[3]);
 };
 
+methodmap IIntention < INextBotComponent
+{
+
+};
+
 native void UpdateEntityLastKnownArea(int entity);
 
-methodmap INextBot
+methodmap INextBot < INextBotEventResponder
 {
 	public native INextBot(int entity);
 
@@ -716,6 +726,8 @@ methodmap INextBot
 
 	//public native IVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
+
+	public native void StubIntention();
 };
 
 methodmap INextBotCustom < INextBot
