@@ -156,6 +156,11 @@
 				"library"	"server"
 				"linux"		"@_ZN19ZombieBotLocomotion23ResolveZombieCollisionsERK6Vector"
 			}
+			"ZombieBotVision::ZombieBotVision"
+			{
+				"library"	"server"
+				"linux"		"@_ZN15ZombieBotVisionC1EP8INextBot"
+			}
 		}
 		"Offsets"
 		{
@@ -295,6 +300,11 @@
 			{
 				"library"	"server"
 				"linux"		"@_Z16NavAreaBuildPathIK9IPathCostEbP8CNavAreaS3_PK6VectorRT_PS3_fib"
+			}
+			"IVision::IVision"
+			{
+				"library"	"server"
+				"linux"		"@_ZN7IVisionC2EP8INextBot"
 			}
 		}
 	}

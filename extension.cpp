@@ -128,8 +128,10 @@ void *CTFPathFollowerCTOR = nullptr;
 #endif
 #if SOURCE_ENGINE == SE_TF2
 void *NextBotGroundLocomotionCTOR = nullptr;
+void *IVisionCTOR = nullptr;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 void *ZombieBotLocomotionCTOR = nullptr;
+void *ZombieBotVisionCTOR = nullptr;
 #endif
 
 void *PathComputePathDetails = nullptr;
@@ -150,7 +152,7 @@ void *CTraceFilterSimpleShouldHitEntity = nullptr;
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 void *PathComputeVector = nullptr;
 void *PathComputeEntity = nullptr;
-void *INextBotIsDebugging = nullptr;
+void *INextBotIsDebuggingPtr = nullptr;
 #endif
 
 void *NavAreaBuildPathPtr = nullptr;
@@ -602,6 +604,15 @@ float CTFNavArea::GetCombatIntensity( void ) const
 
 	return actualIntensity;
 }
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+class TerrorNavArea : public CNavArea
+{
+public:
+	unsigned int GetSpawnAttributes() const
+	{ return m_SpawnAttributes; }
+	
+	unsigned int m_SpawnAttributes;
+};
 #endif
 
 #if SOURCE_ENGINE == SE_TF2
@@ -628,11 +639,11 @@ bool CNavArea::IsBlocked( int teamID, bool ignoreNavBlockers ) const
 	}
 	
 	#define TEAM_SURVIVOR 2
-	#define NAV_PLAYERCLIP 0
+	#define NAV_PLAYERCLIP NAV_MESH_FIRST_CUSTOM
 
 #ifdef TERROR
-	//if ( ( teamID == TEAM_SURVIVOR ) && ( m_attributeFlags & NAV_PLAYERCLIP ) )
-	//	return true;
+	if ( ( teamID == TEAM_SURVIVOR ) && ( m_attributeFlags & NAV_PLAYERCLIP ) )
+		return true;
 #endif
 
 	if ( teamID == TEAM_ANY )
@@ -650,6 +661,30 @@ bool CNavArea::IsBlocked( int teamID, bool ignoreNavBlockers ) const
 	return m_isBlocked[ teamIdx ];
 }
 #endif
+
+void CNavArea::DecayDanger( void )
+{
+	for( int i=0; i<MAX_NAV_TEAMS; ++i )
+	{
+		float deltaT = gpGlobals->curtime - m_dangerTimestamp[i];
+		float decayAmount = GetDangerDecayRate() * deltaT;
+
+		m_danger[i] -= decayAmount;
+		if (m_danger[i] < 0.0f)
+			m_danger[i] = 0.0f;
+
+		// update timestamp
+		m_dangerTimestamp[i] = gpGlobals->curtime;
+	}
+}
+
+float CNavArea::GetDanger( int teamID )
+{
+	DecayDanger();
+
+	int teamIdx = teamID % MAX_NAV_TEAMS;
+	return m_danger[ teamIdx ];
+}
 
 void CNavArea::GetClosestPointOnArea( const Vector * RESTRICT pPos, Vector *close ) const RESTRICT 
 {
@@ -903,86 +938,358 @@ public:
 	// Events.  All events must be 'extended' by calling the derived class explicitly to ensure propagation.
 	// Each event must implement its propagation in this interface class.
 	//
-	virtual void OnLeaveGround( CBaseEntity *ground ) {}		// invoked when bot leaves ground for any reason
-	virtual void OnLandOnGround( CBaseEntity *ground ) {}		// invoked when bot lands on the ground after being in the air
+	virtual void OnLeaveGround( CBaseEntity *ground )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnLeaveGround( ground );
+		}
+	}
+	virtual void OnLandOnGround( CBaseEntity *ground )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnLandOnGround( ground );
+		}
+	}
 
-	virtual void OnContact( CBaseEntity *other, CGameTrace *result = NULL ) {}	// invoked when bot touches 'other'
+	virtual void OnContact( CBaseEntity *other, CGameTrace *result = NULL )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnContact( other, result );
+		}
+	}
 
-	virtual void OnMoveToSuccess( const Path *path ) {}		// invoked when a bot reaches the end of the given Path
-	virtual void OnMoveToFailure( const Path *path, MoveToFailureType reason ) {}	// invoked when a bot fails to reach the end of the given Path
-	virtual void OnStuck( void ) {}							// invoked when bot becomes stuck while trying to move
-	virtual void OnUnStuck( void ) {}							// invoked when a previously stuck bot becomes un-stuck and can again move
+	virtual void OnMoveToSuccess( const Path *path )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnMoveToSuccess( path );
+		}
+	}
+	virtual void OnMoveToFailure( const Path *path, MoveToFailureType reason )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnMoveToFailure( path, reason );
+		}
+	}
+	virtual void OnStuck( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnStuck();
+		}
+	}
+	virtual void OnUnStuck( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnUnStuck();
+		}
+	}
 
-	virtual void OnPostureChanged( void ) {}					// when bot has assumed new posture (query IBody for posture)
+	virtual void OnPostureChanged( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnPostureChanged();
+		}
+	}
 
-	virtual void OnAnimationActivityComplete( int activity ) {}	// when animation activity has finished playing
-	virtual void OnAnimationActivityInterrupted( int activity ) {}// when animation activity was replaced by another animation
-	virtual void OnAnimationEvent( animevent_t *event ) {}	// when a QC-file animation event is triggered by the current animation sequence
+	virtual void OnAnimationActivityComplete( int activity )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnAnimationActivityComplete( activity );
+		}
+	}
+	virtual void OnAnimationActivityInterrupted( int activity )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnAnimationActivityInterrupted( activity );
+		}
+	}
+	virtual void OnAnimationEvent( animevent_t *event )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnAnimationEvent( event );
+		}
+	}
 
-	virtual void OnIgnite( void ) {}							// when bot starts to burn
-	virtual void OnInjured( const CTakeDamageInfo &info ) {}	// when bot is damaged by something
-	virtual void OnKilled( const CTakeDamageInfo &info ) {}	// when the bot's health reaches zero
-	virtual void OnOtherKilled( CBaseCombatCharacter *victim, const CTakeDamageInfo &info ) {}	// when someone else dies
+	virtual void OnIgnite( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnIgnite();
+		}
+	}
+	virtual void OnInjured( const CTakeDamageInfo &info )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnInjured( info );
+		}
+	}
+	virtual void OnKilled( const CTakeDamageInfo &info )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnKilled( info );
+		}
+	}
+	virtual void OnOtherKilled( CBaseCombatCharacter *victim, const CTakeDamageInfo &info )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnOtherKilled( victim, info );
+		}
+	}
 
-	virtual void OnSight( CBaseEntity *subject ) {}			// when subject initially enters bot's visual awareness
-	virtual void OnLostSight( CBaseEntity *subject ) {}		// when subject leaves enters bot's visual awareness
+	virtual void OnSight( CBaseEntity *subject )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnSight( subject );
+		}
+	}
+	virtual void OnLostSight( CBaseEntity *subject )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnLostSight( subject );
+		}
+	}
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual void OnThreatChanged(CBaseEntity *) {}
+	virtual void OnThreatChanged(CBaseEntity *subject)
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnThreatChanged( subject );
+		}
+	}
 #endif
 	
-	virtual void OnSound( CBaseEntity *source, const Vector &pos, KeyValues *keys ) {}				// when an entity emits a sound. "pos" is world coordinates of sound. "keys" are from sound's GameData
-	virtual void OnSpokeConcept( CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response ) {}	// when an Actor speaks a concept
+	virtual void OnSound( CBaseEntity *source, const Vector &pos, KeyValues *keys )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnSound( source, pos, keys );
+		}
+	}
+	virtual void OnSpokeConcept( CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnSpokeConcept( who, concept, response );
+		}
+	}
 	
 #if SOURCE_ENGINE == SE_TF2
-	virtual void OnWeaponFired( CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon ) {}		// when someone fires a weapon
+	virtual void OnWeaponFired( CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnWeaponFired( whoFired, weapon );
+		}
+	}
 #endif
 	
-	virtual void OnNavAreaChanged( CNavArea *newArea, CNavArea *oldArea ) {}	// when bot enters a new navigation area
+	virtual void OnNavAreaChanged( CNavArea *newArea, CNavArea *oldArea )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnNavAreaChanged( newArea, oldArea );
+		}
+	}
 
-	virtual void OnModelChanged( void ) {}					// when the entity's model has been changed	
+	virtual void OnModelChanged( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnModelChanged();
+		}
+	}
 
-	virtual void OnPickUp( CBaseEntity *item, CBaseCombatCharacter *giver ) {}	// when something is added to our inventory
-	virtual void OnDrop( CBaseEntity *item ) {}									// when something is removed from our inventory
+	virtual void OnPickUp( CBaseEntity *item, CBaseCombatCharacter *giver )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnPickUp( item, giver );
+		}
+	}
+	virtual void OnDrop( CBaseEntity *item )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnDrop( item );
+		}
+	}
 	
 #if SOURCE_ENGINE == SE_TF2
-	virtual void OnActorEmoted( CBaseCombatCharacter *emoter, int emote ) {}			// when "emoter" does an "emote" (ie: manual voice command, etc)
+	virtual void OnActorEmoted( CBaseCombatCharacter *emoter, int emote )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnActorEmoted( emoter, emote );
+		}
+	}
 
-	virtual void OnCommandAttack( CBaseEntity *victim ) {}	// attack the given entity
-	virtual void OnCommandApproach( const Vector &pos, float range = 0.0f ) {}	// move to within range of the given position
-	virtual void OnCommandApproach( CBaseEntity *goal ) {}	// follow the given leader
-	virtual void OnCommandRetreat( CBaseEntity *threat, float range = 0.0f ) {}	// retreat from the threat at least range units away (0 == infinite)
-	virtual void OnCommandPause( float duration = 0.0f ) {}	// pause for the given duration (0 == forever)
-	virtual void OnCommandResume( void ) {}					// resume after a pause
-	virtual void OnCommandString( const char *command ) {}	// for debugging: respond to an arbitrary string representing a generalized command
+	virtual void OnCommandAttack( CBaseEntity *victim );	// attack the given entity
+	virtual void OnCommandApproach( const Vector &pos, float range = 0.0f );	// move to within range of the given position
+	virtual void OnCommandApproach( CBaseEntity *goal );	// follow the given leader
+	virtual void OnCommandRetreat( CBaseEntity *threat, float range = 0.0f );	// retreat from the threat at least range units away (0 == infinite)
+	virtual void OnCommandPause( float duration = 0.0f );	// pause for the given duration (0 == forever)
+	virtual void OnCommandResume( void );					// resume after a pause
+	virtual void OnCommandString( const char *command );	// for debugging: respond to an arbitrary string representing a generalized command
 #endif
 	
-	virtual void OnShoved( CBaseEntity *pusher ) {}			// 'pusher' has shoved me
-	virtual void OnBlinded( CBaseEntity *blinder ) {}			// 'blinder' has blinded me with a flash of light
+	virtual void OnShoved( CBaseEntity *pusher )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnShoved( pusher );
+		}
+	}
+	virtual void OnBlinded( CBaseEntity *blinder )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnBlinded( blinder );
+		}
+	}
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual void OnEnteredSpit() {}
-	virtual void OnHitByVomitJar(CBaseEntity *) {}
+	virtual void OnEnteredSpit()
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnEnteredSpit();
+		}
+	}
+	virtual void OnHitByVomitJar(CBaseEntity *victim)
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnHitByVomitJar(victim);
+		}
+	}
 
-	virtual void OnCommandAttack( CBaseEntity *victim ) {}	// attack the given entity
-	virtual void OnCommandAssault() {}
-	virtual void OnCommandApproach( const Vector &pos, float range = 0.0f ) {}	// move to within range of the given position
-	virtual void OnCommandApproach( CBaseEntity *goal ) {}	// follow the given leader
-	virtual void OnCommandRetreat( CBaseEntity *threat, float range = 0.0f ) {}	// retreat from the threat at least range units away (0 == infinite)
-	virtual void OnCommandPause( float duration = 0.0f ) {}	// pause for the given duration (0 == forever)
-	virtual void OnCommandResume( void ) {}					// resume after a pause
-	virtual void OnCommandString( const char *command ) {}	// for debugging: respond to an arbitrary string representing a generalized command
+	virtual void OnCommandAttack( CBaseEntity *victim );	// attack the given entity
+	virtual void OnCommandAssault()
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnCommandAssault();
+		}
+	}
+	virtual void OnCommandApproach( const Vector &pos, float range = 0.0f );	// move to within range of the given position
+	virtual void OnCommandApproach( CBaseEntity *goal );	// follow the given leader
+	virtual void OnCommandRetreat( CBaseEntity *threat, float range = 0.0f );	// retreat from the threat at least range units away (0 == infinite)
+	virtual void OnCommandPause( float duration = 0.0f );	// pause for the given duration (0 == forever)
+	virtual void OnCommandResume( void );					// resume after a pause
+	virtual void OnCommandString( const char *command );	// for debugging: respond to an arbitrary string representing a generalized command
 #endif
 	
 #if SOURCE_ENGINE == SE_TF2
-	virtual void OnTerritoryContested( int territoryID ) {}	// territory has been invaded and is changing ownership
-	virtual void OnTerritoryCaptured( int territoryID ) {}	// we have captured enemy territory
-	virtual void OnTerritoryLost( int territoryID ) {}		// we have lost territory to the enemy
+	virtual void OnTerritoryContested( int territoryID )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnTerritoryContested( territoryID );
+		}
+	}
+	virtual void OnTerritoryCaptured( int territoryID )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnTerritoryCaptured( territoryID );
+		}
+	}
+	virtual void OnTerritoryLost( int territoryID )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnTerritoryLost( territoryID );
+		}
+	}
 
-	virtual void OnWin( void ) {}
-	virtual void OnLose( void ) {}
+	virtual void OnWin( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnWin();
+		}
+	}
+	virtual void OnLose( void )
+	{
+		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+		{
+			sub->OnLose();
+		}
+	}
 #endif
 };
+
+inline void INextBotEventResponder::OnCommandAttack( CBaseEntity *victim )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandAttack( victim );
+	}	
+}
+
+inline void INextBotEventResponder::OnCommandApproach( const Vector &pos, float range )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandApproach( pos, range );
+	}	
+}
+
+inline void INextBotEventResponder::OnCommandApproach( CBaseEntity *goal )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandApproach( goal );
+	}	
+}
+
+inline void INextBotEventResponder::OnCommandRetreat( CBaseEntity *threat, float range )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandRetreat( threat, range );
+	}	
+}
+
+inline void INextBotEventResponder::OnCommandPause( float duration )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandPause( duration );
+	}	
+}
+
+inline void INextBotEventResponder::OnCommandResume( void )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandResume();
+	}	
+}
+
+inline void INextBotEventResponder::OnCommandString( const char *command )
+{
+	for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
+	{
+		sub->OnCommandString( command );
+	}	
+}
 
 class ILocomotion;
 class IBody;
@@ -1414,16 +1721,8 @@ public:
 	bool m_isVisible;				// flagged by IVision update as visible or not
 };
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-class RecognizeInfo
-{
-	
-};
-
-class RecognizedActor
-{
-public:
-	CHandle< CBaseEntity > m_who;
-};
+class RecognizeInfo;
+class RecognizedActor;
 #endif
 
 class IVision : public INextBotComponent
@@ -1454,7 +1753,7 @@ public:
 #if SOURCE_ENGINE == SE_TF2
 	virtual const CKnownEntity *GetPrimaryKnownThreat( bool onlyVisibleThreats = false ) const = 0;	// return the biggest threat to ourselves that we are aware of
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual const RecognizedActor *GetPrimaryRecognizedThreat() const = 0;
+	virtual CBaseEntity *GetPrimaryRecognizedThreat() const = 0;
 #endif
 
 	virtual float GetTimeSinceVisible( int team ) const = 0;				// return time since we saw any member of the given team
@@ -1464,7 +1763,7 @@ public:
 	
 	virtual int GetKnownCount( int team, bool onlyVisible = false, float rangeLimit = -1.0f ) const = 0;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual const RecognizedActor *GetClosestRecognized( int team = TEAM_ANY ) const = 0;
+	virtual CBaseEntity *GetClosestRecognized( int team = TEAM_ANY ) const = 0;
 	
 	virtual int GetRecognizedCount( int team, float rangeLimit = -1.0f ) const = 0;
 #endif
@@ -1474,7 +1773,7 @@ public:
 
 	virtual const CKnownEntity *GetKnown( const CBaseEntity *entity ) const = 0;		// given an entity, return our known version of it (or NULL if we don't know of it)
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual const RecognizedActor *GetClosestRecognized( const INextBotEntityFilter &filter ) const = 0;
+	virtual CBaseEntity *GetClosestRecognized( const INextBotEntityFilter &filter ) const = 0;
 #endif
 	
 	// Introduce a known entity into the system. Its position is assumed to be known
@@ -1495,8 +1794,8 @@ public:
 	virtual void CollectPotentiallyVisibleEntities( CUtlVector< CBaseEntity * > *potentiallyVisible ) = 0;
 #endif
 	
-	virtual float GetMaxVisionRange( void ) const = 0;				// return maximum distance vision can reach
-	virtual float GetMinRecognizeTime( void ) const = 0;			// return VISUAL reaction time
+	virtual float GetMaxVisionRange( void ) = 0;				// return maximum distance vision can reach
+	virtual float GetMinRecognizeTime( void ) = 0;			// return VISUAL reaction time
 
 	/**
 	 * IsAbleToSee() returns true if the viewer can ACTUALLY SEE the subject or position,
@@ -1521,7 +1820,7 @@ public:
 	 */
 	virtual bool IsInFieldOfView( const Vector &pos ) const = 0;
 	virtual bool IsInFieldOfView( CBaseEntity *subject ) const = 0;
-	virtual float GetDefaultFieldOfView( void ) const = 0;			// return default FOV in degrees
+	virtual float GetDefaultFieldOfView( void ) = 0;			// return default FOV in degrees
 	virtual float GetFieldOfView( void ) const = 0;					// return FOV in degrees
 	virtual void SetFieldOfView( float horizAngle ) = 0;			// angle given in degrees
 
@@ -1966,7 +2265,7 @@ public:
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	bool IsDebugging( unsigned int type ) const
 	{
-		return call_mfunc<bool, INextBot, unsigned int>(this, INextBotIsDebugging, type);
+		return call_mfunc<bool, INextBot, unsigned int>(this, INextBotIsDebuggingPtr, type);
 	}
 #endif
 
@@ -3005,6 +3304,77 @@ public:
 	{
 		GetBot()->GetEntity()->SetAbsOrigin( pos );
 		return true;
+	}
+};
+
+#if SOURCE_ENGINE == SE_TF2
+SH_DECL_HOOK0(IVision, GetMaxVisionRange, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(IVision, GetMinRecognizeTime, SH_NOATTRIB, 0, float);
+#endif
+SH_DECL_HOOK0(IVision, GetDefaultFieldOfView, SH_NOATTRIB, 0, float);
+
+#if SOURCE_ENGINE == SE_TF2
+class IVisionCustom : public IVision
+{
+public:
+	typedef IVision BaseClass;
+	typedef IVisionCustom ThisClass;
+	
+	static void *getctorptr() { return IVisionCTOR; }
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+class ZombieBotVision : public IVision
+{
+public:
+	char pad1[36];
+};
+
+class ZombieBotVisionCustom : public ZombieBotVision
+{
+public:
+	typedef ZombieBotVision BaseClass;
+	typedef ZombieBotVisionCustom ThisClass;
+	
+	static void *getctorptr() { return ZombieBotVisionCTOR; }
+#endif
+	struct vars_t
+	{
+#if SOURCE_ENGINE == SE_TF2
+		float maxrange = 2000.0;
+		float minreco = 0.0;
+#endif
+		float deffov = 90.0;
+	};
+	
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + sizeof(BaseClass)); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+	
+#if SOURCE_ENGINE == SE_TF2
+	float HookGetMaxVisionRange() { RETURN_META_VALUE(MRES_SUPERCEDE, getvars().maxrange); }
+	float HookGetMinRecognizeTime() { RETURN_META_VALUE(MRES_SUPERCEDE, getvars().minreco); }
+#endif
+	float HookGetDefaultFieldOfView() { RETURN_META_VALUE(MRES_SUPERCEDE, getvars().deffov); }
+	
+	static ThisClass *create(INextBot *bot, bool reg)
+	{
+		ThisClass *bytes = (ThisClass *)calloc(1, sizeof(BaseClass) + sizeof(vars_t));
+		call_mfunc<void, BaseClass, INextBot *>(bytes, getctorptr(), bot);
+		
+		new (bytes->vars_ptr()) vars_t();
+		
+#if SOURCE_ENGINE == SE_TF2
+		SH_ADD_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(bytes, &ThisClass::HookGetMaxVisionRange), false);
+		SH_ADD_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(bytes, &ThisClass::HookGetMinRecognizeTime), false);
+#endif
+		SH_ADD_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(bytes, &ThisClass::HookGetDefaultFieldOfView), false);
+		
+		if(!reg) {
+			bot->m_componentList = bytes->m_nextComponent;
+			bytes->m_nextComponent = nullptr;
+		}
+		
+		return bytes;
 	}
 };
 
@@ -5186,6 +5556,12 @@ cell_t CTFNavAreaHasAttributeTF(IPluginContext *pContext, const cell_t *params)
 	CTFNavArea *area = (CTFNavArea *)params[1];
 	return area->HasAttributeTF((int)params[2]);
 }
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+cell_t TerrorNavAreaGetSpawnAttributes(IPluginContext *pContext, const cell_t *params)
+{
+	TerrorNavArea *area = (TerrorNavArea *)params[1];
+	return area->GetSpawnAttributes();
+}
 #endif
 
 cell_t CNavLadderLengthget(IPluginContext *pContext, const cell_t *params)
@@ -5235,6 +5611,18 @@ cell_t CNavMeshGetGroundHeightNative(IPluginContext *pContext, const cell_t *par
 	*heightaddr = sp_ftoc(height);
 	
 	return ret;
+}
+
+cell_t CNavAreaGetDanger(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return sp_ftoc(area->GetDanger(params[2]));
+}
+
+cell_t CNavAreaUnderwaterget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsUnderwater();
 }
 
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
@@ -5447,6 +5835,38 @@ cell_t INextBotGetRangeSquaredToVector(IPluginContext *pContext, const cell_t *p
 	return sp_ftoc(bot->GetRangeSquaredTo(vec));
 }
 
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+cell_t INextBotGet2DRangeToEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc(bot->Get2DRangeTo(pEntity));
+}
+
+cell_t INextBotGet2DRangeToVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return sp_ftoc(bot->Get2DRangeTo(vec));
+}
+#endif
+
+cell_t INextBotIsDebuggingNative(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	return bot->IsDebugging(params[2]);
+}
+
 cell_t INextBotEndUpdate(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *bot = (INextBot *)params[1];
@@ -5644,34 +6064,48 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 	
 	bot->ReplaceComponent(old, locomotion);
 	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	pointer_holder_t *holder = nullptr;
+#endif
+	
 	if(old) {
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 		if(old != &bot->baseLocomotion()) {
+			pointer_holder_map_t::iterator it{pointermap.find(bot)};
+			if(it != pointermap.end()) {
+				holder = it->second;
+				if(old == holder->locomotion) {
+					holder->locomotion = nullptr;
+				}
+			}
+			
 			delete old;
 		}
 #elif SOURCE_ENGINE == SE_TF2
+		if(old == bot->m_baseLocomotion) {
+			bot->m_baseLocomotion = nullptr;
+		}
+
 		delete old;
 #endif
 	}
+	
+	locomotion->Reset();
 	
 #if SOURCE_ENGINE == SE_TF2
 	if(bot->m_baseLocomotion) {
 		delete bot->m_baseLocomotion;
 	}
-#endif
 	
-	locomotion->Reset();
-	
-#if SOURCE_ENGINE == SE_TF2
 	bot->m_baseLocomotion = locomotion;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	pointer_holder_t *holder = nullptr;
-	
-	pointer_holder_map_t::iterator it{pointermap.find(bot)};
-	if(it != pointermap.end()) {
-		holder = it->second;
-	} else {
-		holder = new pointer_holder_t{bot};
+	if(!holder) {
+		pointer_holder_map_t::iterator it{pointermap.find(bot)};
+		if(it != pointermap.end()) {
+			holder = it->second;
+		} else {
+			holder = new pointer_holder_t{bot};
+		}
 	}
 	
 	holder->set_locomotion(locomotion);
@@ -5696,37 +6130,121 @@ cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params
 	
 	bot->ReplaceComponent(old, locomotion);
 	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	pointer_holder_t *holder = nullptr;
+#endif
+	
 	if(old) {
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 		if(old != &bot->baseBody()) {
+			pointer_holder_map_t::iterator it{pointermap.find(bot)};
+			if(it != pointermap.end()) {
+				holder = it->second;
+				if(old == holder->body) {
+					holder->body = nullptr;
+				}
+			}
+			
 			delete old;
 		}
 #elif SOURCE_ENGINE == SE_TF2
+		if(old == bot->m_baseBody) {
+			bot->m_baseBody = nullptr;
+		}
+
 		delete old;
 #endif
 	}
+	
+	locomotion->Reset();
 	
 #if SOURCE_ENGINE == SE_TF2
 	if(bot->m_baseBody) {
 		delete bot->m_baseBody;
 	}
+	
+	bot->m_baseBody = locomotion;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	if(!holder) {
+		pointer_holder_map_t::iterator it{pointermap.find(bot)};
+		if(it != pointermap.end()) {
+			holder = it->second;
+		} else {
+			holder = new pointer_holder_t{bot};
+		}
+	}
+	
+	holder->set_body(locomotion);
 #endif
+	
+	return (cell_t)locomotion;
+}
+
+cell_t INextBotAllocateCustomVision(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+#if SOURCE_ENGINE == SE_TF2
+	IVisionCustom *locomotion = IVisionCustom::create(bot, false);
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	ZombieBotVisionCustom *locomotion = ZombieBotVisionCustom::create(bot, false);
+#endif
+	
+	IVision *old = bot->GetVisionInterface();
+	
+#if SOURCE_ENGINE == SE_TF2
+	bot->UnregisterComponent(bot->m_baseVision);
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	bot->UnregisterComponent(&bot->baseVision());
+#endif
+	
+	bot->ReplaceComponent(old, locomotion);
+	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	pointer_holder_t *holder = nullptr;
+#endif
+	
+	if(old) {
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		if(old != &bot->baseVision()) {
+			pointer_holder_map_t::iterator it{pointermap.find(bot)};
+			if(it != pointermap.end()) {
+				holder = it->second;
+				if(old == holder->vis) {
+					holder->vis = nullptr;
+				}
+			}
+			
+			delete old;
+		}
+#elif SOURCE_ENGINE == SE_TF2
+		if(old == bot->m_baseVision) {
+			bot->m_baseVision = nullptr;
+		}
+
+		delete old;
+#endif
+	}
 	
 	locomotion->Reset();
 	
 #if SOURCE_ENGINE == SE_TF2
-	bot->m_baseBody = locomotion;
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	pointer_holder_t *holder = nullptr;
-	
-	pointer_holder_map_t::iterator it{pointermap.find(bot)};
-	if(it != pointermap.end()) {
-		holder = it->second;
-	} else {
-		holder = new pointer_holder_t{bot};
+	if(bot->m_baseVision) {
+		delete bot->m_baseVision;
 	}
 	
-	holder->set_body(locomotion);
+	bot->m_baseVision = locomotion;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	if(!holder) {
+		pointer_holder_map_t::iterator it{pointermap.find(bot)};
+		if(it != pointermap.end()) {
+			holder = it->second;
+		} else {
+			holder = new pointer_holder_t{bot};
+		}
+	}
+	
+	holder->set_vision(locomotion);
 #endif
 	
 	return (cell_t)locomotion;
@@ -5748,34 +6266,48 @@ cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
 	
 	bot->ReplaceComponent(old, locomotion);
 	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	pointer_holder_t *holder = nullptr;
+#endif
+	
 	if(old) {
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 		if(old != &bot->baseIntention()) {
+			pointer_holder_map_t::iterator it{pointermap.find(bot)};
+			if(it != pointermap.end()) {
+				holder = it->second;
+				if(old == holder->inte) {
+					holder->inte = nullptr;
+				}
+			}
+			
 			delete old;
 		}
 #elif SOURCE_ENGINE == SE_TF2
+		if(old == bot->m_baseIntention) {
+			bot->m_baseIntention = nullptr;
+		}
+
 		delete old;
 #endif
 	}
+	
+	locomotion->Reset();
 	
 #if SOURCE_ENGINE == SE_TF2
 	if(bot->m_baseIntention) {
 		delete bot->m_baseIntention;
 	}
-#endif
 	
-	locomotion->Reset();
-	
-#if SOURCE_ENGINE == SE_TF2
 	bot->m_baseIntention = locomotion;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	pointer_holder_t *holder = nullptr;
-	
-	pointer_holder_map_t::iterator it{pointermap.find(bot)};
-	if(it != pointermap.end()) {
-		holder = it->second;
-	} else {
-		holder = new pointer_holder_t{bot};
+	if(!holder) {
+		pointer_holder_map_t::iterator it{pointermap.find(bot)};
+		if(it != pointermap.end()) {
+			holder = it->second;
+		} else {
+			holder = new pointer_holder_t{bot};
+		}
 	}
 	
 	holder->set_intention(locomotion);
@@ -6976,7 +7508,13 @@ cell_t IVisionForgetAllKnownEntities(IPluginContext *pContext, const cell_t *par
 cell_t IVisionGetClosestRecognizedTeam(IPluginContext *pContext, const cell_t *params)
 {
 	IVision *locomotion = (IVision *)params[1];
-	return (cell_t)locomotion->GetClosestRecognized(params[2]);
+	
+	CBaseEntity *pEntity = locomotion->GetClosestRecognized(params[2]);
+	if(!pEntity) {
+		return -1;
+	}
+	
+	return gamehelpers->EntityToBCompatRef(pEntity);
 }
 
 cell_t IVisionGetRecognizedCount(IPluginContext *pContext, const cell_t *params)
@@ -6988,7 +7526,13 @@ cell_t IVisionGetRecognizedCount(IPluginContext *pContext, const cell_t *params)
 cell_t IVisionGetPrimaryRecognizedThreat(IPluginContext *pContext, const cell_t *params)
 {
 	IVision *locomotion = (IVision *)params[1];
-	return (cell_t)locomotion->GetPrimaryRecognizedThreat();
+	
+	CBaseEntity *pEntity = locomotion->GetPrimaryRecognizedThreat();
+	if(!pEntity) {
+		return -1;
+	}
+	
+	return gamehelpers->EntityToBCompatRef(pEntity);
 }
 
 class SPGetClosestRecognized : public INextBotEntityFilter
@@ -7016,7 +7560,13 @@ cell_t IVisionGetClosestRecognizedFilter(IPluginContext *pContext, const cell_t 
 	IVision *locomotion = (IVision *)params[1];
 	IPluginFunction *callback = pContext->GetFunctionById(params[2]);
 	SPGetClosestRecognized each(callback, params[3]);
-	return (cell_t)locomotion->GetClosestRecognized(each);
+	
+	CBaseEntity *pEntity = locomotion->GetClosestRecognized(each);
+	if(!pEntity) {
+		return -1;
+	}
+	
+	return gamehelpers->EntityToBCompatRef(pEntity);
 }
 #endif
 
@@ -7369,18 +7919,6 @@ cell_t CKnownEntityGetLastKnownPosition(IPluginContext *pContext, const cell_t *
 	
 	return 0;
 }
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-cell_t RecognizedActorEntityget(IPluginContext *pContext, const cell_t *params)
-{
-	RecognizedActor *locomotion = (RecognizedActor *)params[1];
-	
-	CBaseEntity *pEntity = locomotion->m_who.Get();
-	if(!pEntity) {
-		return -1;
-	}
-	
-	return gamehelpers->EntityToBCompatRef(pEntity);
-}
 #endif
 
 cell_t AllocateNextBotCombatCharacter(IPluginContext *pContext, const cell_t *params)
@@ -7521,9 +8059,13 @@ sp_nativeinfo_t natives[] =
 	{"CTFNavArea.InCombat.get", CTFNavAreaInCombatget},
 	{"CTFNavArea.CombatIntensity.get", CTFNavAreaCombatIntensityget},
 	{"CTFNavArea.HasAttributeTF", CTFNavAreaHasAttributeTF},
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	{"TerrorNavArea.GetSpawnAttributes", TerrorNavAreaGetSpawnAttributes},
 #endif
 	{"CNavMesh.GetNearestNavAreaVector", CNavMeshGetNearestNavAreaVector},
 	{"CNavMesh.GetGroundHeight", CNavMeshGetGroundHeightNative},
+	{"CNavArea.GetDanger", CNavAreaGetDanger},
+	{"CNavArea.Underwater.get", CNavAreaUnderwaterget},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
@@ -7567,6 +8109,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
+	{"INextBot.AllocateCustomVision", INextBotAllocateCustomVision},
 	{"INextBot.StubIntention", INextBotStubIntention},
 	{"INextBot.Entity.get", INextBotEntityget},
 	{"INextBot.BeginUpdate", INextBotBeginUpdate},
@@ -7581,6 +8124,11 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.GetRangeToVector", INextBotGetRangeToVector},
 	{"INextBot.GetRangeSquaredToEntity", INextBotGetRangeSquaredToEntity},
 	{"INextBot.GetRangeSquaredToVector", INextBotGetRangeSquaredToVector},
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	{"INextBot.Get2DRangeToEntity", INextBotGet2DRangeToEntity},
+	{"INextBot.Get2DRangeToVector", INextBotGet2DRangeToVector},
+#endif
+	{"INextBot.IsDebugging", INextBotIsDebuggingNative},
 	{"INextBotComponent.Bot.get", INextBotComponentBotget},
 #if SOURCE_ENGINE == SE_TF2
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
@@ -7702,8 +8250,6 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.Destroy", CKnownEntityDestroy},
 	{"CKnownEntity.UpdatePosition", CKnownEntityUpdatePosition},
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	{"RecognizedActor.Entity.get", RecognizedActorEntityget},
 #endif
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
 	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
@@ -7824,15 +8370,17 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetMemSig("NextBotGroundLocomotion::NextBotGroundLocomotion", &NextBotGroundLocomotionCTOR);
 	g_pGameConf->GetMemSig("NextBotGroundLocomotion::ResolveCollision", &NextBotGroundLocomotionResolveCollision);
+	g_pGameConf->GetMemSig("IVision::IVision", &IVisionCTOR);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	g_pGameConf->GetMemSig("ZombieBotLocomotion::ZombieBotLocomotion", &ZombieBotLocomotionCTOR);
+	g_pGameConf->GetMemSig("ZombieBotVision::ZombieBotVision", &ZombieBotVisionCTOR);
 #endif
 	g_pGameConf->GetMemSig("CBaseEntity::SetGroundEntity", &CBaseEntitySetGroundEntity);
 	g_pGameConf->GetMemSig("CTraceFilterSimple::ShouldHitEntity", &CTraceFilterSimpleShouldHitEntity);
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	g_pGameConf->GetMemSig("Path::Compute(CBaseCombatCharacter)", &PathComputeEntity);
 	g_pGameConf->GetMemSig("Path::Compute(Vector)", &PathComputeVector);
-	g_pGameConf->GetMemSig("INextBot::IsDebugging", &INextBotIsDebugging);
+	g_pGameConf->GetMemSig("INextBot::IsDebugging", &INextBotIsDebuggingPtr);
 #endif
 	
 	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);

@@ -14,9 +14,6 @@ typeset nextbot_functions
 #if defined GAME_TF2
 	//IVision.ForEachKnownEntity
 	function bool (CKnownEntity known, any data);
-#elseif defined GAME_L4D2
-	//IVision.ForEachRecognized
-	function bool (RecognizedActor known, any data);
 #endif
 
 	//IVision.GetClosestKnownFilter
@@ -68,6 +65,11 @@ methodmap CNavArea
 		public native get();
 	}
 
+	property bool Underwater
+	{
+		public native get();
+	}
+
 	public native bool HasAttributes(NavAttributeType bits);
 #if defined GAME_TF2
 	public native float ComputeFuncNavCost(int entity);
@@ -75,6 +77,7 @@ methodmap CNavArea
 	public native void GetCenter(float pos[3]);
 	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
 	public native int GetPlayerCount(int team = 0);
+	public native float GetDanger(int team);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
@@ -134,6 +137,34 @@ methodmap CTFNavArea < CNavArea
 	}
 
 	public native bool HasAttributeTF(TFNavAttributeType bits);
+};
+#elseif defined GAME_L4D2
+enum
+{
+	NAV_PLAYERCLIP = NAV_MESH_FIRST_CUSTOM,
+	NAV_BREAKABLEWALL,
+};
+
+enum
+{
+	EMPTY = (1 << 1),
+	STOP = (1 << 2),
+	FINALE = (1 << 6),
+	PLAYER_START = (1 << 7),
+	BATTLEFIELD = (1 << 8),
+	IGNORE_VISIBILITY = (1 << 9),
+	NOT_CLEARABLE = (1 << 10),
+	CHECKPOINT = (1 << 11),
+	OBSCURED = (1 << 12),
+	NO_MOBS = (1 << 13),
+	THREAT = (1 << 14),
+	RESCUE_VEHICLE = (1 << 15),
+	RESCUE_CLOSET = (1 << 16),
+};
+
+methodmap TerrorNavArea < CNavArea
+{
+	public native int GetSpawnAttributes();
 };
 #endif
 
@@ -410,16 +441,12 @@ methodmap ZombieBotLocomotionCustom < ZombieBotLocomotion
 
 #if defined GAME_TF2
 methodmap CKnownEntity
-#elseif defined GAME_L4D2
-methodmap RecognizedActor
-#endif
 {
 	property int Entity
 	{
 		public native get();
 	}
 
-#if defined GAME_TF2
 	property bool LastKnownPositionBeenSeen
 	{
 		public native get();
@@ -474,13 +501,9 @@ methodmap RecognizedActor
 	public native void Destroy();
 	public native void UpdatePosition();
 	public native void GetLastKnownPosition(float pos[3]);
-#endif
 };
 
-#if defined GAME_TF2
 #define CKnownEntity_Null view_as<CKnownEntity>(Address_Null)
-#elseif defined GAME_L4D2
-#define RecognizedActor_Null view_as<RecognizedActor>(Address_Null)
 #endif
 
 enum FieldOfViewCheckType
@@ -504,9 +527,9 @@ methodmap IVision < INextBotComponent
 	public native void ForgetAllKnownEntities();
 	public native void CollectPotentiallyVisibleEntities(ArrayList list);
 #elseif defined GAME_L4D2
-	public native RecognizedActor GetPrimaryRecognizedThreat();
-	public native RecognizedActor GetClosestRecognizedTeam(int team);
-	public native RecognizedActor GetClosestRecognizedFilter(nextbot_functions func, any data = 0);
+	public native int GetPrimaryRecognizedThreat();
+	public native int GetClosestRecognizedTeam(int team);
+	public native int GetClosestRecognizedFilter(nextbot_functions func, any data = 0);
 #endif
 	public native float GetTimeSinceVisible(int team);
 	public native bool IsAbleToSeeEntity(int entity, FieldOfViewCheckType checkFOV, float visibleSpot[3] = NULL_VECTOR);
@@ -546,8 +569,18 @@ methodmap IVision < INextBotComponent
 	}
 };
 
+#if defined GAME_TF2
 methodmap IVisionCustom < IVision
+#elseif defined GAME_L4D2
+methodmap ZombieBotVision < IVision
 {
+	
+};
+
+methodmap ZombieBotVisionCustom < ZombieBotVision
+#endif
+{
+#if defined GAME_TF2
 	property float MaxVisionRange
 	{
 		public native set(float height);
@@ -557,6 +590,7 @@ methodmap IVisionCustom < IVision
 	{
 		public native set(float height);
 	}
+#endif
 
 	property float DefaultFieldOfView
 	{
@@ -642,12 +676,23 @@ methodmap IBodyCustom < IBody
 	public native void SetHullMaxs(float vec[3]);
 };
 
-methodmap IIntention < INextBotComponent
-{
-
-};
-
 native void UpdateEntityLastKnownArea(int entity);
+
+enum NextBotDebugType 
+{
+	NEXTBOT_DEBUG_NONE = 0,
+	NEXTBOT_BEHAVIOR	= 0x0001,
+	NEXTBOT_LOOK_AT		= 0x0002,
+	NEXTBOT_PATH		= 0x0004,
+	NEXTBOT_ANIMATION	= 0x0008,
+	NEXTBOT_LOCOMOTION	= 0x0010,
+	NEXTBOT_VISION		= 0x0020,
+	NEXTBOT_HEARING		= 0x0040,
+	NEXTBOT_EVENTS		= 0x0080,
+	NEXTBOT_ERRORS		= 0x0100,		// when things go wrong, like being stuck
+
+	NEXTBOT_DEBUG_ALL	= 0xFFFF
+};
 
 methodmap INextBot < INextBotEventResponder
 {
@@ -715,7 +760,8 @@ methodmap INextBot < INextBotEventResponder
 	public native float GetRangeSquaredToVector(float vec[3]);
 
 #if defined GAME_L4D2
-	
+	public native float Get2DRangeToEntity(int entity);
+	public native float Get2DRangeToVector(float vec[3]);
 #endif
 
 #if defined GAME_TF2
@@ -724,11 +770,20 @@ methodmap INextBot < INextBotEventResponder
 	public native ZombieBotLocomotionCustom AllocateCustomLocomotion();
 #endif
 
-	//public native IVisionCustom AllocateCustomVision();
+#if defined GAME_TF2
+	public native IVisionCustom AllocateCustomVision();
+#elseif defined GAME_L4D2
+	public native ZombieBotVisionCustom AllocateCustomVision();
+#endif
+
 	public native IBodyCustom AllocateCustomBody();
 
 	public native void StubIntention();
+	
+	public native bool IsDebugging(NextBotDebugType type);
 };
+
+#define INextBot_Null (view_as<INextBot>(Address_Null))
 
 methodmap INextBotCustom < INextBot
 {
@@ -972,132 +1027,191 @@ enum baseline_cost_flags
 	cost_flags_mod = (1 << 0),
 	cost_flags_safest = (1 << 1),
 	cost_flags_discrete = (1 << 2),
+	cost_flags_nojumping = (1 << 3),
+	cost_flags_noladders = (1 << 4),
+	cost_flags_nocrouch = (1 << 5),
 };
+
+#define cost_flags_onlywalk (cost_flags_nojumping| \
+							cost_flags_noladders| \
+							cost_flags_nocrouch)
 
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, baseline_cost_flags flags)
 {
 	if(fromArea == CNavArea_Null) {
 		return 0.0;
+	}
+
+	ILocomotion locomotion = bot.LocomotionInterface;
+
+	if(!locomotion.IsAreaTraversable(area)) {
+		return -1.0;
+	}
+
+	float dist = 0.0;
+	if(ladder != CNavLadder_Null) {
+		if(flags & cost_flags_noladders) {
+			return -1.0;
+		}
+
+		static const float ladderPenalty = 2.0;
+		dist = ladder.Length * ladderPenalty;
+	} else if(length > 0.0) {
+		dist = length;
 	} else {
-		ILocomotion locomotion = bot.LocomotionInterface;
+		float pos1[3];
+		area.GetCenter(pos1);
 
-		if(!locomotion.IsAreaTraversable(area)) {
+		float pos2[3];
+		fromArea.GetCenter(pos2);
+
+		float sub[3];
+		SubtractVectors(pos1, pos2, sub);
+
+		dist = GetVectorLength(sub);
+	}
+
+	float cost = fromArea.CostSoFar + dist;
+
+	float deltaZ = fromArea.ComputeAdjacentConnectionHeightChange(area);
+	if(deltaZ < -locomotion.DeathDropHeight ||
+		deltaZ >= locomotion.MaxJumpHeight) {
+		return -1.0;
+	} else if(deltaZ >= locomotion.StepHeight ||
+				area.HasAttributes(NAV_MESH_JUMP)) {
+		if(flags & cost_flags_nojumping) {
 			return -1.0;
 		}
 
-		float dist = 0.0;
-		if(ladder != CNavLadder_Null) {
-			dist = ladder.Length;
-		} else if(length > 0.0) {
-			dist = length;
-		} else {
-			float pos1[3];
-			area.GetCenter(pos1);
+		static const float jumpPenalty = 5.0;
+		cost *= jumpPenalty;
+	}
 
-			float pos2[3];
-			fromArea.GetCenter(pos2);
+	if(area.Underwater) {
+		static const float underwaterPenalty = 20.0;
+		cost *= underwaterPenalty;
+	}
 
-			float sub[3];
-			SubtractVectors(pos1, pos2, sub);
-
-			dist = GetVectorLength(sub);
-		}
-
-		float deltaZ = fromArea.ComputeAdjacentConnectionHeightChange(area);
-		if(deltaZ >= locomotion.StepHeight) {
-			if(deltaZ >= locomotion.MaxJumpHeight) {
-				return -1.0;
-			}
-
-			static const float jumpPenalty = 5.0;
-			dist *= jumpPenalty * dist;
-		} else if(deltaZ < -locomotion.DeathDropHeight) {
+	if(area.HasAttributes(NAV_MESH_CROUCH)) {
+		if(flags & cost_flags_nocrouch) {
 			return -1.0;
 		}
 
-		float preference = 1.0;
+		static const float crouchPenalty = 5.0;
+		cost *= crouchPenalty;
+	}
 
-		int entity = bot.Entity;
+	if(area.HasAttributes(NAV_MESH_AVOID)) {
+		static const float avoidPenalty = 10.0;
+		cost *= avoidPenalty;
+	}
 
-		if(flags & cost_flags_mod) {
-			int timeMod = RoundToFloor( GetGameTime() / 10.0 ) + 1;
-			preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+#if defined GAME_TF2
+	if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
+		cost *= area.ComputeFuncNavCost(entity);
+	}
+#endif
+
+	int entity = bot.Entity;
+
+	int team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
+	
+	bool safe = !!(flags & cost_flags_safest);
+	bool discrete = !!(flags & cost_flags_discrete);
+
+	if(safe || discrete) {
+		int enemy_team = 0;
+		switch(team) {
+			case 2: { enemy_team = 3; }
+			case 3: { enemy_team = 2; }
 		}
 
-		int team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
-
-		if(flags & cost_flags_safest) {
-		#if defined GAME_TF2
-			CTFNavArea tfarea = view_as<CTFNavArea>(area);
-
-			if(tfarea.InCombat) {
-				static const float combatDangerCost = 4.0;
-				dist *= combatDangerCost * tfarea.CombatIntensity;
-			}
-
-			static const float sentryDangerCost = 5.0;
-			switch(team) {
-				case 2: {
-					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-						dist *= sentryDangerCost;
-					}
-				}
-				case 3: {
-					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-						dist *= sentryDangerCost;
-					}
-				}
-			}
-		#endif
-		}
-
-		if(flags & cost_flags_discrete) {
-			int enemy_team = 0;
-			switch(team) {
-				case 2: { enemy_team = 3; }
-				case 3: { enemy_team = 2; }
-			}
-
-		#if defined GAME_TF2
-			int obj = -1;
-			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-				int obj_team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
-				if(team == 0 ||
-					enemy_team == 0 ||
-					obj_team == 0 ||
-					obj_team == enemy_team) {
-					UpdateEntityLastKnownArea(obj);
-
-					if(GetEntityLastKnownArea(obj) == area) {
-						static const float enemyBuildingCost = 10.0;
-						dist *= enemyBuildingCost;
-					}
-				}
-			}
-		#elseif defined GAME_L4D2
-			if(enemy_team == 3) {
-				//loop infected
-			}
-
-			if(enemy_team == 2) {
-				//loop survivor
-			}
-		#endif
-
-			static const float teammateCost = 10.0;
-			dist += dist * teammateCost * area.GetPlayerCount(team);
-		}
-
-		float cost = dist * preference;
+		static const float dangerCost = 100.0;
+		cost *= area.GetDanger(team) * dangerCost;
 
 	#if defined GAME_TF2
-		if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
-			cost *= area.ComputeFuncNavCost(entity);
+		int obj = -1;
+		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
+			int obj_team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
+			if(obj_team == enemy_team) {
+				UpdateEntityLastKnownArea(obj);
+
+				if(GetEntityLastKnownArea(obj) == area) {
+					static const float enemyBuildingCost = 10.0;
+					cost *= enemyBuildingCost;
+				}
+			}
+		}
+
+		CTFNavArea tfarea = view_as<CTFNavArea>(area);
+
+		if(tfarea.InCombat) {
+			static const float combatDangerCost = 4.0;
+			cost *= tfarea.CombatIntensity * combatDangerCost;
+		}
+
+		static const float enemySentryDangerCost = 5.0;
+		switch(team) {
+			case 2: {
+				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+					cost *= enemySentryDangerCost;
+				}
+			}
+			case 3: {
+				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+					cost *= enemySentryDangerCost;
+				}
+			}
+		}
+	#endif
+	}
+
+	if(discrete) {
+	#if defined GAME_TF2
+		int obj = -1;
+		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
+			int obj_team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
+			if(obj_team == team) {
+				UpdateEntityLastKnownArea(obj);
+
+				if(GetEntityLastKnownArea(obj) == area) {
+					static const float friendlyBuildingCost = 5.0;
+					cost *= friendlyBuildingCost;
+				}
+			}
+		}
+
+		CTFNavArea tfarea = view_as<CTFNavArea>(area);
+
+		static const float friendlySentryDangerCost = 2.5;
+		switch(team) {
+			case 3: {
+				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+					cost *= friendlySentryDangerCost;
+				}
+			}
+			case 2: {
+				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+					cost *= friendlySentryDangerCost;
+				}
+			}
 		}
 	#endif
 
-		return cost + fromArea.CostSoFar;
+		static const float teammateCost = 10.0;
+		cost *= area.GetPlayerCount(team) * teammateCost;
 	}
+
+	float preference = 1.0;
+
+	if(flags & cost_flags_mod) {
+		int timeMod = RoundToFloor( GetGameTime() / 10.0 ) + 1;
+		preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+	}
+
+	cost *= preference;
+
+	return cost;
 }
 
 #if !defined REQUIRE_EXTENSIONS
