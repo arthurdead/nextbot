@@ -9,6 +9,20 @@
 	#define TEAM_ANY -1
 #endif
 
+#define BEHAVIOR_REASON_MAX 64
+
+enum struct BehaviorResult
+{
+	BehaviorAction action;
+	EventResultPriorityType priority;
+	char reason[BEHAVIOR_REASON_MAX];
+	
+	void set_reason(const char[] str)
+	{
+		strcopy(this.reason, BEHAVIOR_REASON_MAX, str);
+	}
+}
+
 typeset nextbot_functions
 {
 #if defined GAME_TF2
@@ -23,6 +37,66 @@ typeset nextbot_functions
 	//Path.ComputeVector
 	//Path.ComputeEntity
 	function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
+	
+	//BehaviorActionEntry.OnStart
+	//BehaviorActionEntry.OnSuspend
+	//BehaviorActionEntry.OnResume
+	function BehaviorResultType (BehaviorAction action, int entity, BehaviorAction prior, BehaviorResult result);
+	//BehaviorActionEntry.Update
+	function BehaviorResultType (BehaviorAction action, int entity, float interval, BehaviorResult result);
+	//BehaviorActionEntry.OnEnd
+	function void (BehaviorAction action, int entity, BehaviorAction next);
+	//BehaviorActionEntry.InitialContainedAction
+	function BehaviorAction (BehaviorAction action, int entity);
+	
+	//INextBot.AllocateCustomIntention
+	function BehaviorAction (int entity);
+	
+	//BehaviorActionEntry.OnLeaveGround
+	//BehaviorActionEntry.OnLandOnGround
+	//BehaviorActionEntry.OnContact
+	//BehaviorActionEntry.OnAnimationActivityComplete
+	//BehaviorActionEntry.OnAnimationActivityInterrupted
+	//BehaviorActionEntry.OnAnimationEvent
+	//BehaviorActionEntry.OnSight
+	//BehaviorActionEntry.OnLostSight
+	//BehaviorActionEntry.OnShoved
+	//BehaviorActionEntry.OnBlinded
+	//BehaviorActionEntry.OnTerritoryContested
+	//BehaviorActionEntry.OnTerritoryCaptured
+	//BehaviorActionEntry.OnTerritoryLost
+	//BehaviorActionEntry.OnThreatChanged
+	//BehaviorActionEntry.OnHitByVomitJar
+	//BehaviorActionEntry.OnDrop
+	function BehaviorResultType (BehaviorAction action, int entity, int ground, BehaviorResult result);
+	
+	//BehaviorActionEntry.OnMoveToSuccess
+	//BehaviorActionEntry.OnStuck
+	//BehaviorActionEntry.OnUnStuck
+	//BehaviorActionEntry.OnIgnite
+	//BehaviorActionEntry.OnWin
+	//BehaviorActionEntry.OnLose
+	//BehaviorActionEntry.OnEnteredSpit
+	//BehaviorActionEntry.OnModelChanged
+	function BehaviorResultType (BehaviorAction action, int entity, BehaviorResult result);
+	
+	//BehaviorActionEntry.OnMoveToFailure
+	function BehaviorResultType (BehaviorAction action, int entity, MoveToFailureType type, BehaviorResult result);
+	
+	//BehaviorActionEntry.OnSound
+	function BehaviorResultType (BehaviorAction action, int entity, int source, float pos[3], BehaviorResult result);
+	
+	//BehaviorActionEntry.OnWeaponFired
+	//BehaviorActionEntry.OnActorEmoted
+	//BehaviorActionEntry.OnPickUp
+	function BehaviorResultType (BehaviorAction action, int entity, int who, int weapon, BehaviorResult result);
+	
+	//BehaviorActionEntry.OnInjured
+	//BehaviorActionEntry.OnKilled
+	function BehaviorResultType (BehaviorAction action, int entity, BehaviorResult result);
+	
+	//BehaviorActionEntry.OnOtherKilled
+	function BehaviorResultType (BehaviorAction action, int entity, int victim, BehaviorResult result);
 };
 
 enum NavAttributeType
@@ -69,15 +143,37 @@ methodmap CNavArea
 	{
 		public native get();
 	}
+	
+	property int Place
+	{
+		public native get();
+	}
+	
+	property float AvoidanceObstacleHeight
+	{
+		public native get();
+	}
+	
+	property float SizeX
+	{
+		public native get();
+	}
+	
+	property float SizeY
+	{
+		public native get();
+	}
 
 	public native bool HasAttributes(NavAttributeType bits);
 #if defined GAME_TF2
 	public native float ComputeFuncNavCost(int entity);
 #endif
 	public native void GetCenter(float pos[3]);
+	public native void GetRandomPoint(float pos[3]);
 	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
 	public native int GetPlayerCount(int team = 0);
 	public native float GetDanger(int team);
+	public native bool HasAvoidanceObstacle(float maxObstructionHeight = 18.0)
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
@@ -168,6 +264,13 @@ methodmap TerrorNavArea < CNavArea
 };
 #endif
 
+#define GETNAVAREA_CHECK_LOS 0x1
+#define GETNAVAREA_ALLOW_BLOCKED_AREAS 0x2
+#define GETNAVAREA_CHECK_GROUND 0x4
+
+#define UNDEFINED_PLACE 0
+#define ANY_PLACE 0xFFFF
+
 methodmap CNavMesh
 {
 #if defined GAME_TF2
@@ -175,7 +278,24 @@ methodmap CNavMesh
 #elseif defined GAME_L4D2
 	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, bool unknown = false);
 #endif
+	public native CNavArea GetNearestNavAreaEntity(int entity, int nGetNavAreaFlags = GETNAVAREA_CHECK_GROUND, float maxDist = 10000.0);
+
+	public native CNavArea GetNavAreaEntity(int entity, int nGetNavAreaFlags, float flBeneathLimit = 120.0);
+	public native CNavArea GetNavAreaVector(float vec[3], float beneathLimt = 120.0);
+	
+	public native CNavArea GetNavAreaByID(int id);
+	
+	property int NavAreaCount
+	{
+		public native get();
+	}
+	
 	public native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
+	public native bool GetSimpleGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
+	
+	public native int GetPlace(float vec[3]);
+	public native void PlaceToName(int id, char[] name, int len);
+	public native int NameToPlace(const char[] name);
 };
 
 public const CNavMesh TheNavMesh;
@@ -206,6 +326,8 @@ methodmap INextBotComponent < INextBotEventResponder
 	{
 		public native get();
 	}
+	
+	public native void Reset();
 };
 
 methodmap ILocomotion < INextBotComponent
@@ -676,6 +798,48 @@ methodmap IBodyCustom < IBody
 	public native void SetHullMaxs(float vec[3]);
 };
 
+enum BehaviorResultType
+{ 
+	BEHAVIOR_CONTINUE,			// continue executing this action next frame - nothing has changed
+	BEHAVIOR_CHANGE_TO,			// change actions next frame
+	BEHAVIOR_SUSPEND_FOR,		// put the current action on hold for the new action
+	BEHAVIOR_DONE,				// this action has finished, resume suspended action
+	BEHAVIOR_SUSTAIN,			// for use with event handlers - a way to say "It's important to keep doing what I'm doing"
+};
+
+enum EventResultPriorityType
+{
+	RESULT_NONE,		// no result
+	RESULT_TRY,			// use this result, or toss it out, either is ok
+	RESULT_IMPORTANT,	// try extra-hard to use this result
+	RESULT_CRITICAL		// this result must be used - emit an error if it can't be
+};
+
+methodmap BehaviorActionEntry < Handle
+{
+	public native BehaviorActionEntry(const char[] name);
+	
+	public native void set_function(const char[] name, nextbot_functions func);
+	
+	public native BehaviorAction create();
+};
+
+methodmap BehaviorAction
+{
+	property BehaviorActionEntry Entry
+	{
+		public native get();
+	}
+	
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+};
+
+methodmap IIntentionCustom < INextBotComponent
+{
+	public native void ResetBehavior(BehaviorAction action);
+};
+
 native void UpdateEntityLastKnownArea(int entity);
 
 enum NextBotDebugType 
@@ -778,6 +942,7 @@ methodmap INextBot < INextBotEventResponder
 
 	public native IBodyCustom AllocateCustomBody();
 
+	public native IIntentionCustom AllocateCustomIntention(nextbot_functions func);
 	public native void StubIntention();
 	
 	public native bool IsDebugging(NextBotDebugType type);
@@ -863,6 +1028,13 @@ methodmap Segment
 };
 
 #define Segment_Null view_as<Segment>(Address_Null)
+
+enum MoveToFailureType
+{
+	FAIL_NO_PATH_EXISTS,
+	FAIL_STUCK,
+	FAIL_FELL_OFF,
+};
 
 methodmap Path < Handle
 {

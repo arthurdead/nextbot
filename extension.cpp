@@ -686,6 +686,22 @@ float CNavArea::GetDanger( int teamID )
 	return m_danger[ teamIdx ];
 }
 
+void CNavArea::GetExtent( Extent *extent ) const
+{
+	extent->lo = m_nwCorner;
+	extent->hi = m_seCorner;
+
+	extent->lo.z = MIN( extent->lo.z, m_nwCorner.z );
+	extent->lo.z = MIN( extent->lo.z, m_seCorner.z );
+	extent->lo.z = MIN( extent->lo.z, m_neZ );
+	extent->lo.z = MIN( extent->lo.z, m_swZ );
+
+	extent->hi.z = MAX( extent->hi.z, m_nwCorner.z );
+	extent->hi.z = MAX( extent->hi.z, m_seCorner.z );
+	extent->hi.z = MAX( extent->hi.z, m_neZ );
+	extent->hi.z = MAX( extent->hi.z, m_swZ );
+}
+
 void CNavArea::GetClosestPointOnArea( const Vector * RESTRICT pPos, Vector *close ) const RESTRICT 
 {
 	float x, y, z;
@@ -877,6 +893,267 @@ float CNavArea::GetZ( float x, float y ) const RESTRICT
 	return northZ + v * (southZ - northZ);
 }
 
+Vector CNavArea::GetRandomPoint( void ) const
+{
+	Extent extent;
+	GetExtent( &extent );
+
+	Vector spot;
+	spot.x = RandomFloat( extent.lo.x, extent.hi.x ); 
+	spot.y = RandomFloat( extent.lo.y, extent.hi.y );
+	spot.z = GetZ( spot.x, spot.y );
+
+	return spot;
+}
+
+bool CNavArea::IsOverlapping( const Vector &pos, float tolerance ) const
+{
+	if (pos.x + tolerance >= m_nwCorner.x && pos.x - tolerance <= m_seCorner.x &&
+		pos.y + tolerance >= m_nwCorner.y && pos.y - tolerance <= m_seCorner.y)
+		return true;
+
+	return false;
+}
+
+bool CNavArea::IsOverlapping( const CNavArea *area ) const
+{
+	if (area->m_nwCorner.x < m_seCorner.x && area->m_seCorner.x > m_nwCorner.x && 
+		area->m_nwCorner.y < m_seCorner.y && area->m_seCorner.y > m_nwCorner.y)
+		return true;
+
+	return false;
+}
+
+bool CNavArea::IsOverlapping( const Extent &extent ) const
+{
+	return ( extent.lo.x < m_seCorner.x && extent.hi.x > m_nwCorner.x && 
+			 extent.lo.y < m_seCorner.y && extent.hi.y > m_nwCorner.y );
+}
+
+bool CNavArea::IsOverlappingX( const CNavArea *area ) const
+{
+	if (area->m_nwCorner.x < m_seCorner.x && area->m_seCorner.x > m_nwCorner.x)
+		return true;
+
+	return false;
+}
+
+bool CNavArea::IsOverlappingY( const CNavArea *area ) const
+{
+	if (area->m_nwCorner.y < m_seCorner.y && area->m_seCorner.y > m_nwCorner.y)
+		return true;
+
+	return false;
+}
+
+bool CNavArea::Contains( const CNavArea *area ) const
+{
+	return ( ( m_nwCorner.x <= area->m_nwCorner.x ) && ( m_seCorner.x >= area->m_seCorner.x ) &&
+		( m_nwCorner.y <= area->m_nwCorner.y ) && ( m_seCorner.y >= area->m_seCorner.y ) &&
+		( m_nwCorner.z <= area->m_nwCorner.z ) && ( m_seCorner.z >= area->m_seCorner.z ) );
+}
+
+class COverlapCheck
+{
+public:
+	COverlapCheck( const CNavArea *me, const Vector &pos ) : m_pos( pos )
+	{
+		m_me = me;
+		m_myZ = me->GetZ( pos );
+	}
+
+	bool operator() ( CNavArea *area )
+	{
+		// skip self
+		if ( area == m_me )
+			return true;
+
+		// check 2D overlap
+		if ( !area->IsOverlapping( m_pos ) )
+			return true;
+
+		float theirZ = area->GetZ( m_pos );
+		if ( theirZ > m_pos.z )
+		{
+			// they are above the point
+			return true;
+		}
+
+		if ( theirZ > m_myZ )
+		{
+			// we are below an area that is beneath the given position
+			return false;
+		}
+
+		return true;
+	}
+
+	const CNavArea *m_me;
+	float m_myZ;
+	const Vector &m_pos;
+};
+
+bool CNavArea::Contains( const Vector &pos ) const
+{
+	// check 2D overlap
+	if (!IsOverlapping( pos ))
+		return false;
+
+	// the point overlaps us, check that it is above us, but not above any areas that overlap us
+	float myZ = GetZ( pos );
+
+	// if the nav area is above the given position, fail
+	// allow nav area to be as much as a step height above the given position
+	if (myZ - StepHeight > pos.z)
+		return false;
+
+	Extent areaExtent;
+	GetExtent( &areaExtent );
+
+	COverlapCheck overlap( this, pos );
+	return TheNavMesh->ForAllAreasOverlappingExtent( overlap, areaExtent );
+}
+
+void CNavArea::ClearSearchLists( void )
+{
+	// effectively clears all open list pointers and closed flags
+	CNavArea::MakeNewMarker();
+
+	m_openList = NULL;
+	m_openListTail = NULL;
+}
+
+void CNavArea::AddToOpenList( void )
+{
+	if ( IsOpen() )
+	{
+		// already on list
+		return;
+	}
+
+	// mark as being on open list for quick check
+	m_openMarker = m_masterMarker;
+
+	// if list is empty, add and return
+	if ( m_openList == NULL )
+	{
+		m_openList = this;
+		m_openListTail = this;
+		this->m_prevOpen = NULL;
+		this->m_nextOpen = NULL;
+		return;
+	}
+
+	// insert self in ascending cost order
+	CNavArea *area, *last = NULL;
+	for( area = m_openList; area; area = area->m_nextOpen )
+	{
+		if ( GetTotalCost() < area->GetTotalCost() )
+		{
+			break;
+		}
+		last = area;
+	}
+
+	if ( area )
+	{
+		// insert before this area
+		this->m_prevOpen = area->m_prevOpen;
+
+		if ( this->m_prevOpen )
+		{
+			this->m_prevOpen->m_nextOpen = this;
+		}
+		else
+		{
+			m_openList = this;
+		}
+
+		this->m_nextOpen = area;
+		area->m_prevOpen = this;
+	}
+	else
+	{
+		// append to end of list
+		last->m_nextOpen = this;
+		this->m_prevOpen = last;
+	
+		this->m_nextOpen = NULL;
+
+		m_openListTail = this;
+	}
+}
+
+void CNavArea::UpdateOnOpenList( void )
+{
+	// since value can only decrease, bubble this area up from current spot
+	while( m_prevOpen && this->GetTotalCost() < m_prevOpen->GetTotalCost() )
+	{
+		// swap position with predecessor
+		CNavArea *other = m_prevOpen;
+		CNavArea *before = other->m_prevOpen;
+		CNavArea *after  = this->m_nextOpen;
+
+		this->m_nextOpen = other;
+		this->m_prevOpen = before;
+
+		other->m_prevOpen = this;
+		other->m_nextOpen = after;
+
+		if ( before )
+		{
+			before->m_nextOpen = this;
+		}
+		else
+		{
+			m_openList = this;
+		}
+
+		if ( after )
+		{
+			after->m_prevOpen = other;
+		}
+		else
+		{
+			m_openListTail = this;
+		}
+	}
+}
+
+void CNavArea::RemoveFromOpenList( void )
+{
+	if ( m_openMarker == 0 )
+	{
+		// not on the list
+		return;
+	}
+
+	if ( m_prevOpen )
+	{
+		m_prevOpen->m_nextOpen = m_nextOpen;
+	}
+	else
+	{
+		m_openList = m_nextOpen;
+	}
+	
+	if ( m_nextOpen )
+	{
+		m_nextOpen->m_prevOpen = m_prevOpen;
+	}
+	else
+	{
+		m_openListTail = m_prevOpen;
+	}
+	
+	// zero is an invalid marker
+	m_openMarker = 0;
+}
+
+unsigned int CNavArea::m_masterMarker = 1;
+CNavArea *CNavArea::m_openList = NULL;
+CNavArea *CNavArea::m_openListTail = NULL;
+
 #if SOURCE_ENGINE == SE_TF2
 CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround, int team ) const
 {
@@ -888,6 +1165,216 @@ CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDi
 	return call_mfunc<CNavArea *, CNavMesh, const Vector &, bool, float, bool, bool, bool>(this, CNavMeshGetNearestNavArea, pos, anyZ, maxDist, checkLOS, checkGround, unk);
 }
 #endif
+
+CNavArea *CNavMesh::GetNavArea( CBaseEntity *pEntity, int nFlags, float flBeneathLimit ) const
+{
+	if ( !m_grid.Count() )
+		return NULL;
+
+	Vector testPos = pEntity->GetAbsOrigin();
+
+	float flStepHeight = 1e-3;
+	CBaseCombatCharacter *pBCC = pEntity->MyCombatCharacterPointer();
+	if ( pBCC )
+	{
+		// Check if we're still in the last area
+		CNavArea *pLastNavArea = pBCC->GetLastKnownArea();
+		if ( pLastNavArea && pLastNavArea->IsOverlapping( testPos ) )
+		{
+			float flZ = pLastNavArea->GetZ( testPos );
+			if ( ( flZ <= testPos.z + StepHeight ) && ( flZ >= testPos.z - StepHeight ) )
+				return pLastNavArea;
+		}
+		flStepHeight = StepHeight;
+	}
+
+	// get list in cell that contains position
+	int x = WorldToGridX( testPos.x );
+	int y = WorldToGridY( testPos.y );
+	NavAreaVector *areaVector = &m_grid[ x + y*m_gridSizeX ];
+
+	// search cell list to find correct area
+	CNavArea *use = NULL;
+	float useZ = -99999999.9f;
+
+	bool bSkipBlockedAreas = ( ( nFlags & GETNAVAREA_ALLOW_BLOCKED_AREAS ) == 0 );
+	FOR_EACH_VEC( (*areaVector), it )
+	{
+		CNavArea *pArea = (*areaVector)[ it ];
+
+		// check if position is within 2D boundaries of this area
+		if ( !pArea->IsOverlapping( testPos ) )
+			continue;
+
+		// don't consider blocked areas
+		if ( bSkipBlockedAreas && pArea->IsBlocked( pEntity->GetTeamNumber() ) )
+			continue;
+
+		// project position onto area to get Z
+		float z = pArea->GetZ( testPos );
+
+		// if area is above us, skip it
+		if ( z > testPos.z + flStepHeight )
+			continue;
+
+		// if area is too far below us, skip it
+		if ( z < testPos.z - flBeneathLimit )
+			continue;
+
+		// if area is lower than the one we have, skip it
+		if ( z <= useZ )
+			continue;
+
+		use = pArea;
+		useZ = z;
+	}
+
+	// Check LOS if necessary
+	if ( use && ( nFlags && GETNAVAREA_CHECK_LOS ) && ( useZ < testPos.z - flStepHeight ) )
+	{
+		// trace directly down to see if it's below us and unobstructed
+		trace_t result;
+		UTIL_TraceLine( testPos, Vector( testPos.x, testPos.y, useZ ), MASK_NPCSOLID_BRUSHONLY, NULL, COLLISION_GROUP_NONE, &result );
+		if ( ( result.fraction != 1.0f ) && ( fabs( result.endpos.z - useZ ) > flStepHeight ) )
+			return NULL;
+	}
+	return use;
+}
+
+CNavArea *CNavMesh::GetNavArea( const Vector &pos, float beneathLimit ) const
+{
+	if ( !m_grid.Count() )
+		return NULL;
+
+	// get list in cell that contains position
+	int x = WorldToGridX( pos.x );
+	int y = WorldToGridY( pos.y );
+	NavAreaVector *areaVector = &m_grid[ x + y*m_gridSizeX ];
+
+	// search cell list to find correct area
+	CNavArea *use = NULL;
+	float useZ = -99999999.9f;
+	Vector testPos = pos + Vector( 0, 0, 5 );
+
+	FOR_EACH_VEC( (*areaVector), it )
+	{
+		CNavArea *area = (*areaVector)[ it ];
+
+		// check if position is within 2D boundaries of this area
+		if (area->IsOverlapping( testPos ))
+		{
+			// project position onto area to get Z
+			float z = area->GetZ( testPos );
+
+			// if area is above us, skip it
+			if (z > testPos.z)
+				continue;
+
+			// if area is too far below us, skip it
+			if (z < pos.z - beneathLimit)
+				continue;
+
+			// if area is higher than the one we have, use this instead
+			if (z > useZ)
+			{
+				use = area;
+				useZ = z;
+			}
+		}
+	}
+
+	return use;
+}
+
+CNavArea *CNavMesh::GetNearestNavArea( CBaseEntity *pEntity, int nFlags, float maxDist ) const
+{
+	if ( !m_grid.Count() )
+		return NULL;
+
+	// quick check
+	CNavArea *pClose = GetNavArea( pEntity, nFlags );
+	if ( pClose )
+		return pClose;
+
+	bool bCheckLOS = ( nFlags & GETNAVAREA_CHECK_LOS ) != 0;
+	bool bCheckGround = ( nFlags & GETNAVAREA_CHECK_GROUND ) != 0;
+#if SOURCE_ENGINE == SE_TF2
+	return GetNearestNavArea( pEntity->GetAbsOrigin(), false, maxDist, bCheckLOS, bCheckGround, pEntity->GetTeamNumber() );
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	return GetNearestNavArea( pEntity->GetAbsOrigin(), false, maxDist, bCheckLOS, bCheckGround, false );
+#endif
+}
+
+CNavArea *CNavMesh::GetNavAreaByID( unsigned int id ) const
+{
+	if (id == 0)
+		return NULL;
+
+	int key = ComputeHashKey( id );
+
+	for( CNavArea *area = m_hashTable[key]; area; area = area->m_nextHash )
+	{
+		if (area->GetID() == id)
+		{
+			return area;
+		}
+	}
+
+	return NULL;
+}
+
+bool CNavMesh::GetSimpleGroundHeight( const Vector &pos, float *height, Vector *normal ) const
+{
+	Vector to;
+	to.x = pos.x;
+	to.y = pos.y;
+	to.z = pos.z - 9999.9f;
+
+	trace_t result;
+
+	UTIL_TraceLine( pos, to, MASK_NPCSOLID_BRUSHONLY, NULL, COLLISION_GROUP_NONE, &result );
+
+	if (result.startsolid)
+		return false;
+
+	*height = result.endpos.z;
+
+	if (normal)
+		*normal = result.plane.normal;
+
+	return true;
+}
+
+unsigned int CNavMesh::GetPlace( const Vector &pos ) const
+{
+	CNavArea *area = GetNearestNavArea( pos, true );
+
+	if (area)
+	{
+		return area->GetPlace();
+	}
+
+	return UNDEFINED_PLACE;
+}
+
+const char *CNavMesh::PlaceToName( Place place ) const
+{
+	if (place >= 1 && place <= m_placeCount)
+		return m_placeName[ (int)place - 1 ];
+
+	return NULL;
+}
+
+Place CNavMesh::NameToPlace( const char *name ) const
+{
+	for( unsigned int i=0; i<m_placeCount; ++i )
+	{
+		if (FStrEq( m_placeName[i], name ))
+			return i+1;
+	}
+
+	return UNDEFINED_PLACE;
+}
 
 bool CNavMesh::GetGroundHeight( const Vector &pos, float *height, Vector *normal ) const
 {
@@ -1894,7 +2381,7 @@ public:
 															   CBaseCombatCharacter *subject,
 															   const CKnownEntity *threat1, 
 															   const CKnownEntity *threat2 ) const { return NULL; }
-#elif SORUCE_ENGINE == SE_LEFT4DEAD2
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( const INextBot *me, 
 															   CBaseCombatCharacter *subject,
 															   CBaseCombatCharacter *threat1, 
@@ -2161,6 +2648,24 @@ public:
 	}
 };
 
+ConVar *NextBotDebugHistory = nullptr;
+
+enum NextBotDebugType 
+{
+	NEXTBOT_DEBUG_NONE = 0,
+	NEXTBOT_BEHAVIOR	= 0x0001,
+	NEXTBOT_LOOK_AT		= 0x0002,
+	NEXTBOT_PATH		= 0x0004,
+	NEXTBOT_ANIMATION	= 0x0008,
+	NEXTBOT_LOCOMOTION	= 0x0010,
+	NEXTBOT_VISION		= 0x0020,
+	NEXTBOT_HEARING		= 0x0040,
+	NEXTBOT_EVENTS		= 0x0080,
+	NEXTBOT_ERRORS		= 0x0100,		// when things go wrong, like being stuck
+
+	NEXTBOT_DEBUG_ALL	= 0xFFFF
+};
+
 class INextBot : public INextBotEventResponder
 {
 public:
@@ -2332,6 +2837,15 @@ public:
 		}
 	}
 	
+	#define MAX_NEXTBOT_DEBUG_HISTORY 100
+	#define MAX_NEXTBOT_DEBUG_LINE_LENGTH 256
+
+	struct NextBotDebugLineType
+	{
+		NextBotDebugType debugType;
+		char data[ MAX_NEXTBOT_DEBUG_LINE_LENGTH ];
+	};
+	
 	INextBotComponent *m_componentList;						// the first component
 
 #if SOURCE_ENGINE == SE_TF2
@@ -2384,8 +2898,1307 @@ public:
 	}
 #endif
 	
-	CUtlVector< struct NextBotDebugLineType * > m_debugHistory;
+	CUtlVector< NextBotDebugLineType * > m_debugHistory;
 };
+
+using NextBotDebugLineType = INextBot::NextBotDebugLineType;
+
+ConVar *developer = nullptr;
+ConVar *r_visualizetraces = nullptr;
+
+class NextBotCombatCharacter : public CBaseCombatCharacter
+{
+public:
+	static NextBotCombatCharacter *create(size_t size_modifier)
+	{
+		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
+		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
+		return bytes;
+	}
+	
+	void ResetDebugHistory()
+	{
+		CUtlVector< NextBotDebugLineType * > &m_debugHistory = MyNextBotPointer()->m_debugHistory;
+		
+		for ( int i=0; i<m_debugHistory.Count(); ++i )
+		{
+			delete m_debugHistory[i];
+		}
+
+		m_debugHistory.RemoveAll();
+	}
+	
+	void DebugConColorMsg( NextBotDebugType debugType, const Color &color, const char *fmt, ... )
+	{
+		bool isDataFormatted = false;
+
+		va_list argptr;
+		char data[ MAX_NEXTBOT_DEBUG_LINE_LENGTH ];
+
+		if ( developer->GetBool() && IsDebugging( debugType ) )
+		{
+			va_start(argptr, fmt);
+			Q_vsnprintf(data, sizeof( data ), fmt, argptr);
+			va_end(argptr);
+			isDataFormatted = true;
+
+			ConColorMsg( color, "%s", data );
+		}
+		
+		CUtlVector< NextBotDebugLineType * > &m_debugHistory = MyNextBotPointer()->m_debugHistory;
+
+		if ( !NextBotDebugHistory->GetBool() )
+		{
+			if ( m_debugHistory.Count() )
+			{
+				ResetDebugHistory();
+			}
+			return;
+		}
+
+		// Don't bother with event data - it's spammy enough to overshadow everything else.
+		if ( debugType == NEXTBOT_EVENTS )
+			return;
+
+		if ( !isDataFormatted )
+		{
+			va_start(argptr, fmt);
+			Q_vsnprintf(data, sizeof( data ), fmt, argptr);
+			va_end(argptr);
+			isDataFormatted = true;
+		}
+
+		int lastLine = m_debugHistory.Count() - 1;
+		if ( lastLine >= 0 )
+		{
+			NextBotDebugLineType *line = m_debugHistory[lastLine];
+			if ( line->debugType == debugType && V_strstr( line->data, "\n" ) == NULL )
+			{
+				// append onto previous line
+				V_strncat( line->data, data, MAX_NEXTBOT_DEBUG_LINE_LENGTH );
+				return;
+			}
+		}
+
+		// Prune out an old line if needed, keeping a pointer to re-use the memory
+		NextBotDebugLineType *line = NULL;
+		if ( m_debugHistory.Count() == MAX_NEXTBOT_DEBUG_HISTORY )
+		{
+			line = m_debugHistory[0];
+			m_debugHistory.Remove( 0 );
+		}
+
+		// Add to debug history
+		if ( !line )
+		{
+			line = new NextBotDebugLineType;
+		}
+		line->debugType = debugType;
+		V_strncpy( line->data, data, MAX_NEXTBOT_DEBUG_LINE_LENGTH );
+		m_debugHistory.AddToTail( line );
+	}
+	
+	const char *GetDebugIdentifier( void )
+	{
+		return MyNextBotPointer()->GetDebugIdentifier();
+	}
+	
+	bool IsDebugging( unsigned int type )
+	{
+		return MyNextBotPointer()->IsDebugging(type);
+	}
+	
+	void DisplayDebugText( const char *text )
+	{
+		MyNextBotPointer()->DisplayDebugText(text);
+	}
+};
+
+#include "NextBotBehavior.h"
+
+HandleType_t BehaviorEntryHandleType = 0;
+
+using SPActor = NextBotCombatCharacter;
+
+class SPActionResult : public ActionResult<SPActor>
+{
+public:
+	using BaseClass = ActionResult<SPActor>;
+	
+	void set_reason(std::string &&reason_)
+	{
+		m_reason = std::move(reason_);
+	}
+};
+
+class SPEventDesiredResult : public EventDesiredResult<SPActor>
+{
+public:
+	using BaseClass = EventDesiredResult<SPActor>;
+	
+	
+};
+
+using SPBehavior = Behavior<SPActor>;
+
+class SPAction;
+
+struct SPActionEntry
+{
+	SPActionEntry(std::string &&name_)
+		: name{std::move(name_)}
+	{
+	}
+	
+	std::string name;
+	
+	IPluginFunction *onstart = nullptr;
+	IPluginFunction *onupdate = nullptr;
+	IPluginFunction *onsus = nullptr;
+	IPluginFunction *onresume = nullptr;
+	IPluginFunction *onend = nullptr;
+	IPluginFunction *intialact = nullptr;
+	
+	IPluginFunction *leavegrnd = nullptr;
+	IPluginFunction *landgrnd = nullptr;
+	IPluginFunction *oncontact = nullptr;
+	IPluginFunction *animcompl = nullptr;
+	IPluginFunction *animinter = nullptr;
+	IPluginFunction *animevent = nullptr;
+	IPluginFunction *otherkilled = nullptr;
+	IPluginFunction *onsight = nullptr;
+	IPluginFunction *onlosesight = nullptr;
+	IPluginFunction *shoved = nullptr;
+	IPluginFunction *blinded = nullptr;
+	IPluginFunction *terrcontest = nullptr;
+	IPluginFunction *terrcap = nullptr;
+	IPluginFunction *terrlost = nullptr;
+	IPluginFunction *threachngd = nullptr;
+	IPluginFunction *hitvom = nullptr;
+	IPluginFunction *drop = nullptr;
+	IPluginFunction *movesucc = nullptr;
+	IPluginFunction *stuck = nullptr;
+	IPluginFunction *unstuck = nullptr;
+	IPluginFunction *ignite = nullptr;
+	IPluginFunction *injured = nullptr;
+	IPluginFunction *killed = nullptr;
+	IPluginFunction *win = nullptr;
+	IPluginFunction *lose = nullptr;
+	IPluginFunction *enterspit = nullptr;
+	IPluginFunction *mdlchnd = nullptr;
+	IPluginFunction *movefail = nullptr;
+	IPluginFunction *sound = nullptr;
+	IPluginFunction *wepfired = nullptr;
+	IPluginFunction *actemote = nullptr;
+	IPluginFunction *pickup = nullptr;
+	
+	Handle_t hndl = BAD_HANDLE;
+	IPluginContext *pContext = nullptr;
+	
+	std::vector<SPAction *> actions{};
+	
+	void on_destroyed(SPAction *action)
+	{
+		auto it = actions.begin();
+		while(it != actions.end()) {
+			if(*it == action) {
+				actions.erase(it);
+				break;
+			}
+			
+			++it;
+		}
+	}
+	
+	~SPActionEntry();
+	
+	SPAction *create();
+};
+
+#define RESVARS_REASON_SIZE 64
+#define RESVARS_SIZE (RESVARS_REASON_SIZE+2)
+
+#include <npcevent.h>
+
+class SPAction : public Action<SPActor>
+{
+public:
+	using BaseClass = Action<SPActor>;
+	
+	virtual const char *GetName( void ) const { return name.c_str(); }
+	
+	void varstoresult(cell_t *vars, SPActionResult &result)
+	{
+		result.m_action = (SPAction *)vars[0];
+		
+		std::string reason{};
+		
+		for(int i = 2; i < RESVARS_REASON_SIZE; ++i) {
+			if(vars[i] == 0) {
+				break;
+			}
+			
+			reason += (char)vars[i];
+		}
+		
+		result.set_reason(std::move(reason));
+	}
+	
+	void varstoresult(cell_t *vars, SPEventDesiredResult &result)
+	{
+		varstoresult(vars, (SPActionResult &)result);
+		
+		result.m_priority = (EventResultPriorityType)vars[1];
+	}
+	
+	virtual ~SPAction()
+	{
+		if(entry) {
+			entry->on_destroyed(this);
+		}
+	}
+	
+	SPActionEntry *entry = nullptr;
+	std::unordered_map<std::string, cell_t> data{};
+	std::string name{};
+	
+	virtual BaseClass *InitialContainedAction(SPActor *me)
+	{
+		if(!entry) {
+			return nullptr;
+		}
+		
+		IPluginFunction *func = entry->intialact;
+		
+		if(!func) {
+			return nullptr;
+		}
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		SPAction *act = nullptr;
+		func->Execute((cell_t *)&act);
+		
+		return act;
+	}
+	
+	virtual SPActionResult::BaseClass OnStart(SPActor *me, BaseClass *priorAction)
+	{
+		if(!entry) {
+			return Done("missing entry");
+		}
+		
+		IPluginFunction *func = entry->onstart;
+		
+		if(!func) {
+			return Continue();
+		}
+		
+		SPActionResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell((cell_t)priorAction);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	
+	virtual SPActionResult::BaseClass Update(SPActor *me, float interval)
+	{
+		if(!entry) {
+			return Done("missing entry");
+		}
+		
+		IPluginFunction *func = entry->onupdate;
+		
+		if(!func) {
+			return Continue();
+		}
+		
+		SPActionResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushFloat(interval);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	
+	virtual SPActionResult::BaseClass OnSuspend(SPActor *me, BaseClass *interruptingAction)
+	{
+		if(!entry) {
+			return Done("missing entry");
+		}
+		
+		IPluginFunction *func = entry->onsus;
+		
+		if(!func) {
+			return Continue();
+		}
+		
+		SPActionResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell((cell_t)interruptingAction);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	
+	virtual SPActionResult::BaseClass OnResume(SPActor *me, BaseClass *interruptingAction)
+	{
+		if(!entry) {
+			return Done("missing entry");
+		}
+		
+		IPluginFunction *func = entry->onresume;
+		
+		if(!func) {
+			return Continue();
+		}
+		
+		SPActionResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell((cell_t)interruptingAction);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	
+	virtual void OnEnd(SPActor *me, BaseClass *nextAction)
+	{
+		if(!entry) {
+			return;
+		}
+		
+		IPluginFunction *func = entry->onend;
+		
+		if(!func) {
+			return;
+		}
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell((cell_t)nextAction);
+		func->Execute(nullptr);
+	}
+	
+	virtual SPEventDesiredResult::BaseClass OnLeaveGround(SPActor *me, CBaseEntity *ground )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->leavegrnd;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(ground));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnLandOnGround(SPActor *me, CBaseEntity *ground )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->landgrnd;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(ground));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnContact(SPActor *me, CBaseEntity *other, CGameTrace *trace = NULL )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->oncontact;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(other));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnMoveToSuccess(SPActor *me, const Path *path )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->movesucc;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnMoveToFailure(SPActor *me, const Path *path, MoveToFailureType reason )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->movefail;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(reason);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnStuck(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->stuck;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnUnStuck(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->unstuck;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnPostureChanged(SPActor *me )											{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnAnimationActivityComplete(SPActor *me, int activity )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->animcompl;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(activity);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnAnimationActivityInterrupted(SPActor *me, int activity )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->animinter;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(activity);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnAnimationEvent(SPActor *me, animevent_t *event )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->animevent;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+		func->PushCell(event->Event());
+#elif SOURCE_ENGINE == SE_TF2
+		func->PushCell(event->event);
+#endif
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnIgnite(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->ignite;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnInjured(SPActor *me, const CTakeDamageInfo &info )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->injured;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnKilled(SPActor *me, const CTakeDamageInfo &info )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->killed;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnOtherKilled(SPActor *me, CBaseCombatCharacter *victim, const CTakeDamageInfo &info )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->otherkilled;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(victim));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnSight(SPActor *me, CBaseEntity *subject )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->onsight;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnLostSight(SPActor *me, CBaseEntity *subject )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->onlosesight;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnSound(SPActor *me, CBaseEntity *source, const Vector &pos, KeyValues *keys )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->sound;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(source));
+		cell_t addr[3]{sp_ftoc(pos.x), sp_ftoc(pos.y), sp_ftoc(pos.z)};
+		func->PushArray(addr, 3);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnSpokeConcept(SPActor *me, CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response )	{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnWeaponFired(SPActor *me, CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->wepfired;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(whoFired));
+		func->PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity *)weapon));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnNavAreaChanged(SPActor *me, CNavArea *newArea, CNavArea *oldArea )		{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnModelChanged(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->mdlchnd;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnPickUp(SPActor *me, CBaseEntity *item, CBaseCombatCharacter *giver )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->pickup;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(giver));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnDrop(SPActor *me, CBaseEntity *item )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->pickup;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(item));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnActorEmoted(SPActor *me, CBaseCombatCharacter *emoter, int emote )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->actemote;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(emoter));
+		func->PushCell(emote);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+
+	virtual SPEventDesiredResult::BaseClass OnCommandAttack(SPActor *me, CBaseEntity *victim )						{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandApproach(SPActor *me, const Vector &pos, float range )			{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandApproach(SPActor *me, CBaseEntity *goal )						{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandRetreat(SPActor *me, CBaseEntity *threat, float range )			{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandPause(SPActor *me, float duration )								{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandResume(SPActor *me )											{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandString(SPActor *me, const char *command )						{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+
+	virtual SPEventDesiredResult::BaseClass OnShoved(SPActor *me, CBaseEntity *pusher )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->shoved;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(pusher));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnBlinded(SPActor *me, CBaseEntity *blinder )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->blinded;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(blinder));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnTerritoryContested(SPActor *me, int territoryID )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->terrcontest;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(territoryID);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnTerritoryCaptured(SPActor *me, int territoryID )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->terrcap;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(territoryID);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnTerritoryLost(SPActor *me, int territoryID )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->terrlost;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(territoryID);
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnWin(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->win;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnLose(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->lose;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+
+	virtual SPEventDesiredResult::BaseClass OnThreatChanged(SPActor *me, CBaseEntity * territoryID )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->threachngd;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(territoryID));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnEnteredSpit(SPActor *me )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->enterspit;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnHitByVomitJar(SPActor *me, CBaseEntity * territoryID )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+		
+		IPluginFunction *func = entry->hitvom;
+		
+		if(!func) {
+			return TryContinue();
+		}
+		
+		SPEventDesiredResult result{};
+		
+		func->PushCell((cell_t)this);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		func->PushCell(gamehelpers->EntityToBCompatRef(territoryID));
+		cell_t resvars[RESVARS_SIZE]{0};
+		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		func->Execute((cell_t *)&result.m_type);
+		
+		varstoresult(resvars, result);
+		
+		return result;
+	}
+	virtual SPEventDesiredResult::BaseClass OnCommandAssault(SPActor *me )														{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+};
+
+SPAction *SPActionEntry::create()
+{
+	SPAction *action = new SPAction{};
+	action->entry = this;
+	action->name = name;
+	actions.emplace_back(action);
+	return action;
+}
+
+class IIntentionCustom;
+
+std::vector<IIntentionCustom *> customintentions{};
+
+class IIntentionCustom : public IIntention
+{
+public:
+	IIntentionCustom( INextBot *bot, bool reg, IPluginFunction *initact_, IdentityToken_t *id )
+		: IIntention( bot, reg )
+	{
+		pId = id;
+		customintentions.emplace_back(this);
+		initact = initact_;
+		m_behavior = new SPBehavior( initialaction(bot) );
+	}
+	virtual ~IIntentionCustom()
+	{
+		delete m_behavior;
+		
+		auto it = customintentions.begin();
+		while(it != customintentions.end()) {
+			if(*it == this) {
+				customintentions.erase(it);
+				break;
+			}
+			
+			++it;
+		}
+	}
+	
+	SPAction *initialaction(INextBot *bot)
+	{
+		if(!initact) {
+			return nullptr;
+		}
+		
+		SPAction *act = nullptr;
+		initact->PushCell(gamehelpers->EntityToBCompatRef(bot->GetEntity()));
+		initact->Execute((cell_t *)&act);
+		
+		return act;
+	}
+	
+	virtual void Reset( void )
+	{
+		IIntention::Reset();
+		
+		delete m_behavior;
+		m_behavior = new SPBehavior( initialaction(GetBot()) );
+	}
+	
+	virtual void Update( void )
+	{
+		IIntention::Update();
+		
+		m_behavior->Update( (SPActor *)GetBot()->GetEntity() , GetUpdateInterval() );
+	}
+	
+	virtual INextBotEventResponder *FirstContainedResponder( void ) const  { return m_behavior; }
+	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const { return NULL; }
+	
+	SPBehavior *m_behavior = nullptr;
+	IPluginFunction *initact = nullptr;
+	IdentityToken_t *pId = nullptr;
+};
+
+SPActionEntry::~SPActionEntry()
+{
+	for(SPAction *act : actions) {
+		act->entry = nullptr;
+	}
+}
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 CBaseEntity *IBody::GetEntity() { return m_bot->GetEntity(); }
@@ -2613,22 +4426,6 @@ public:
 	}
 };
 
-enum NextBotDebugType 
-{
-	NEXTBOT_DEBUG_NONE = 0,
-	NEXTBOT_BEHAVIOR	= 0x0001,
-	NEXTBOT_LOOK_AT		= 0x0002,
-	NEXTBOT_PATH		= 0x0004,
-	NEXTBOT_ANIMATION	= 0x0008,
-	NEXTBOT_LOCOMOTION	= 0x0010,
-	NEXTBOT_VISION		= 0x0020,
-	NEXTBOT_HEARING		= 0x0040,
-	NEXTBOT_EVENTS		= 0x0080,
-	NEXTBOT_ERRORS		= 0x0100,		// when things go wrong, like being stuck
-
-	NEXTBOT_DEBUG_ALL	= 0xFFFF
-};
-
 SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetDeathDropHeight, SH_NOATTRIB, 0, float);
@@ -2730,6 +4527,11 @@ namespace NDebugOverlay
 	{
 		(void_to_func<void(*)(const Vector &, const Vector &, const Vector &, int, int, int, int, bool, float)>(NDebugOverlayTriangle))(p1, p2, p3, r, g, b, a, noDepthTest, duration);
 	}
+}
+
+void DebugDrawLine( const Vector& vecAbsStart, const Vector& vecAbsEnd, int r, int g, int b, bool test, float duration )
+{
+	NDebugOverlay::Line( vecAbsStart + Vector( 0,0,0.1), vecAbsEnd + Vector( 0,0,0.1), r,g,b, test, duration );
 }
 
 void CNavArea::DrawFilled( int r, int g, int b, int a, float deltaT, bool noDepthTest, float margin ) const
@@ -3374,17 +5176,6 @@ public:
 			bytes->m_nextComponent = nullptr;
 		}
 		
-		return bytes;
-	}
-};
-
-class NextBotCombatCharacter : public CBaseCombatCharacter, public INextBot
-{
-public:
-	static NextBotCombatCharacter *create(size_t size_modifier)
-	{
-		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
-		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
 		return bytes;
 	}
 };
@@ -4123,17 +5914,10 @@ public:
 	
 	void ctor(SubjectChaseType chaseHow)
 	{
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-		static void **timervtable = nullptr;
-		if(!timervtable) {
-			static CountdownTimer timerobject;
-			timervtable = *(void ***)&timerobject;
-		}
-		
-		*(void ***)&m_failTimer = timervtable;
-		*(void ***)&m_throttleTimer = timervtable;
-		*(void ***)&m_lifetimeTimer = timervtable;
-#endif
+		new (&m_failTimer) CountdownTimer();
+		new (&m_throttleTimer) CountdownTimer();
+		new (&m_lifetimeTimer) CountdownTimer();
+		new (&m_lastPathSubject) EHANDLE();
 		
 		m_failTimer.Invalidate();
 		m_throttleTimer.Invalidate();
@@ -4638,31 +6422,6 @@ public:
 	}
 };
 
-bool CNavArea::IsOverlapping( const Vector &pos, float tolerance ) const
-{
-	if (pos.x + tolerance >= m_nwCorner.x && pos.x - tolerance <= m_seCorner.x &&
-		pos.y + tolerance >= m_nwCorner.y && pos.y - tolerance <= m_seCorner.y)
-		return true;
-
-	return false;
-}
-
-void CNavArea::GetExtent( Extent *extent ) const
-{
-	extent->lo = m_nwCorner;
-	extent->hi = m_seCorner;
-
-	extent->lo.z = MIN( extent->lo.z, m_nwCorner.z );
-	extent->lo.z = MIN( extent->lo.z, m_seCorner.z );
-	extent->lo.z = MIN( extent->lo.z, m_neZ );
-	extent->lo.z = MIN( extent->lo.z, m_swZ );
-
-	extent->hi.z = MAX( extent->hi.z, m_nwCorner.z );
-	extent->hi.z = MAX( extent->hi.z, m_seCorner.z );
-	extent->hi.z = MAX( extent->hi.z, m_neZ );
-	extent->hi.z = MAX( extent->hi.z, m_swZ );
-}
-
 class RetreatPathBuilder
 {
 public:
@@ -4692,7 +6451,7 @@ public:
 		startArea->SetParent( NULL );
 
 		// start search
-#if 0
+#if 1
 		CNavArea::ClearSearchLists();
 #endif
 
@@ -4704,7 +6463,7 @@ public:
 
 		startArea->SetTotalCost( initCost );
 
-#if 0
+#if 1
 		startArea->AddToOpenList();
 #endif
 		
@@ -4718,7 +6477,7 @@ public:
 		// Minimize total path length and danger.
 		// Maximize distance to threat of end of path.
 		//
-#if 0
+#if 1
 		while( !CNavArea::IsOpenListEmpty() )
 		{
 			// get next area to check
@@ -5498,6 +7257,18 @@ cell_t CNavAreaGetCenter(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
+cell_t CNavAreaGetRandomPoint(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	Vector vec = area->GetRandomPoint();
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(vec.x);
+	addr[1] = sp_ftoc(vec.y);
+	addr[2] = sp_ftoc(vec.z);
+	return 0;
+}
+
 cell_t CNavAreaComputeAdjacentConnectionHeightChange(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
@@ -5613,6 +7384,118 @@ cell_t CNavMeshGetGroundHeightNative(IPluginContext *pContext, const cell_t *par
 	return ret;
 }
 
+cell_t CNavMeshGetSimpleGroundHeightNative(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	cell_t *heightaddr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	
+	Vector normal{};
+	
+	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
+	
+	float height = 0.0f;
+	bool ret = area->GetSimpleGroundHeight(pos, &height, &normal);
+	
+	addr = nullptr;
+	pContext->LocalToPhysAddr(params[4], &addr);
+	
+	if(addr != pNullVec) {
+		addr[0] = sp_ftoc(normal.x);
+		addr[1] = sp_ftoc(normal.y);
+		addr[2] = sp_ftoc(normal.z);
+	}
+	
+	*heightaddr = sp_ftoc(height);
+	
+	return ret;
+}
+
+cell_t CNavMeshNavAreaCountget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	return area->GetNavAreaCount();
+}
+
+cell_t CNavMeshGetPlace(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return area->GetPlace(pos);
+}
+
+cell_t CNavMeshPlaceToName(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+
+	const char *name = area->PlaceToName(params[2]);
+	pContext->StringToLocal(params[3], params[4], name);
+
+	return 0;
+}
+
+cell_t CNavMeshNameToPlace(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	return area->NameToPlace(name);
+}
+
+cell_t CNavMeshGetNavAreaByID(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	return (cell_t)area->GetNavAreaByID(params[2]);
+}
+
+cell_t CNavMeshGetNavAreaEntity(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return (cell_t)area->GetNavArea(pEntity, params[3], sp_ctof(params[4]));
+}
+
+cell_t CNavMeshGetNavAreaVector(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	return (cell_t)area->GetNavArea(pos, sp_ctof(params[3]));
+}
+
+cell_t CNavMeshGetNearestNavAreaEntity(IPluginContext *pContext, const cell_t *params)
+{
+	CNavMesh *area = (CNavMesh *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return (cell_t)area->GetNearestNavArea(pEntity, params[3], sp_ctof(params[4]));
+}
+
 cell_t CNavAreaGetDanger(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
@@ -5623,6 +7506,36 @@ cell_t CNavAreaUnderwaterget(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
 	return area->IsUnderwater();
+}
+
+cell_t CNavAreaAvoidanceObstacleHeightget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return sp_ftoc(area->GetAvoidanceObstacleHeight());
+}
+
+cell_t CNavAreaSizeXget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return sp_ftoc(area->GetSizeX());
+}
+
+cell_t CNavAreaSizeYget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return sp_ftoc(area->GetSizeY());
+}
+
+cell_t CNavAreaPlaceget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->GetPlace();
+}
+
+cell_t CNavAreaHasAvoidanceObstacle(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->HasAvoidanceObstacle(sp_ctof(params[2]));
 }
 
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
@@ -5879,6 +7792,15 @@ cell_t INextBotComponentBotget(IPluginContext *pContext, const cell_t *params)
 	INextBotComponent *bot = (INextBotComponent *)params[1];
 	
 	return (cell_t)bot->GetBot();
+}
+
+cell_t INextBotComponentBotReset(IPluginContext *pContext, const cell_t *params)
+{
+	INextBotComponent *bot = (INextBotComponent *)params[1];
+	
+	bot->Reset();
+	
+	return 0;
 }
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
@@ -6250,11 +8172,12 @@ cell_t INextBotAllocateCustomVision(IPluginContext *pContext, const cell_t *para
 	return (cell_t)locomotion;
 }
 
-cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
+template <typename T, typename ...Args>
+cell_t INextBotAllocateIntention(IPluginContext *pContext, const cell_t *params, Args &&... args)
 {
 	INextBot *bot = (INextBot *)params[1];
 	
-	IIntentionStub *locomotion = new IIntentionStub(bot, false);
+	T *locomotion = new T(bot, false, std::forward<Args>(args)...);
 	
 	IIntention *old = bot->GetIntentionInterface();
 	
@@ -6314,6 +8237,18 @@ cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
 #endif
 	
 	return (cell_t)locomotion;
+}
+
+cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
+{
+	return INextBotAllocateIntention<IIntentionStub>(pContext, params);
+}
+
+cell_t INextBotAllocateCustomIntention(IPluginContext *pContext, const cell_t *params)
+{
+	IPluginFunction *initact = pContext->GetFunctionById(params[2]);
+	
+	return INextBotAllocateIntention<IIntentionCustom>(pContext, params, initact, pContext->GetIdentity());
 }
 
 cell_t PathLengthget(IPluginContext *pContext, const cell_t *params)
@@ -7996,6 +9931,185 @@ cell_t MakeEntityNextBot(IPluginContext *pContext, const cell_t *params)
 	return (cell_t)INextBotCustom::create(pSubject);
 }
 
+cell_t BehaviorActionEntryCTOR(IPluginContext *pContext, const cell_t *params)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[1], &name);
+	
+	std::string str{name};
+	
+	SPActionEntry *obj = new SPActionEntry{std::move(name)};
+	Handle_t hndl = handlesys->CreateHandle(BehaviorEntryHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->hndl = hndl;
+	obj->pContext = pContext;
+	
+	return hndl;
+}
+
+cell_t BehaviorActionEntryset_function(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	SPActionEntry *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], BehaviorEntryHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	IPluginFunction *func = pContext->GetFunctionById(params[3]);
+	
+	if(stricmp(name, "OnStart") == 0) {
+		obj->onstart = func;
+	} else if(stricmp(name, "Update") == 0) {
+		obj->onupdate = func;
+	} else if(stricmp(name, "OnSuspend") == 0) {
+		obj->onsus = func;
+	} else if(stricmp(name, "OnResume") == 0) {
+		obj->onresume = func;
+	} else if(stricmp(name, "OnEnd") == 0) {
+		obj->onend = func;
+	} else if(stricmp(name, "OnLeaveGround") == 0) {
+		obj->leavegrnd = func;
+	} else if(stricmp(name, "OnLandOnGround") == 0) {
+		obj->landgrnd = func;
+	} else if(stricmp(name, "OnContact") == 0) {
+		obj->oncontact = func;
+	} else if(stricmp(name, "OnAnimationActivityComplete") == 0) {
+		obj->animcompl = func;
+	} else if(stricmp(name, "OnAnimationActivityInterrupted") == 0) {
+		obj->animinter = func;
+	} else if(stricmp(name, "OnAnimationEvent") == 0) {
+		obj->animevent = func;
+	} else if(stricmp(name, "OnOtherKilled") == 0) {
+		obj->otherkilled = func;
+	} else if(stricmp(name, "OnSight") == 0) {
+		obj->onsight = func;
+	} else if(stricmp(name, "OnLostSight") == 0) {
+		obj->onlosesight = func;
+	} else if(stricmp(name, "OnShoved") == 0) {
+		obj->shoved = func;
+	} else if(stricmp(name, "OnBlinded") == 0) {
+		obj->blinded = func;
+	} else if(stricmp(name, "OnTerritoryContested") == 0) {
+		obj->terrcontest = func;
+	} else if(stricmp(name, "OnTerritoryCaptured") == 0) {
+		obj->terrcap = func;
+	} else if(stricmp(name, "OnTerritoryLost") == 0) {
+		obj->terrlost = func;
+	} else if(stricmp(name, "OnThreatChanged") == 0) {
+		obj->threachngd = func;
+	} else if(stricmp(name, "OnHitByVomitJar") == 0) {
+		obj->hitvom = func;
+	} else if(stricmp(name, "OnDrop") == 0) {
+		obj->drop = func;
+	} else if(stricmp(name, "OnMoveToSuccess") == 0) {
+		obj->movesucc = func;
+	} else if(stricmp(name, "OnStuck") == 0) {
+		obj->stuck = func;
+	} else if(stricmp(name, "OnUnStuck") == 0) {
+		obj->unstuck = func;
+	} else if(stricmp(name, "OnIgnite") == 0) {
+		obj->ignite = func;
+	} else if(stricmp(name, "OnInjured") == 0) {
+		obj->injured = func;
+	} else if(stricmp(name, "OnKilled") == 0) {
+		obj->killed = func;
+	} else if(stricmp(name, "OnWin") == 0) {
+		obj->win = func;
+	} else if(stricmp(name, "OnLose") == 0) {
+		obj->lose = func;
+	} else if(stricmp(name, "OnEnteredSpit") == 0) {
+		obj->enterspit = func;
+	} else if(stricmp(name, "OnModelChanged") == 0) {
+		obj->mdlchnd = func;
+	} else if(stricmp(name, "OnMoveToFailure") == 0) {
+		obj->movefail = func;
+	} else if(stricmp(name, "OnSound") == 0) {
+		obj->sound = func;
+	} else if(stricmp(name, "OnWeaponFired") == 0) {
+		obj->wepfired = func;
+	} else if(stricmp(name, "OnActorEmoted") == 0) {
+		obj->actemote = func;
+	} else if(stricmp(name, "OnPickUp") == 0) {
+		obj->pickup = func;
+	} else {
+		return pContext->ThrowNativeError("invalid name %s", name);
+	}
+	
+	return 0;
+}
+
+cell_t BehaviorActionEntrycreate(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	SPActionEntry *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], BehaviorEntryHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	return (cell_t)obj->create();
+}
+
+cell_t BehaviorActionEntryget(IPluginContext *pContext, const cell_t *params)
+{
+	SPAction *obj = (SPAction *)params[1];
+	
+	if(!obj->entry) {
+		return 0;
+	}
+	
+	return obj->entry->hndl;
+}
+
+cell_t BehaviorActionset_data(IPluginContext *pContext, const cell_t *params)
+{
+	SPAction *obj = (SPAction *)params[1];
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{obj->data.find(name)};
+	if(it == obj->data.end()) {
+		it = obj->data.emplace(std::pair<std::string, cell_t>{name, 0}).first;
+	}
+	
+	it->second = params[3];
+	
+	return 0;
+}
+
+cell_t BehaviorActionget_data(IPluginContext *pContext, const cell_t *params)
+{
+	SPAction *obj = (SPAction *)params[1];
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{obj->data.find(name)};
+	if(it == obj->data.end()) {
+		return pContext->ThrowNativeError("theres no data with the name %s", name);
+	}
+	
+	return it->second;
+}
+
+cell_t IIntentionCustomResetBehavior(IPluginContext *pContext, const cell_t *params)
+{
+	IIntentionCustom *obj = (IIntentionCustom *)params[1];
+	SPAction *act = (SPAction *)params[2];
+	
+	obj->m_behavior->Reset(act);
+	
+	return 0;
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -8049,6 +10163,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.CostSoFar.get", CNavAreaCostSoFarget},
 	{"CNavArea.ID.get", CNavAreaIDget},
 	{"CNavArea.GetCenter", CNavAreaGetCenter},
+	{"CNavArea.GetRandomPoint", CNavAreaGetRandomPoint},
 	{"CNavArea.ComputeAdjacentConnectionHeightChange", CNavAreaComputeAdjacentConnectionHeightChange},
 	{"CNavArea.HasAttributes", CNavAreaHasAttributes},
 #if SOURCE_ENGINE == SE_TF2
@@ -8064,8 +10179,22 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"CNavMesh.GetNearestNavAreaVector", CNavMeshGetNearestNavAreaVector},
 	{"CNavMesh.GetGroundHeight", CNavMeshGetGroundHeightNative},
+	{"CNavMesh.GetSimpleGroundHeight", CNavMeshGetSimpleGroundHeightNative},
+	{"CNavMesh.NavAreaCount.get", CNavMeshNavAreaCountget},
+	{"CNavMesh.GetPlace", CNavMeshGetPlace},
+	{"CNavMesh.PlaceToName", CNavMeshPlaceToName},
+	{"CNavMesh.NameToPlace", CNavMeshNameToPlace},
+	{"CNavMesh.GetNavAreaByID", CNavMeshGetNavAreaByID},
+	{"CNavMesh.GetNavAreaEntity", CNavMeshGetNavAreaEntity},
+	{"CNavMesh.GetNavAreaVector", CNavMeshGetNavAreaVector},
+	{"CNavMesh.GetNearestNavAreaEntity", CNavMeshGetNearestNavAreaEntity},
 	{"CNavArea.GetDanger", CNavAreaGetDanger},
 	{"CNavArea.Underwater.get", CNavAreaUnderwaterget},
+	{"CNavArea.AvoidanceObstacleHeight.get", CNavAreaAvoidanceObstacleHeightget},
+	{"CNavArea.SizeX.get", CNavAreaSizeXget},
+	{"CNavArea.SizeY.get", CNavAreaSizeYget},
+	{"CNavArea.Place.get", CNavAreaPlaceget},
+	{"CNavArea.HasAvoidanceObstacle", CNavAreaHasAvoidanceObstacle},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
@@ -8110,6 +10239,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
 	{"INextBot.AllocateCustomVision", INextBotAllocateCustomVision},
+	{"INextBot.AllocateCustomIntention", INextBotAllocateCustomIntention},
 	{"INextBot.StubIntention", INextBotStubIntention},
 	{"INextBot.Entity.get", INextBotEntityget},
 	{"INextBot.BeginUpdate", INextBotBeginUpdate},
@@ -8130,6 +10260,7 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"INextBot.IsDebugging", INextBotIsDebuggingNative},
 	{"INextBotComponent.Bot.get", INextBotComponentBotget},
+	{"INextBotComponent.Reset", INextBotComponentBotReset},
 #if SOURCE_ENGINE == SE_TF2
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
 #endif
@@ -8257,6 +10388,13 @@ sp_nativeinfo_t natives[] =
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
 	{"MakeEntityNextBot", MakeEntityNextBot},
+	{"BehaviorActionEntry.BehaviorActionEntry", BehaviorActionEntryCTOR},
+	{"BehaviorActionEntry.set_function", BehaviorActionEntryset_function},
+	{"BehaviorActionEntry.create", BehaviorActionEntrycreate},
+	{"BehaviorAction.Entry.get", BehaviorActionEntryget},
+	{"BehaviorAction.set_data", BehaviorActionset_data},
+	{"BehaviorAction.get_data", BehaviorActionget_data},
+	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
 	{NULL, NULL}
 };
 
@@ -8273,6 +10411,9 @@ bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	tf_nav_combat_decay_rate = g_pCVar->FindVar("tf_nav_combat_decay_rate");
 #endif
 	NextBotStop = g_pCVar->FindVar("nb_stop");
+	NextBotDebugHistory = g_pCVar->FindVar("nb_debug_history");
+	developer = g_pCVar->FindVar("developer");
+	r_visualizetraces = g_pCVar->FindVar("r_visualizetraces");
 	return true;
 }
 
@@ -8299,6 +10440,9 @@ void Sample::OnHandleDestroy(HandleType_t type, void *object)
 		delete obj;
 	} else if(type == RetreatPathHandleType) {
 		RetreatPath *obj = (RetreatPath *)object;
+		delete obj;
+	} else if(type == BehaviorEntryHandleType) {
+		SPActionEntry *obj = (SPActionEntry *)object;
 		delete obj;
 	}
 }
@@ -8458,6 +10602,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	RetreatPathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("RetreatPath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	DirectChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("DirectChasePath", this, ChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
+	BehaviorEntryHandleType = handlesys->CreateType("BehaviorActionEntry", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	
 	plsys->AddPluginsListener(this);
 	
 	sharesys->RegisterLibrary(myself, "nextbot");
@@ -8479,7 +10625,11 @@ void Sample::OnPluginLoaded(IPlugin *plugin)
 
 void Sample::OnPluginUnloaded(IPlugin *plugin)
 {
-	
+	for(IIntentionCustom *inte : customintentions) {
+		if(inte->pId == plugin->GetIdentity()) {
+			inte->initact = nullptr;
+		}
+	}
 }
 
 void Sample::SDK_OnAllLoaded()
@@ -8521,5 +10671,6 @@ void Sample::SDK_OnUnload()
 	handlesys->RemoveType(ChasePathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(DirectChasePathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(RetreatPathHandleType, myself->GetIdentity());
+	handlesys->RemoveType(BehaviorEntryHandleType, myself->GetIdentity());
 	gameconfs->CloseGameConfigFile(g_pGameConf);
 }
