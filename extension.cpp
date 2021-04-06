@@ -2594,7 +2594,7 @@ public:
 
 		return threat2;
 	}
-#elif SORUCE_ENGINE == SE_LEFT4DEAD2
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( const INextBot *me, 
 															   CBaseCombatCharacter *subject,
 															   CBaseCombatCharacter *threat1, 
@@ -2618,7 +2618,7 @@ public:
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
-				const CBaseCombatCharacter *result = query->SelectMoreDangerousThreat( me, subject, threat1, threat2 );
+				CBaseCombatCharacter *result = query->SelectMoreDangerousThreat( me, subject, threat1, threat2 );
 				if ( result )
 				{
 					return result;
@@ -3127,24 +3127,25 @@ public:
 	
 	virtual const char *GetName( void ) const { return name.c_str(); }
 	
-	void varstoresult(cell_t *vars, SPActionResult &result)
+	static void initvars(cell_t *vars, SPActionResult &result)
+	{
+		
+	}
+	
+	static void initvars(cell_t *vars, SPEventDesiredResult &result)
+	{
+		vars[1] = (cell_t)RESULT_TRY;
+	}
+	
+	static void varstoresult(cell_t *vars, SPActionResult &result)
 	{
 		result.m_action = (SPAction *)vars[0];
 		
-		std::string reason{};
-		
-		for(int i = 2; i < RESVARS_REASON_SIZE; ++i) {
-			if(vars[i] == 0) {
-				break;
-			}
-			
-			reason += (char)vars[i];
-		}
-		
+		std::string reason{(char *)&vars[2]};
 		result.set_reason(std::move(reason));
 	}
 	
-	void varstoresult(cell_t *vars, SPEventDesiredResult &result)
+	static void varstoresult(cell_t *vars, SPEventDesiredResult &result)
 	{
 		varstoresult(vars, (SPActionResult &)result);
 		
@@ -3200,6 +3201,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell((cell_t)priorAction);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3226,6 +3228,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushFloat(interval);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3252,6 +3255,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell((cell_t)interruptingAction);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3278,6 +3282,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell((cell_t)interruptingAction);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3322,6 +3327,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(ground));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3347,6 +3353,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(ground));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3372,6 +3379,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(other));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3396,6 +3404,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3421,6 +3430,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(reason);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3445,6 +3455,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3469,6 +3480,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3495,6 +3507,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(activity);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3520,6 +3533,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(activity);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3549,6 +3563,7 @@ public:
 		func->PushCell(event->event);
 #endif
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3573,6 +3588,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3597,6 +3613,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3621,6 +3638,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3646,6 +3664,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(victim));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3671,6 +3690,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3696,6 +3716,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3723,6 +3744,7 @@ public:
 		cell_t addr[3]{sp_ftoc(pos.x), sp_ftoc(pos.y), sp_ftoc(pos.z)};
 		func->PushArray(addr, 3);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3750,6 +3772,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(whoFired));
 		func->PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity *)weapon));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3775,6 +3798,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3800,6 +3824,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(giver));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3825,6 +3850,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(item));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3851,6 +3877,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(emoter));
 		func->PushCell(emote);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3885,6 +3912,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(pusher));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3910,6 +3938,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(blinder));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3935,6 +3964,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(territoryID);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3960,6 +3990,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(territoryID);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -3985,6 +4016,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(territoryID);
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -4009,6 +4041,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -4033,6 +4066,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -4059,6 +4093,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(territoryID));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -4083,6 +4118,7 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -4108,6 +4144,7 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(territoryID));
 		cell_t resvars[RESVARS_SIZE]{0};
+		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
@@ -4130,6 +4167,8 @@ SPAction *SPActionEntry::create()
 class IIntentionCustom;
 
 std::vector<IIntentionCustom *> customintentions{};
+
+#define IS_ANY_HINDRANCE_POSSIBLE	( (CBaseEntity*)0xFFFFFFFF )
 
 class IIntentionCustom : public IIntention
 {
@@ -4170,6 +4209,38 @@ public:
 		return act;
 	}
 	
+	virtual QueryResultType	 IsHindrance( const INextBot *me, CBaseEntity *blocker ) const
+	{
+		QueryResultType result = IIntention::IsHindrance(me, blocker);
+		if(result != ANSWER_UNDEFINED) {
+			return result;
+		}
+		
+		if(ishinder) {
+			ishinder->PushCell((cell_t)this);
+			ishinder->PushCell((cell_t)me);
+			if(blocker != IS_ANY_HINDRANCE_POSSIBLE) {
+				ishinder->PushCell(gamehelpers->EntityToBCompatRef(blocker));
+			} else {
+				ishinder->PushCell((cell_t)IS_ANY_HINDRANCE_POSSIBLE);
+			}
+			QueryResultType res = ANSWER_UNDEFINED;
+			ishinder->Execute((cell_t *)&res);
+			if(res != ANSWER_UNDEFINED) {
+				return res;
+			}
+		}
+		
+		return ANSWER_UNDEFINED;
+	}
+	
+	void plugin_unloaded()
+	{
+		initact = nullptr;
+		ishinder = nullptr;
+		pId = nullptr;
+	}
+	
 	virtual void Reset( void )
 	{
 		IIntention::Reset();
@@ -4189,7 +4260,9 @@ public:
 	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const { return NULL; }
 	
 	SPBehavior *m_behavior = nullptr;
+	
 	IPluginFunction *initact = nullptr;
+	IPluginFunction *ishinder = nullptr;
 	IdentityToken_t *pId = nullptr;
 };
 
@@ -4201,7 +4274,7 @@ SPActionEntry::~SPActionEntry()
 }
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-CBaseEntity *IBody::GetEntity() { return m_bot->GetEntity(); }
+CBaseEntity *IBody::GetEntity() { return GetBot()->GetEntity(); }
 #endif
 
 bool IBody::SetPosition( const Vector &pos )
@@ -5074,8 +5147,6 @@ public:
 #if SOURCE_ENGINE == SE_TF2
 	int CollisionGroup = COLLISION_GROUP_NONE;
 #endif
-	Vector eye;
-	Vector view;
 	Vector hullMaxs;
 	Vector hullMins;
 	
@@ -5083,30 +5154,13 @@ public:
 	float GetHullHeight( void ) override { return HullHeight; }							// height of bot's current collision hull based on posture
 	float GetStandHullHeight( void ) override { return StandHullHeight; }						// height of bot's collision hull when standing
 	float GetCrouchHullHeight( void ) override { return CrouchHullHeight; }					// height of bot's collision hull when crouched
-	const Vector &GetHullMins( void ) override { return hullMaxs; }					// return current collision hull minimums based on actual body posture
-	const Vector &GetHullMaxs( void ) override { return hullMins; }					// return current collision hull maximums based on actual body posture
+	const Vector &GetHullMins( void ) override { return hullMins; }					// return current collision hull minimums based on actual body posture
+	const Vector &GetHullMaxs( void ) override { return hullMaxs; }					// return current collision hull maximums based on actual body posture
 
 	unsigned int GetSolidMask( void ) override { return SolidMask; }					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
 #if SOURCE_ENGINE == SE_TF2
 	unsigned int GetCollisionGroup( void ) override { return CollisionGroup; }
 #endif
-	
-	const Vector &GetEyePosition( void ) override
-	{
-		eye = GetBot()->GetEntity()->WorldSpaceCenter();
-		return eye;
-	}
-	const Vector &GetViewVector( void ) override
-	{
-		AngleVectors( GetBot()->GetEntity()->EyeAngles(), &view );
-		return view;
-	}
-	
-	bool SetPosition( const Vector &pos ) override
-	{
-		GetBot()->GetEntity()->SetAbsOrigin( pos );
-		return true;
-	}
 };
 
 #if SOURCE_ENGINE == SE_TF2
@@ -5906,31 +5960,21 @@ public:
 		DONT_LEAD_SUBJECT
 	};
 	
-	CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
-	CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
-	CountdownTimer m_lifetimeTimer;
-	EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
-	SubjectChaseType m_chaseHow;
-	
-	void ctor(SubjectChaseType chaseHow)
-	{
-		new (&m_failTimer) CountdownTimer();
-		new (&m_throttleTimer) CountdownTimer();
-		new (&m_lifetimeTimer) CountdownTimer();
-		new (&m_lastPathSubject) EHANDLE();
-		
-		m_failTimer.Invalidate();
-		m_throttleTimer.Invalidate();
-		m_lifetimeTimer.Invalidate();
-		m_lastPathSubject = NULL;
-		m_chaseHow = chaseHow;
-	}
+	char pad1[40];
 	
 	using IsRepathNeeded_t = bool (ChasePath::*)( INextBot *, CBaseEntity * );
 	using Update_t = void (ChasePath::*)( INextBot *, CBaseEntity *, const IPathCost &, Vector * );
 	
 	struct vars_t
 	{
+		vars_t(SubjectChaseType chaseHow) {
+			m_failTimer.Invalidate();
+			m_throttleTimer.Invalidate();
+			m_lifetimeTimer.Invalidate();
+			m_lastPathSubject = NULL;
+			m_chaseHow = chaseHow;
+		}
+		
 		float radius = 500.0f;
 		float maxlen = 0.0f;
 		float life = 0.0f;
@@ -5940,6 +5984,12 @@ public:
 		
 		IsRepathNeeded_t pIsRepathNeeded = nullptr;
 		Update_t pUpdate = nullptr;
+		
+		CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
+		CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
+		CountdownTimer m_lifetimeTimer;
+		EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
+		SubjectChaseType m_chaseHow;
 	};
 	
 	unsigned char *vars_ptr()
@@ -5949,8 +5999,8 @@ public:
 	
 	void HookInvalidate()
 	{
-		m_throttleTimer.Invalidate();
-		m_lifetimeTimer.Invalidate();
+		getvars().m_throttleTimer.Invalidate();
+		getvars().m_lifetimeTimer.Invalidate();
 		
 		RETURN_META(MRES_IGNORED);
 	}
@@ -6126,7 +6176,7 @@ public:
 			}
 
 			// don't allow repath until a moment AFTER we have left the ladder
-			m_throttleTimer.Start( 1.0f );
+			getvars().m_throttleTimer.Start( 1.0f );
 
 			return;
 		}
@@ -6144,7 +6194,7 @@ public:
 			return;
 		}
 
-		if ( !m_failTimer.IsElapsed() )
+		if ( !getvars().m_failTimer.IsElapsed() )
 		{
 	 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
 	 		{
@@ -6158,13 +6208,13 @@ public:
 		}
 
 		// if our path subject changed, repath immediately
-		if ( subject != m_lastPathSubject )
+		if ( subject != getvars().m_lastPathSubject )
 		{
 			if ( bot->IsDebugging( NEXTBOT_PATH ) )
 			{
 				static float lastprint = 0.0f;
 				if(lastprint <= gpGlobals->curtime) {
-					DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p (#%d) to %p (#%d)).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), m_lastPathSubject.Get(), m_lastPathSubject.Get() ? m_lastPathSubject.Get()->entindex() : -1, subject, subject ? subject->entindex() : -1 );
+					DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p (#%d) to %p (#%d)).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), getvars().m_lastPathSubject.Get(), getvars().m_lastPathSubject.Get() ? getvars().m_lastPathSubject.Get()->entindex() : -1, subject, subject ? subject->entindex() : -1 );
 					lastprint = gpGlobals->curtime + 2.0f;
 				}
 			}
@@ -6172,10 +6222,10 @@ public:
 			Invalidate();
 
 			// new subject, fresh attempt
-			m_failTimer.Invalidate();
+			getvars().m_failTimer.Invalidate();
 		}
 
-		if ( IsValid() && !m_throttleTimer.IsElapsed() )
+		if ( IsValid() && !getvars().m_throttleTimer.IsElapsed() )
 		{
 			// require a minimum time between repaths, as long as we have a path to follow
 	 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
@@ -6189,7 +6239,7 @@ public:
 			return;
 		}
 
-		if ( IsValid() && m_lifetimeTimer.HasStarted() && m_lifetimeTimer.IsElapsed() )
+		if ( IsValid() && getvars().m_lifetimeTimer.HasStarted() && getvars().m_lifetimeTimer.IsElapsed() )
 		{
 			// this path's lifetime has elapsed
 			Invalidate();
@@ -6201,7 +6251,7 @@ public:
 			bool isPath;
 			Vector pathTarget = subject->GetAbsOrigin();
 
-			if ( m_chaseHow == LEAD_SUBJECT )
+			if ( getvars().m_chaseHow == LEAD_SUBJECT )
 			{
 				pathTarget = pPredictedSubjectPos ? *pPredictedSubjectPos : PredictSubjectPosition( bot, subject );
 				isPath = Compute( bot, pathTarget, cost, GetMaxPathLength() );
@@ -6229,19 +6279,19 @@ public:
 					}
 				}
 
-				m_lastPathSubject = subject;
+				getvars().m_lastPathSubject = subject;
 
-				m_throttleTimer.Start( getvars().repathtime );
+				getvars().m_throttleTimer.Start( getvars().repathtime );
 
 				// track the lifetime of this new path
 				float lifetime = GetLifetime();
 				if ( lifetime > 0.0f )
 				{
-					m_lifetimeTimer.Start( lifetime );
+					getvars().m_lifetimeTimer.Start( lifetime );
 				}
 				else
 				{
-					m_lifetimeTimer.Invalidate();
+					getvars().m_lifetimeTimer.Invalidate();
 				}
 			}
 			else
@@ -6249,7 +6299,7 @@ public:
 				// can't reach subject - throttle retry based on range to subject
 				float failtime = 0.005f * ( bot->GetRangeTo( subject ) );
 				
-				m_failTimer.Start( failtime );
+				getvars().m_failTimer.Start( failtime );
 				
 				// allow bot to react to path failure
 				bot->OnMoveToFailure( this, FAIL_NO_PATH_EXISTS );
@@ -6278,8 +6328,7 @@ public:
 	{
 		ChasePath *bytes = (ChasePath *)calloc(1, sizeof(ChasePath) + sizeof(vars_t));
 		call_mfunc<void>(bytes, PathFollowerCTOR);
-		bytes->ctor(chaseHow);
-		new (bytes->vars_ptr()) vars_t();
+		new (bytes->vars_ptr()) vars_t(chaseHow);
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &ChasePath::dtor), false);
 		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &ChasePath::HookInvalidate), false);
 		bytes->getvars().pIsRepathNeeded = &ChasePath::IsRepathNeeded;
@@ -7343,35 +7392,31 @@ cell_t CNavLadderLengthget(IPluginContext *pContext, const cell_t *params)
 
 cell_t CNavMeshGetNearestNavAreaVector(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
 	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
+	pContext->LocalToPhysAddr(params[1], &addr);
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
-	return (cell_t)area->GetNearestNavArea(pos, params[3], sp_ctof(params[4]), params[5], params[6], params[7]);
+	return (cell_t)TheNavMesh->GetNearestNavArea(pos, params[2], sp_ctof(params[3]), params[4], params[5], params[6]);
 }
 
 cell_t CNavMeshGetGroundHeightNative(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
 	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
+	pContext->LocalToPhysAddr(params[1], &addr);
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
 	cell_t *heightaddr = nullptr;
-	pContext->LocalToPhysAddr(params[3], &addr);
+	pContext->LocalToPhysAddr(params[2], &addr);
 	
 	Vector normal{};
 	
 	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
 	
 	float height = 0.0f;
-	bool ret = area->GetGroundHeight(pos, &height, &normal);
+	bool ret = TheNavMesh->GetGroundHeight(pos, &height, &normal);
 	
 	addr = nullptr;
-	pContext->LocalToPhysAddr(params[4], &addr);
+	pContext->LocalToPhysAddr(params[3], &addr);
 	
 	if(addr != pNullVec) {
 		addr[0] = sp_ftoc(normal.x);
@@ -7386,24 +7431,22 @@ cell_t CNavMeshGetGroundHeightNative(IPluginContext *pContext, const cell_t *par
 
 cell_t CNavMeshGetSimpleGroundHeightNative(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
 	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
+	pContext->LocalToPhysAddr(params[1], &addr);
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
 	cell_t *heightaddr = nullptr;
-	pContext->LocalToPhysAddr(params[3], &addr);
+	pContext->LocalToPhysAddr(params[2], &addr);
 	
 	Vector normal{};
 	
 	cell_t *pNullVec = pContext->GetNullRef(SP_NULL_VECTOR);
 	
 	float height = 0.0f;
-	bool ret = area->GetSimpleGroundHeight(pos, &height, &normal);
+	bool ret = TheNavMesh->GetSimpleGroundHeight(pos, &height, &normal);
 	
 	addr = nullptr;
-	pContext->LocalToPhysAddr(params[4], &addr);
+	pContext->LocalToPhysAddr(params[3], &addr);
 	
 	if(addr != pNullVec) {
 		addr[0] = sp_ftoc(normal.x);
@@ -7418,82 +7461,73 @@ cell_t CNavMeshGetSimpleGroundHeightNative(IPluginContext *pContext, const cell_
 
 cell_t CNavMeshNavAreaCountget(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	return area->GetNavAreaCount();
+	return TheNavMesh->GetNavAreaCount();
 }
 
 cell_t CNavMeshGetPlace(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
 	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
+	pContext->LocalToPhysAddr(params[1], &addr);
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
-	return area->GetPlace(pos);
+	return TheNavMesh->GetPlace(pos);
 }
 
 cell_t CNavMeshPlaceToName(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-
-	const char *name = area->PlaceToName(params[2]);
-	pContext->StringToLocal(params[3], params[4], name);
+	const char *name = TheNavMesh->PlaceToName(params[1]);
+	pContext->StringToLocal(params[2], params[3], name);
 
 	return 0;
 }
 
 cell_t CNavMeshNameToPlace(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
 	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
+	pContext->LocalToString(params[1], &name);
 	
-	return area->NameToPlace(name);
+	return TheNavMesh->NameToPlace(name);
 }
 
 cell_t CNavMeshGetNavAreaByID(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	return (cell_t)area->GetNavAreaByID(params[2]);
+	return (cell_t)TheNavMesh->GetNavAreaByID(params[1]);
 }
 
 cell_t CNavMeshGetNavAreaEntity(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
-	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[1]);
 	if(!pEntity)
 	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
 	}
 	
-	return (cell_t)area->GetNavArea(pEntity, params[3], sp_ctof(params[4]));
+	return (cell_t)TheNavMesh->GetNavArea(pEntity, params[2], sp_ctof(params[3]));
 }
 
 cell_t CNavMeshGetNavAreaVector(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
 	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
+	pContext->LocalToPhysAddr(params[1], &addr);
 	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
 	
-	return (cell_t)area->GetNavArea(pos, sp_ctof(params[3]));
+	return (cell_t)TheNavMesh->GetNavArea(pos, sp_ctof(params[2]));
 }
 
 cell_t CNavMeshGetNearestNavAreaEntity(IPluginContext *pContext, const cell_t *params)
 {
-	CNavMesh *area = (CNavMesh *)params[1];
-	
-	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[1]);
 	if(!pEntity)
 	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
 	}
 	
-	return (cell_t)area->GetNearestNavArea(pEntity, params[3], sp_ctof(params[4]));
+	return (cell_t)TheNavMesh->GetNearestNavArea(pEntity, params[2], sp_ctof(params[3]));
+}
+
+cell_t CNavMeshGetMemory(IPluginContext *pContext, const cell_t *params)
+{
+	return (cell_t)TheNavMesh;
 }
 
 cell_t CNavAreaGetDanger(IPluginContext *pContext, const cell_t *params)
@@ -8583,6 +8617,25 @@ cell_t PathFollowerGoalToleranceset(IPluginContext *pContext, const cell_t *para
 	return 0;
 }
 #endif
+
+cell_t PathFollowerHindranceget(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	PathFollower *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], PathFollowerHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	CBaseEntity *pEntity = obj->GetHindrance();
+	if(!pEntity) {
+		return -1;
+	}
+	
+	return gamehelpers->EntityToBCompatRef(pEntity);
+}
 
 cell_t PathFollowerIsDiscontinuityAhead(IPluginContext *pContext, const cell_t *params)
 {
@@ -10110,6 +10163,30 @@ cell_t IIntentionCustomResetBehavior(IPluginContext *pContext, const cell_t *par
 	return 0;
 }
 
+cell_t IIntentionCustomset_function(IPluginContext *pContext, const cell_t *params)
+{
+	IIntentionCustom *obj = (IIntentionCustom *)params[1];
+	
+	if(obj->pId != pContext->GetIdentity()) {
+		return pContext->ThrowNativeError("this plugin doenst own this intention");
+	}
+	
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	IPluginFunction *func = pContext->GetFunctionById(params[3]);
+	
+	if(stricmp(name, "InitialContainedAction") == 0) {
+		obj->initact = func;
+	} else if(stricmp(name, "IsHindrance") == 0) {
+		obj->ishinder = func;
+	} else {
+		return pContext->ThrowNativeError("invalid name %s", name);
+	}
+	
+	return 0;
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -10157,6 +10234,7 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"PathFollower.IsDiscontinuityAhead", PathFollowerIsDiscontinuityAhead},
 	{"PathFollower.IsAtGoal", PathFollowerIsAtGoal},
+	{"PathFollower.Hindrance.get", PathFollowerHindranceget},
 #if SOURCE_ENGINE == SE_TF2
 	{"CTFPathFollower.MinLookAheadDistance.get", CTFPathFollowerMinLookAheadDistanceget},
 #endif
@@ -10180,7 +10258,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavMesh.GetNearestNavAreaVector", CNavMeshGetNearestNavAreaVector},
 	{"CNavMesh.GetGroundHeight", CNavMeshGetGroundHeightNative},
 	{"CNavMesh.GetSimpleGroundHeight", CNavMeshGetSimpleGroundHeightNative},
-	{"CNavMesh.NavAreaCount.get", CNavMeshNavAreaCountget},
+	{"CNavMesh.GetNavAreaCount", CNavMeshNavAreaCountget},
 	{"CNavMesh.GetPlace", CNavMeshGetPlace},
 	{"CNavMesh.PlaceToName", CNavMeshPlaceToName},
 	{"CNavMesh.NameToPlace", CNavMeshNameToPlace},
@@ -10188,6 +10266,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavMesh.GetNavAreaEntity", CNavMeshGetNavAreaEntity},
 	{"CNavMesh.GetNavAreaVector", CNavMeshGetNavAreaVector},
 	{"CNavMesh.GetNearestNavAreaEntity", CNavMeshGetNearestNavAreaEntity},
+	{"CNavMesh.GetMemory", CNavMeshGetMemory},
 	{"CNavArea.GetDanger", CNavAreaGetDanger},
 	{"CNavArea.Underwater.get", CNavAreaUnderwaterget},
 	{"CNavArea.AvoidanceObstacleHeight.get", CNavAreaAvoidanceObstacleHeightget},
@@ -10395,6 +10474,7 @@ sp_nativeinfo_t natives[] =
 	{"BehaviorAction.set_data", BehaviorActionset_data},
 	{"BehaviorAction.get_data", BehaviorActionget_data},
 	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
+	{"IIntentionCustom.set_function", IIntentionCustomset_function},
 	{NULL, NULL}
 };
 
@@ -10613,21 +10693,14 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 
 void Sample::OnPluginLoaded(IPlugin *plugin)
 {
-	IPluginRuntime *runtime = plugin->GetRuntime();
 	
-	uint32_t idx = (uint32_t)-1;
-	if(runtime->FindPubvarByName("TheNavMesh", &idx) == SP_ERROR_NONE) {
-		sp_pubvar_t *TheNavMeshVar = nullptr;
-		runtime->GetPubvarByIndex(idx, &TheNavMeshVar);
-		*TheNavMeshVar->offs == (cell_t)TheNavMesh;
-	}
 }
 
 void Sample::OnPluginUnloaded(IPlugin *plugin)
 {
 	for(IIntentionCustom *inte : customintentions) {
-		if(inte->pId == plugin->GetIdentity()) {
-			inte->initact = nullptr;
+		if(plugin->GetIdentity() == inte->pId) {
+			inte->plugin_unloaded();
 		}
 	}
 }

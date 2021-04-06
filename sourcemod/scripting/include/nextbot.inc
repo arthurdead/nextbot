@@ -50,7 +50,11 @@ typeset nextbot_functions
 	function BehaviorAction (BehaviorAction action, int entity);
 	
 	//INextBot.AllocateCustomIntention
+	//IIntentionCustom.InitialContainedAction
 	function BehaviorAction (int entity);
+	
+	//IIntentionCustom.IsHindrance
+	function QueryResultType (IIntentionCustom intention, INextBot bot, int blocker);
 	
 	//BehaviorActionEntry.OnLeaveGround
 	//BehaviorActionEntry.OnLandOnGround
@@ -274,31 +278,26 @@ methodmap TerrorNavArea < CNavArea
 methodmap CNavMesh
 {
 #if defined GAME_TF2
-	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
+	public static native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
 #elseif defined GAME_L4D2
-	public native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, bool unknown = false);
+	public static native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, bool unknown = false);
 #endif
-	public native CNavArea GetNearestNavAreaEntity(int entity, int nGetNavAreaFlags = GETNAVAREA_CHECK_GROUND, float maxDist = 10000.0);
+	public static native CNavArea GetNearestNavAreaEntity(int entity, int nGetNavAreaFlags = GETNAVAREA_CHECK_GROUND, float maxDist = 10000.0);
 
-	public native CNavArea GetNavAreaEntity(int entity, int nGetNavAreaFlags, float flBeneathLimit = 120.0);
-	public native CNavArea GetNavAreaVector(float vec[3], float beneathLimt = 120.0);
+	public static native CNavArea GetNavAreaEntity(int entity, int nGetNavAreaFlags, float flBeneathLimit = 120.0);
+	public static native CNavArea GetNavAreaVector(float vec[3], float beneathLimt = 120.0);
 	
-	public native CNavArea GetNavAreaByID(int id);
+	public static native CNavArea GetNavAreaByID(int id);
 	
-	property int NavAreaCount
-	{
-		public native get();
-	}
+	public static native int GetNavAreaCount();
 	
-	public native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
-	public native bool GetSimpleGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
+	public static native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
+	public static native bool GetSimpleGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
 	
-	public native int GetPlace(float vec[3]);
-	public native void PlaceToName(int id, char[] name, int len);
-	public native int NameToPlace(const char[] name);
+	public static native int GetPlace(float vec[3]);
+	public static native void PlaceToName(int id, char[] name, int len);
+	public static native int NameToPlace(const char[] name);
 };
-
-public const CNavMesh TheNavMesh;
 
 methodmap CNavLadder
 {
@@ -835,10 +834,30 @@ methodmap BehaviorAction
 	public native any get_data(const char[] name);
 };
 
-methodmap IIntentionCustom < INextBotComponent
+#define IS_ANY_HINDRANCE_POSSIBLE 0xFFFFFFFF
+
+enum QueryResultType
+{
+	ANSWER_NO,
+	ANSWER_YES,
+	ANSWER_UNDEFINED
+};
+
+methodmap IIntention < INextBotComponent
+{
+
+};
+
+#define IIntention_Null (view_as<IIntention>(Address_Null))
+
+methodmap IIntentionCustom < IIntention
 {
 	public native void ResetBehavior(BehaviorAction action);
+	
+	public native void set_function(const char[] name, nextbot_functions func);
 };
+
+#define IIntentionCustom_Null (view_as<IIntentionCustom>(IIntention_Null))
 
 native void UpdateEntityLastKnownArea(int entity);
 
