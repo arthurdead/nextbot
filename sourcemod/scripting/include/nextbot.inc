@@ -1195,21 +1195,43 @@ native INextBotCustom MakeEntityNextBot(int entity);
 native Address AllocateNextBotCombatCharacter(int size_modifier);
 native int GetNextBotCombatCharacterSize();
 
+#if defined GAME_L4D2
+native Address AllocateInfected(int size_modifier);
+native int GetInfectedSize();
+#endif
+
 stock Address datamaps_allocatenextbot(int size_modifier)
-{
-	return AllocateNextBotCombatCharacter(size_modifier);
-}
+{ return AllocateNextBotCombatCharacter(size_modifier); }
+
+#if defined GAME_L4D2
+stock Address datamaps_allocateinfected(int size_modifier)
+{ return AllocateInfected(size_modifier); }
+#endif
 
 #if defined datamaps_included
 stock CustomSendtable sendtable_from_nextbot_factory(CustomEntityFactory factory)
+{ return CustomSendtable.from_factory(factory, "NextBotCombatCharacter"); }
+
+#if defined GAME_L4D2
+stock CustomSendtable sendtable_from_infected_factory(CustomEntityFactory factory)
+{ return CustomSendtable.from_factory(factory, "Infected"); }
+#endif
+
+stock CustomEntityFactory register_nextbot_factory(const char[] classname, CustomSendtable &table = null)
 {
-	return CustomSendtable.from_factory(factory, "NextBotCombatCharacter");
+	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
+	table = sendtable_from_nextbot_factory(factory);
+	return factory;
 }
 
-stock CustomEntityFactory register_nextbot_factory(const char[] classname)
+#if defined GAME_L4D2
+stock CustomEntityFactory register_infected_factory(const char[] classname, CustomSendtable &table = null)
 {
-	return EntityFactoryDictionary.register_function(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
+	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocateinfected, GetInfectedSize());
+	table = sendtable_from_infected_factory(factory);
+	return factory;
 }
+#endif
 #endif
 
 enum baseline_cost_flags

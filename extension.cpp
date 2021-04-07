@@ -118,10 +118,16 @@ ConVar *tf_nav_combat_decay_rate = nullptr;
 #endif
 
 int sizeofNextBotCombatCharacter = 0;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+int sizeofInfected = 0;
+#endif
 
 void *PathCTOR = nullptr;
 void *PathFollowerCTOR = nullptr;
 void *NextBotCombatCharacterCTOR = nullptr;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+void *InfectedCTOR = nullptr;
+#endif
 void *INextBotCTOR = nullptr;
 #if SOURCE_ENGINE == SE_TF2
 void *CTFPathFollowerCTOR = nullptr;
@@ -3013,6 +3019,19 @@ public:
 		MyNextBotPointer()->DisplayDebugText(text);
 	}
 };
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+class Infected : public NextBotCombatCharacter
+{
+public:
+	static Infected *create(size_t size_modifier)
+	{
+		Infected *bytes = (Infected *)engine->PvAllocEntPrivateData(sizeofInfected + size_modifier);
+		call_mfunc<void>(bytes, InfectedCTOR);
+		return bytes;
+	}
+};
+#endif
 
 #include "NextBotBehavior.h"
 
@@ -7476,6 +7495,9 @@ cell_t CNavMeshGetPlace(IPluginContext *pContext, const cell_t *params)
 cell_t CNavMeshPlaceToName(IPluginContext *pContext, const cell_t *params)
 {
 	const char *name = TheNavMesh->PlaceToName(params[1]);
+	if(!name) {
+		name = "";
+	}
 	pContext->StringToLocal(params[2], params[3], name);
 
 	return 0;
@@ -9919,6 +9941,18 @@ cell_t GetNextBotCombatCharacterSize(IPluginContext *pContext, const cell_t *par
 	return sizeofNextBotCombatCharacter;
 }
 
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+cell_t AllocateInfected(IPluginContext *pContext, const cell_t *params)
+{
+	return (cell_t)Infected::create(params[1]);
+}
+
+cell_t GetInfectedSize(IPluginContext *pContext, const cell_t *params)
+{
+	return sizeofInfected;
+}
+#endif
+
 cell_t EntityIsCombatCharacter(IPluginContext *pContext, const cell_t *params)
 {
 	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
@@ -10463,6 +10497,10 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
 	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	{"AllocateInfected", AllocateInfected},
+	{"GetInfectedSize", GetInfectedSize},
+#endif
 	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
@@ -10572,10 +10610,16 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
 	
 	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	g_pGameConf->GetOffset("sizeof(Infected)", &sizeofInfected);
+#endif
 	
 	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
 	g_pGameConf->GetMemSig("PathFollower::PathFollower", &PathFollowerCTOR);
 	g_pGameConf->GetMemSig("NextBotCombatCharacter::NextBotCombatCharacter", &NextBotCombatCharacterCTOR);
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	g_pGameConf->GetMemSig("Infected::Infected", &InfectedCTOR);
+#endif
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
 #endif
