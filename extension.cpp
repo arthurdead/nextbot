@@ -118,16 +118,10 @@ ConVar *tf_nav_combat_decay_rate = nullptr;
 #endif
 
 int sizeofNextBotCombatCharacter = 0;
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-int sizeofInfected = 0;
-#endif
 
 void *PathCTOR = nullptr;
 void *PathFollowerCTOR = nullptr;
 void *NextBotCombatCharacterCTOR = nullptr;
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-void *InfectedCTOR = nullptr;
-#endif
 void *INextBotCTOR = nullptr;
 #if SOURCE_ENGINE == SE_TF2
 void *CTFPathFollowerCTOR = nullptr;
@@ -2652,6 +2646,11 @@ public:
 	IIntentionStub( INextBot *bot, bool reg ) : IIntention( bot, reg ) {
 
 	}
+	
+	static IIntentionStub *create(INextBot *bot, bool reg)
+	{
+		return new IIntentionStub(bot, reg);
+	}
 };
 
 ConVar *NextBotDebugHistory = nullptr;
@@ -2915,13 +2914,6 @@ ConVar *r_visualizetraces = nullptr;
 class NextBotCombatCharacter : public CBaseCombatCharacter
 {
 public:
-	static NextBotCombatCharacter *create(size_t size_modifier)
-	{
-		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
-		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
-		return bytes;
-	}
-	
 	void ResetDebugHistory()
 	{
 		CUtlVector< NextBotDebugLineType * > &m_debugHistory = MyNextBotPointer()->m_debugHistory;
@@ -3018,20 +3010,14 @@ public:
 	{
 		MyNextBotPointer()->DisplayDebugText(text);
 	}
-};
-
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-class Infected : public NextBotCombatCharacter
-{
-public:
-	static Infected *create(size_t size_modifier)
+	
+	static NextBotCombatCharacter *create(size_t size_modifier)
 	{
-		Infected *bytes = (Infected *)engine->PvAllocEntPrivateData(sizeofInfected + size_modifier);
-		call_mfunc<void>(bytes, InfectedCTOR);
+		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
+		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
 		return bytes;
 	}
 };
-#endif
 
 #include "NextBotBehavior.h"
 
@@ -4283,6 +4269,12 @@ public:
 	IPluginFunction *initact = nullptr;
 	IPluginFunction *ishinder = nullptr;
 	IdentityToken_t *pId = nullptr;
+	
+	template <typename... Args>
+	static IIntentionCustom *create(INextBot *bot, bool reg, Args &&... args)
+	{
+		return new IIntentionCustom(bot, reg, std::forward<Args>(args)...);
+	}
 };
 
 SPActionEntry::~SPActionEntry()
@@ -5180,6 +5172,11 @@ public:
 #if SOURCE_ENGINE == SE_TF2
 	unsigned int GetCollisionGroup( void ) override { return CollisionGroup; }
 #endif
+
+	static IBodyCustom *create(INextBot *bot, bool reg)
+	{
+		return new IBodyCustom(bot, reg);
+	}
 };
 
 #if SOURCE_ENGINE == SE_TF2
@@ -7918,10 +7915,6 @@ struct pointer_holder_t
 			hooked_loc = true;
 		}
 		
-		if(locomotion) {
-			delete locomotion;
-		}
-		
 		locomotion = loc;
 	}
 	
@@ -7930,10 +7923,6 @@ struct pointer_holder_t
 		if(!hooked_bod) {
 			SH_ADD_HOOK(INextBot, GetBodyInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetBodyInterface), false);
 			hooked_bod = true;
-		}
-		
-		if(body) {
-			delete body;
 		}
 		
 		body = loc;
@@ -7946,10 +7935,6 @@ struct pointer_holder_t
 			hooked_vis = true;
 		}
 		
-		if(vis) {
-			delete vis;
-		}
-		
 		vis = loc;
 	}
 	
@@ -7958,10 +7943,6 @@ struct pointer_holder_t
 		if(!hooked_inte) {
 			SH_ADD_HOOK(INextBot, GetIntentionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetIntentionInterface), false);
 			hooked_inte = true;
-		}
-		
-		if(inte) {
-			delete inte;
 		}
 		
 		inte = loc;
@@ -8022,23 +8003,19 @@ pointer_holder_t::~pointer_holder_t()
 }
 #endif
 
-cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *params)
+#if SOURCE_ENGINE == SE_TF2
+template <typename T, typename GF, typename V, typename ...Args>
+cell_t INextBotAllocateCustomComponent(IPluginContext *pContext, const cell_t *params, GF getfunc, V var, Args &&... args)
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+template <typename T, typename GF, typename BF, typename V, typename SF, typename ...Args>
+cell_t INextBotAllocateCustomComponent(IPluginContext *pContext, const cell_t *params, GF getfunc, BF basefunc, V var, SF setfunc, Args &&... args)
+#endif
 {
 	INextBot *bot = (INextBot *)params[1];
 	
-#if SOURCE_ENGINE == SE_TF2
-	NextBotGroundLocomotionCustom *locomotion = NextBotGroundLocomotionCustom::create(bot, false);
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	ZombieBotLocomotionCustom *locomotion = ZombieBotLocomotionCustom::create(bot, false);
-#endif
+	T *locomotion = T::create(bot, false, std::forward<Args>(args)...);
 	
-	ILocomotion *old = bot->GetLocomotionInterface();
-	
-#if SOURCE_ENGINE == SE_TF2
-	bot->UnregisterComponent(bot->m_baseLocomotion);
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bot->UnregisterComponent(&bot->baseLocomotion());
-#endif
+	auto old = (bot->*getfunc)();
 	
 	bot->ReplaceComponent(old, locomotion);
 	
@@ -8046,253 +8023,100 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 	pointer_holder_t *holder = nullptr;
 #endif
 	
+	bool needs_holder = false;
+	
 	if(old) {
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-		if(old != &bot->baseLocomotion()) {
+		if(old == &(bot->*basefunc)()) {
+			needs_holder = true;
+		} else {
 			pointer_holder_map_t::iterator it{pointermap.find(bot)};
 			if(it != pointermap.end()) {
 				holder = it->second;
-				if(old == holder->locomotion) {
-					holder->locomotion = nullptr;
-				}
+				needs_holder = true;
 			}
 			
 			delete old;
 		}
 #elif SOURCE_ENGINE == SE_TF2
-		if(old == bot->m_baseLocomotion) {
-			bot->m_baseLocomotion = nullptr;
+		if(old == (bot->*var)) {
+			needs_holder = true;
 		}
 
 		delete old;
 #endif
 	}
 	
+	if(!needs_holder) {
+		CBaseEntity *pEntity = bot->GetEntity();
+		
+		static int index = vfunc_index(getfunc);
+		
+		void **vtable = *(void ***)bot;
+		unsigned char *func = (unsigned char *)vtable[index];
+		
+		unsigned char offset1 = func[25];
+		unsigned char offset2 = func[26];
+		int finaloffset = offset1 | offset2 << 8;
+		
+		*(void **)((unsigned char *)pEntity + finaloffset) = locomotion;
+	} else {
+#if SOURCE_ENGINE == SE_TF2
+		(bot->*var) = locomotion;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+		if(!holder) {
+			pointer_holder_map_t::iterator it{pointermap.find(bot)};
+			if(it != pointermap.end()) {
+				holder = it->second;
+			} else {
+				holder = new pointer_holder_t{bot};
+			}
+		}
+		
+		(holder->*setfunc)(locomotion);
+#endif
+	}
+	
 	locomotion->Reset();
 	
-#if SOURCE_ENGINE == SE_TF2
-	if(bot->m_baseLocomotion) {
-		delete bot->m_baseLocomotion;
-	}
-	
-	bot->m_baseLocomotion = locomotion;
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	if(!holder) {
-		pointer_holder_map_t::iterator it{pointermap.find(bot)};
-		if(it != pointermap.end()) {
-			holder = it->second;
-		} else {
-			holder = new pointer_holder_t{bot};
-		}
-	}
-	
-	holder->set_locomotion(locomotion);
-#endif
-	
 	return (cell_t)locomotion;
+}
+
+cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *params)
+{
+#if SOURCE_ENGINE == SE_TF2
+	return INextBotAllocateCustomComponent<NextBotGroundLocomotionCustom>(pContext, params, &INextBot::GetLocomotionInterface, &INextBot::m_baseLocomotion);
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	return INextBotAllocateCustomComponent<ZombieBotLocomotionCustom>(pContext, params, &INextBot::GetLocomotionInterface, &INextBot::baseLocomotion, &pointer_holder_t::locomotion, &pointer_holder_t::set_locomotion);
+#endif
 }
 
 cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params)
 {
-	INextBot *bot = (INextBot *)params[1];
-	
-	IBodyCustom *locomotion = new IBodyCustom(bot, false);
-	
-	IBody *old = bot->GetBodyInterface();
-	
 #if SOURCE_ENGINE == SE_TF2
-	bot->UnregisterComponent(bot->m_baseBody);
+	return INextBotAllocateCustomComponent<IBodyCustom>(pContext, params, &INextBot::GetBodyInterface, &INextBot::m_baseBody);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bot->UnregisterComponent(&bot->baseBody());
+	return INextBotAllocateCustomComponent<IBodyCustom>(pContext, params, &INextBot::GetBodyInterface, &INextBot::baseBody, &pointer_holder_t::body, &pointer_holder_t::set_body);
 #endif
-	
-	bot->ReplaceComponent(old, locomotion);
-	
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	pointer_holder_t *holder = nullptr;
-#endif
-	
-	if(old) {
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-		if(old != &bot->baseBody()) {
-			pointer_holder_map_t::iterator it{pointermap.find(bot)};
-			if(it != pointermap.end()) {
-				holder = it->second;
-				if(old == holder->body) {
-					holder->body = nullptr;
-				}
-			}
-			
-			delete old;
-		}
-#elif SOURCE_ENGINE == SE_TF2
-		if(old == bot->m_baseBody) {
-			bot->m_baseBody = nullptr;
-		}
-
-		delete old;
-#endif
-	}
-	
-	locomotion->Reset();
-	
-#if SOURCE_ENGINE == SE_TF2
-	if(bot->m_baseBody) {
-		delete bot->m_baseBody;
-	}
-	
-	bot->m_baseBody = locomotion;
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	if(!holder) {
-		pointer_holder_map_t::iterator it{pointermap.find(bot)};
-		if(it != pointermap.end()) {
-			holder = it->second;
-		} else {
-			holder = new pointer_holder_t{bot};
-		}
-	}
-	
-	holder->set_body(locomotion);
-#endif
-	
-	return (cell_t)locomotion;
 }
 
 cell_t INextBotAllocateCustomVision(IPluginContext *pContext, const cell_t *params)
 {
-	INextBot *bot = (INextBot *)params[1];
-	
 #if SOURCE_ENGINE == SE_TF2
-	IVisionCustom *locomotion = IVisionCustom::create(bot, false);
+	return INextBotAllocateCustomComponent<IVisionCustom>(pContext, params, &INextBot::GetVisionInterface, &INextBot::m_baseVision);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	ZombieBotVisionCustom *locomotion = ZombieBotVisionCustom::create(bot, false);
+	return INextBotAllocateCustomComponent<ZombieBotVisionCustom>(pContext, params, &INextBot::GetVisionInterface, &INextBot::baseVision, &pointer_holder_t::vis, &pointer_holder_t::set_vision);
 #endif
-	
-	IVision *old = bot->GetVisionInterface();
-	
-#if SOURCE_ENGINE == SE_TF2
-	bot->UnregisterComponent(bot->m_baseVision);
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bot->UnregisterComponent(&bot->baseVision());
-#endif
-	
-	bot->ReplaceComponent(old, locomotion);
-	
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	pointer_holder_t *holder = nullptr;
-#endif
-	
-	if(old) {
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-		if(old != &bot->baseVision()) {
-			pointer_holder_map_t::iterator it{pointermap.find(bot)};
-			if(it != pointermap.end()) {
-				holder = it->second;
-				if(old == holder->vis) {
-					holder->vis = nullptr;
-				}
-			}
-			
-			delete old;
-		}
-#elif SOURCE_ENGINE == SE_TF2
-		if(old == bot->m_baseVision) {
-			bot->m_baseVision = nullptr;
-		}
-
-		delete old;
-#endif
-	}
-	
-	locomotion->Reset();
-	
-#if SOURCE_ENGINE == SE_TF2
-	if(bot->m_baseVision) {
-		delete bot->m_baseVision;
-	}
-	
-	bot->m_baseVision = locomotion;
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	if(!holder) {
-		pointer_holder_map_t::iterator it{pointermap.find(bot)};
-		if(it != pointermap.end()) {
-			holder = it->second;
-		} else {
-			holder = new pointer_holder_t{bot};
-		}
-	}
-	
-	holder->set_vision(locomotion);
-#endif
-	
-	return (cell_t)locomotion;
 }
 
 template <typename T, typename ...Args>
 cell_t INextBotAllocateIntention(IPluginContext *pContext, const cell_t *params, Args &&... args)
 {
-	INextBot *bot = (INextBot *)params[1];
-	
-	T *locomotion = new T(bot, false, std::forward<Args>(args)...);
-	
-	IIntention *old = bot->GetIntentionInterface();
-	
 #if SOURCE_ENGINE == SE_TF2
-	bot->UnregisterComponent(bot->m_baseIntention);
+	return INextBotAllocateCustomComponent<T>(pContext, params, &INextBot::GetIntentionInterface, &INextBot::m_baseIntention, std::forward<Args>(args)...);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	bot->UnregisterComponent(&bot->baseIntention());
+	return INextBotAllocateCustomComponent<T>(pContext, params, &INextBot::GetIntentionInterface, &INextBot::baseIntention, &pointer_holder_t::inte, &pointer_holder_t::set_intention, std::forward<Args>(args)...);
 #endif
-	
-	bot->ReplaceComponent(old, locomotion);
-	
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	pointer_holder_t *holder = nullptr;
-#endif
-	
-	if(old) {
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-		if(old != &bot->baseIntention()) {
-			pointer_holder_map_t::iterator it{pointermap.find(bot)};
-			if(it != pointermap.end()) {
-				holder = it->second;
-				if(old == holder->inte) {
-					holder->inte = nullptr;
-				}
-			}
-			
-			delete old;
-		}
-#elif SOURCE_ENGINE == SE_TF2
-		if(old == bot->m_baseIntention) {
-			bot->m_baseIntention = nullptr;
-		}
-
-		delete old;
-#endif
-	}
-	
-	locomotion->Reset();
-	
-#if SOURCE_ENGINE == SE_TF2
-	if(bot->m_baseIntention) {
-		delete bot->m_baseIntention;
-	}
-	
-	bot->m_baseIntention = locomotion;
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	if(!holder) {
-		pointer_holder_map_t::iterator it{pointermap.find(bot)};
-		if(it != pointermap.end()) {
-			holder = it->second;
-		} else {
-			holder = new pointer_holder_t{bot};
-		}
-	}
-	
-	holder->set_intention(locomotion);
-#endif
-	
-	return (cell_t)locomotion;
 }
 
 cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
@@ -9941,18 +9765,6 @@ cell_t GetNextBotCombatCharacterSize(IPluginContext *pContext, const cell_t *par
 	return sizeofNextBotCombatCharacter;
 }
 
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-cell_t AllocateInfected(IPluginContext *pContext, const cell_t *params)
-{
-	return (cell_t)Infected::create(params[1]);
-}
-
-cell_t GetInfectedSize(IPluginContext *pContext, const cell_t *params)
-{
-	return sizeofInfected;
-}
-#endif
-
 cell_t EntityIsCombatCharacter(IPluginContext *pContext, const cell_t *params)
 {
 	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
@@ -10497,10 +10309,6 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
 	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	{"AllocateInfected", AllocateInfected},
-	{"GetInfectedSize", GetInfectedSize},
-#endif
 	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
@@ -10595,7 +10403,8 @@ DETOUR_DECL_MEMBER1(ResolveZombieCollisions, Vector, const Vector &, pos)
 {
 	ZombieBotLocomotion *loc = (ZombieBotLocomotion *)this;
 	
-	if(!loc->GetBot()->GetEntity()->MyInfectedPointer()) {
+	CBaseEntity *pEntity = loc->GetBot()->GetEntity();
+	if(!pEntity->MyInfectedPointer()) {
 		return pos;
 	}
 	
@@ -10610,16 +10419,10 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
 	
 	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	g_pGameConf->GetOffset("sizeof(Infected)", &sizeofInfected);
-#endif
 	
 	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
 	g_pGameConf->GetMemSig("PathFollower::PathFollower", &PathFollowerCTOR);
 	g_pGameConf->GetMemSig("NextBotCombatCharacter::NextBotCombatCharacter", &NextBotCombatCharacterCTOR);
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	g_pGameConf->GetMemSig("Infected::Infected", &InfectedCTOR);
-#endif
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
 #endif

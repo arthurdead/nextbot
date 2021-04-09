@@ -161,11 +161,6 @@
 				"library"	"server"
 				"linux"		"@_ZN15ZombieBotVisionC1EP8INextBot"
 			}
-			"Infected::Infected"
-			{
-				"library"	"server"
-				"linux"		"@_ZN8InfectedC1Ev"
-			}
 		}
 		"Offsets"
 		{
@@ -210,10 +205,6 @@
 				"linux" "25"
 			}
 			"sizeof(NextBotCombatCharacter)"
-			{
-				"linux" "7604"
-			}
-			"sizeof(Infected)"
 			{
 				"linux" "7604"
 			}
