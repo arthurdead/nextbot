@@ -1178,7 +1178,7 @@ methodmap DirectChasePath < ChasePath
 };
 
 #if defined GAME_L4D2
-methodmap InfectedChasePath < ChasePath
+methodmap InfectedChasePath < DirectChasePath
 {
 	public native InfectedChasePath(SubjectChaseType chaseHow);
 };
