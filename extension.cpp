@@ -118,6 +118,9 @@ ConVar *tf_nav_combat_decay_rate = nullptr;
 #endif
 
 int sizeofNextBotCombatCharacter = 0;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+int sizeofInfected = 0;
+#endif
 
 void *PathCTOR = nullptr;
 void *PathFollowerCTOR = nullptr;
@@ -153,6 +156,8 @@ void *CTraceFilterSimpleShouldHitEntity = nullptr;
 void *PathComputeVector = nullptr;
 void *PathComputeEntity = nullptr;
 void *INextBotIsDebuggingPtr = nullptr;
+void *InfectedChasePathComputeAreaCrossing = nullptr;
+void *EntityFactoryDictionaryPtr = nullptr;
 #endif
 
 void *NavAreaBuildPathPtr = nullptr;
@@ -180,6 +185,9 @@ int m_iEFlagsOffset = -1;
 int m_fFlagsOffset = -1;
 int m_hGroundEntityOffset = -1;
 int m_MoveTypeOffset = -1;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+int m_isGhostOffset = -1;
+#endif
 
 ConVar *NextBotStop = nullptr;
 
@@ -328,6 +336,8 @@ __attribute__((__visibility__("default"), __cdecl__)) double __acos_finite(doubl
 
 void SetEdictStateChanged(CBaseEntity *pEntity, int offset);
 
+class CBasePlayer;
+
 class CBaseEntity : public IServerEntity
 {
 public:
@@ -348,6 +358,16 @@ public:
 	CBaseCombatCharacter *MyCombatCharacterPointer()
 	{
 		return call_vfunc<CBaseCombatCharacter *>(this, CBaseEntityMyCombatCharacterPointer);
+	}
+	
+	CBasePlayer *IsPlayer()
+	{
+		int idx = gamehelpers->EntityToBCompatRef(this);
+		if(idx >= 1 && idx <= playerhelpers->GetNumPlayers()) {
+			return (CBasePlayer *)this;
+		} else {
+			return nullptr;
+		}
 	}
 	
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
@@ -518,6 +538,17 @@ public:
 	}
 	
 	void OnNavAreaRemoved(CNavArea *) {}
+};
+
+class CBasePlayer : public CBaseCombatCharacter
+{
+public:
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	bool IsGhost()
+	{
+		return *(bool *)((unsigned char *)this + m_isGhostOffset);
+	}
+#endif
 };
 
 #define FCAP_USE_IN_RADIUS 0
@@ -3059,6 +3090,8 @@ namespace __cxxabiv1
 	};
 }
 
+void **infectedvtable = nullptr;
+
 class NextBotCombatCharacterInfected : public NextBotCombatCharacter
 {
 public:
@@ -3146,24 +3179,20 @@ public:
 	
 	void dtor()
 	{
-		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &NextBotCombatCharacterInfected::dtor), false);
-		SH_REMOVE_MANUALHOOK(MyInfectedPointer, this, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
+		NextBotCombatCharacterInfected *pEntity = META_IFACEPTR(NextBotCombatCharacterInfected);
+		SH_REMOVE_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::dtor), false);
+		SH_REMOVE_MANUALHOOK(MyInfectedPointer, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
 		RETURN_META(MRES_IGNORED);
 	}
 	
 	static NextBotCombatCharacter *create(size_t size_modifier)
 	{
-		NextBotCombatCharacterInfected *bytes = (NextBotCombatCharacterInfected *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
+		NextBotCombatCharacterInfected *bytes = (NextBotCombatCharacterInfected *)engine->PvAllocEntPrivateData(sizeofInfected + size_modifier);
 		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
 		
-		static void **infectvtable = nullptr;
-		if(!infectvtable) {
-			static void **nbcbvtable = nullptr;
-			if(!nbcbvtable) {
-				nbcbvtable = *(void ***)bytes;
-			}
-			
-			static void *infectfuncs[] =
+		static void **fakeinfectvtbl = nullptr;
+		if(!fakeinfectvtbl) {
+			void *infectfuncs[] =
 			{
 				func_to_void(&NextBotCombatCharacterInfected::HookUpdate),
 				func_to_void(&NextBotCombatCharacterInfected::HookUpkeep),
@@ -3187,27 +3216,33 @@ public:
 				func_to_void(&NextBotCombatCharacterInfected::HookMakeLowViolence),
 				func_to_void(&NextBotCombatCharacterInfected::HookCreateComponents),
 			};
-			static int infectfuncsnum = (sizeof(infectfuncs) / 4);
+			int infectfuncsnum = (sizeof(infectfuncs) / 4);
 			
 			using vtable_prefix = __cxxabiv1::vtable_prefix;
 			
-			static unsigned char *tablememory = (unsigned char *)calloc(1, sizeof(vtable_prefix) + (((NextBotCombatCharacterGetNextBotCombatCharacter + infectfuncsnum) + 1) * 4));
+			unsigned char *tablememory = (unsigned char *)calloc(1, sizeof(vtable_prefix) + (((NextBotCombatCharacterGetNextBotCombatCharacter + infectfuncsnum) + 1) * 4));
+			
+			void **nbcbvtable = *(void ***)bytes;
 			
 			vtable_prefix &prefix = *(vtable_prefix *)tablememory;
-			prefix = *(vtable_prefix *)(((unsigned char *)nbcbvtable) - sizeof(vtable_prefix));
+			if(infectedvtable) {
+				prefix = *(vtable_prefix *)(((unsigned char *)infectedvtable) - sizeof(vtable_prefix));
+			} else {
+				prefix = *(vtable_prefix *)(((unsigned char *)nbcbvtable) - sizeof(vtable_prefix));
+			}
 			
-			infectvtable = (void **)&tablememory[sizeof(vtable_prefix)];
+			fakeinfectvtbl = (void **)&tablememory[sizeof(vtable_prefix)];
 			
 			int i = 0;
 			for(; i <= NextBotCombatCharacterGetNextBotCombatCharacter; ++i) {
-				infectvtable[i] = nbcbvtable[i];
+				fakeinfectvtbl[i] = nbcbvtable[i];
 			}
 			for(int j = 0; j < infectfuncsnum; ++j) {
-				infectvtable[i++] = infectfuncs[j];
+				fakeinfectvtbl[i++] = infectfuncs[j];
 			}
 		}
 		
-		(*(void ***)bytes) = infectvtable;
+		(*(void ***)bytes) = fakeinfectvtbl;
 		
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::dtor), false);
 		SH_ADD_MANUALHOOK(MyInfectedPointer, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
@@ -4782,6 +4817,7 @@ void *NDebugOverlayLine = nullptr;
 void *NDebugOverlayVertArrow = nullptr;
 void *NDebugOverlayHorzArrow = nullptr;
 void *NDebugOverlayTriangle = nullptr;
+void *NDebugOverlayCircle = nullptr;
 
 namespace NDebugOverlay
 {
@@ -4803,6 +4839,11 @@ namespace NDebugOverlay
 	void Triangle( const Vector &p1, const Vector &p2, const Vector &p3, int r, int g, int b, int a, bool noDepthTest, float duration )
 	{
 		(void_to_func<void(*)(const Vector &, const Vector &, const Vector &, int, int, int, int, bool, float)>(NDebugOverlayTriangle))(p1, p2, p3, r, g, b, a, noDepthTest, duration);
+	}
+	
+	void Circle( const Vector &position, const QAngle &angles, float radius, int r, int g, int b, int a, bool bNoDepthTest, float flDuration )
+	{
+		(void_to_func<void(*)(const Vector &, const QAngle &, float, int, int, int, int, bool, float)>(NDebugOverlayCircle))(position, angles, radius, r, g, b, a, bNoDepthTest, flDuration);
 	}
 }
 
@@ -5965,6 +6006,47 @@ DETOUR_DECL_MEMBER1(PathOptimize, void, INextBot *, bot)
 	((Path *)this)->Optimize(bot);
 }
 
+class NextBotTraceFilterOnlyActors : public CTraceFilterSimple
+{
+public:
+	NextBotTraceFilterOnlyActors( const IHandleEntity *passentity, int collisionGroup )
+		: CTraceFilterSimple( passentity, collisionGroup )
+	{
+	}
+
+	virtual TraceType_t	GetTraceType() const
+	{
+		return TRACE_ENTITIES_ONLY;
+	}
+
+	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask )
+	{
+		if ( CTraceFilterSimple::ShouldHitEntity( pServerEntity, contentsMask ) )
+		{
+			CBaseEntity *entity = EntityFromEntityHandle( pServerEntity );
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+			CBasePlayer *player = entity->IsPlayer();
+			if ( player && player->IsGhost() )
+				return false;
+#endif
+
+			return ( entity->MyNextBotPointer() || entity->IsPlayer() );
+		}
+		return false;
+	}
+};
+
+bool CGameTrace::DidHitWorld() const
+{
+	return m_pEnt && gamehelpers->EntityToBCompatRef(m_pEnt) == 0;
+}
+
+bool CGameTrace::DidHitNonWorldEntity() const
+{
+	return m_pEnt != NULL && !DidHitWorld();
+}
+
 class PathFollower : public Path
 {
 public:
@@ -6006,7 +6088,11 @@ public:
 
 #if SOURCE_ENGINE == SE_TF2
 	float m_goalTolerance;
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	char pad1[16];
+#endif
 	
+#if SOURCE_ENGINE == SE_TF2
 	void SetGoalTolerance(float val)
 	{
 		m_goalTolerance = val;
@@ -6146,6 +6232,81 @@ public:
 
 		return false;	
 	}
+	
+	CBaseEntity *FindBlocker( INextBot *bot )
+	{
+		//IIntention *think = bot->GetIntentionInterface();
+
+		// if we don't care about hindrances, don't do the expensive tests
+		//if ( think->IsHindrance( bot, IS_ANY_HINDRANCE_POSSIBLE ) != ANSWER_YES )
+		//	return NULL;
+
+		ILocomotion *mover = bot->GetLocomotionInterface();
+		IBody *body = bot->GetBodyInterface();
+
+		trace_t result;
+		NextBotTraceFilterOnlyActors filter( bot->GetEntity(), COLLISION_GROUP_NONE );
+
+		const float size = body->GetHullWidth()/4.0f;	// keep this small to avoid lockups when groups of bots get close
+		Vector blockerMins( -size, -size, mover->GetStepHeight() );
+		Vector blockerMaxs( size, size, body->GetCrouchHullHeight() );
+
+		Vector from = mover->GetFeet();
+		float range = 0.0f;
+
+		const float maxHindranceRangeAlong = 750.0f;
+
+		// because our path goal may be far ahead of us if the way to there is unobstructed, we
+		// need to start looking from the point of the path we are actually standing on
+		MoveCursorToClosestPosition( mover->GetFeet() );
+
+		for( const Segment *s = GetCursorData().segmentPrior; s && range < maxHindranceRangeAlong; s = NextSegment( s ) )
+		{
+			// trace along direction toward goal a minimum range, in case goal and hindrance are
+			// very close, but goal is closer
+
+			Vector traceForward = s->pos - from;
+			float traceRange = traceForward.NormalizeInPlace();
+
+			const float minTraceRange = 2.0f * body->GetHullWidth();
+			if ( traceRange < minTraceRange )
+			{
+				traceRange = minTraceRange;
+			}
+
+			mover->TraceHull( from, from + traceRange * traceForward, blockerMins, blockerMaxs, body->GetSolidMask(), &filter, &result );
+
+			if ( result.DidHitNonWorldEntity() )
+			{
+				// if blocker is close, they could be behind us - check
+				Vector toBlocker = result.m_pEnt->GetAbsOrigin() - bot->GetLocomotionInterface()->GetFeet();
+
+				Vector alongPath = s->pos - from;
+				alongPath.z = 0.0f;
+
+				if ( DotProduct( toBlocker, alongPath ) > 0.0f )
+				{
+					// ask the bot if this really is a hindrance
+					//if ( think->IsHindrance( bot, result.m_pEnt ) == ANSWER_YES )
+					{
+						if ( bot->IsDebugging( NEXTBOT_PATH ) )
+						{
+							NDebugOverlay::Circle( bot->GetLocomotionInterface()->GetFeet(), QAngle( -90.0f, 0, 0 ), 10.0f, 255, 0, 0, 255, true, 1.0f );
+							NDebugOverlay::HorzArrow( bot->GetLocomotionInterface()->GetFeet(), result.m_pEnt->GetAbsOrigin(), 1.0f, 255, 0, 0, 255, true, 1.0f );
+						}
+
+						// we are blocked
+						return result.m_pEnt;
+					}
+				}
+			}
+
+			from = s->pos;
+			range += s->length;
+		}
+
+		return NULL;
+	}
 };
 
 void PathFollower::Update( INextBot *bot )
@@ -6160,6 +6321,8 @@ void PathFollower::Update( INextBot *bot )
 
 SH_DECL_HOOK0_void(Path, Invalidate, SH_NOATTRIB, 0);
 
+class DirectChasePath;
+
 class ChasePath : public PathFollower
 {
 public:
@@ -6169,21 +6332,18 @@ public:
 		DONT_LEAD_SUBJECT
 	};
 	
-	char pad1[40];
+	CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
+	CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
+	CountdownTimer m_lifetimeTimer;
+	EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
+	SubjectChaseType m_chaseHow;
 	
 	using IsRepathNeeded_t = bool (ChasePath::*)( INextBot *, CBaseEntity * );
 	using Update_t = void (ChasePath::*)( INextBot *, CBaseEntity *, const IPathCost &, Vector * );
+	using ComputeAreaCrossing_t = void (DirectChasePath::*)( INextBot *bot, const CNavArea *, const Vector &, const CNavArea *, NavDirType, Vector * );
 	
 	struct vars_t
 	{
-		vars_t(SubjectChaseType chaseHow) {
-			m_failTimer.Invalidate();
-			m_throttleTimer.Invalidate();
-			m_lifetimeTimer.Invalidate();
-			m_lastPathSubject = NULL;
-			m_chaseHow = chaseHow;
-		}
-		
 		float radius = 500.0f;
 		float maxlen = 0.0f;
 		float life = 0.0f;
@@ -6193,12 +6353,7 @@ public:
 		
 		IsRepathNeeded_t pIsRepathNeeded = nullptr;
 		Update_t pUpdate = nullptr;
-		
-		CountdownTimer m_failTimer;							// throttle re-pathing if last path attempt failed
-		CountdownTimer m_throttleTimer;						// require a minimum time between re-paths
-		CountdownTimer m_lifetimeTimer;
-		EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
-		SubjectChaseType m_chaseHow;
+		ComputeAreaCrossing_t pComputeAreaCrossing = nullptr;
 	};
 	
 	unsigned char *vars_ptr()
@@ -6208,14 +6363,33 @@ public:
 	
 	void HookInvalidate()
 	{
-		getvars().m_throttleTimer.Invalidate();
-		getvars().m_lifetimeTimer.Invalidate();
+		m_throttleTimer.Invalidate();
+		m_lifetimeTimer.Invalidate();
 		
 		RETURN_META(MRES_IGNORED);
 	}
 	
+	void ctor(SubjectChaseType chaseHow)
+	{
+		new (&m_failTimer) CountdownTimer();
+		new (&m_throttleTimer) CountdownTimer();
+		new (&m_lifetimeTimer) CountdownTimer();
+		new (&m_lastPathSubject) EHANDLE();
+		
+		m_failTimer.Invalidate();
+		m_throttleTimer.Invalidate();
+		m_lifetimeTimer.Invalidate();
+		m_lastPathSubject = NULL;
+		m_chaseHow = chaseHow;
+	}
+	
 	void dtor()
 	{
+		m_failTimer.~CountdownTimer();
+		m_throttleTimer.~CountdownTimer();
+		m_lifetimeTimer.~CountdownTimer();
+		m_lastPathSubject.~EHANDLE();
+		
 		getvars().~vars_t();
 		
 		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &ChasePath::dtor), false);
@@ -6385,7 +6559,7 @@ public:
 			}
 
 			// don't allow repath until a moment AFTER we have left the ladder
-			getvars().m_throttleTimer.Start( 1.0f );
+			m_throttleTimer.Start( 1.0f );
 
 			return;
 		}
@@ -6403,7 +6577,7 @@ public:
 			return;
 		}
 
-		if ( !getvars().m_failTimer.IsElapsed() )
+		if ( !m_failTimer.IsElapsed() )
 		{
 	 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
 	 		{
@@ -6417,13 +6591,13 @@ public:
 		}
 
 		// if our path subject changed, repath immediately
-		if ( subject != getvars().m_lastPathSubject )
+		if ( subject != m_lastPathSubject )
 		{
 			if ( bot->IsDebugging( NEXTBOT_PATH ) )
 			{
 				static float lastprint = 0.0f;
 				if(lastprint <= gpGlobals->curtime) {
-					DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p (#%d) to %p (#%d)).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), getvars().m_lastPathSubject.Get(), getvars().m_lastPathSubject.Get() ? getvars().m_lastPathSubject.Get()->entindex() : -1, subject, subject ? subject->entindex() : -1 );
+					DevMsg( "%3.2f: bot(#%d) Chase path subject changed (from %p (#%d) to %p (#%d)).\n", gpGlobals->curtime, bot->GetEntity()->entindex(), m_lastPathSubject.Get(), m_lastPathSubject.Get() ? m_lastPathSubject.Get()->entindex() : -1, subject, subject ? subject->entindex() : -1 );
 					lastprint = gpGlobals->curtime + 2.0f;
 				}
 			}
@@ -6431,10 +6605,10 @@ public:
 			Invalidate();
 
 			// new subject, fresh attempt
-			getvars().m_failTimer.Invalidate();
+			m_failTimer.Invalidate();
 		}
 
-		if ( IsValid() && !getvars().m_throttleTimer.IsElapsed() )
+		if ( IsValid() && !m_throttleTimer.IsElapsed() )
 		{
 			// require a minimum time between repaths, as long as we have a path to follow
 	 		if ( bot->IsDebugging( NEXTBOT_PATH ) )
@@ -6448,7 +6622,7 @@ public:
 			return;
 		}
 
-		if ( IsValid() && getvars().m_lifetimeTimer.HasStarted() && getvars().m_lifetimeTimer.IsElapsed() )
+		if ( IsValid() && m_lifetimeTimer.HasStarted() && m_lifetimeTimer.IsElapsed() )
 		{
 			// this path's lifetime has elapsed
 			Invalidate();
@@ -6460,7 +6634,7 @@ public:
 			bool isPath;
 			Vector pathTarget = subject->GetAbsOrigin();
 
-			if ( getvars().m_chaseHow == LEAD_SUBJECT )
+			if ( m_chaseHow == LEAD_SUBJECT )
 			{
 				pathTarget = pPredictedSubjectPos ? *pPredictedSubjectPos : PredictSubjectPosition( bot, subject );
 				isPath = Compute( bot, pathTarget, cost, GetMaxPathLength() );
@@ -6488,19 +6662,19 @@ public:
 					}
 				}
 
-				getvars().m_lastPathSubject = subject;
+				m_lastPathSubject = subject;
 
-				getvars().m_throttleTimer.Start( getvars().repathtime );
+				m_throttleTimer.Start( getvars().repathtime );
 
 				// track the lifetime of this new path
 				float lifetime = GetLifetime();
 				if ( lifetime > 0.0f )
 				{
-					getvars().m_lifetimeTimer.Start( lifetime );
+					m_lifetimeTimer.Start( lifetime );
 				}
 				else
 				{
-					getvars().m_lifetimeTimer.Invalidate();
+					m_lifetimeTimer.Invalidate();
 				}
 			}
 			else
@@ -6508,7 +6682,7 @@ public:
 				// can't reach subject - throttle retry based on range to subject
 				float failtime = 0.005f * ( bot->GetRangeTo( subject ) );
 				
-				getvars().m_failTimer.Start( failtime );
+				m_failTimer.Start( failtime );
 				
 				// allow bot to react to path failure
 				bot->OnMoveToFailure( this, FAIL_NO_PATH_EXISTS );
@@ -6537,7 +6711,8 @@ public:
 	{
 		ChasePath *bytes = (ChasePath *)calloc(1, sizeof(ChasePath) + sizeof(vars_t));
 		call_mfunc<void>(bytes, PathFollowerCTOR);
-		new (bytes->vars_ptr()) vars_t(chaseHow);
+		new (bytes->vars_ptr()) vars_t();
+		bytes->ctor(chaseHow);
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &ChasePath::dtor), false);
 		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &ChasePath::HookInvalidate), false);
 		bytes->getvars().pIsRepathNeeded = &ChasePath::IsRepathNeeded;
@@ -6590,6 +6765,7 @@ public:
 		SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &DirectChasePath::HookComputeAreaCrossing), false);
 		bytes->getvars().pIsRepathNeeded = func_to_func<IsRepathNeeded_t>(&DirectChasePath::IsRepathNeeded);
 		bytes->getvars().pUpdate = func_to_func<Update_t>(&DirectChasePath::Update);
+		bytes->getvars().pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&DirectChasePath::DoComputeAreaCrossing);
 		return bytes;
 	}
 	
@@ -6669,16 +6845,39 @@ public:
 		return true;
 	}
 	
-	void HookComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos ) const
+	void DoComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos )
 	{
 		Vector center;
 		float halfWidth;
 		from->ComputePortal( to, dir, &center, &halfWidth );
 
 		*crossPos = center;
+	}
+	
+	void HookComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos )
+	{
+		(this->*getvars().pComputeAreaCrossing)(bot, from, fromPos, to, dir, crossPos);
 		RETURN_META(MRES_SUPERCEDE);
 	}
 };
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+class InfectedChasePath : public DirectChasePath
+{
+public:
+	static InfectedChasePath *create(SubjectChaseType chaseHow)
+	{
+		InfectedChasePath *bytes = (InfectedChasePath *)DirectChasePath::create(chaseHow);
+		bytes->getvars().pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&InfectedChasePath::DoComputeAreaCrossing);
+		return bytes;
+	}
+	
+	void DoComputeAreaCrossing( INextBot *bot, const CNavArea *from, const Vector &fromPos, const CNavArea *to, NavDirType dir, Vector *crossPos )
+	{
+		call_mfunc<void, InfectedChasePath, INextBot *, const CNavArea *, const Vector &, const CNavArea *, NavDirType, Vector *>(this, InfectedChasePathComputeAreaCrossing, bot, from, fromPos, to, dir, crossPos);
+	}
+};
+#endif
 
 class RetreatPathBuilder
 {
@@ -7251,6 +7450,9 @@ HandleType_t CTFPathFollowerHandleType = 0;
 HandleType_t ChasePathHandleType = 0;
 HandleType_t DirectChasePathHandleType = 0;
 HandleType_t RetreatPathHandleType = 0;
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+HandleType_t InfectedChasePathHandleType = 0;
+#endif
 
 cell_t PathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
@@ -7857,6 +8059,14 @@ cell_t DirectChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
 	DirectChasePath *obj = DirectChasePath::create((ChasePath::SubjectChaseType)params[1]);
 	return handlesys->CreateHandle(DirectChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
 }
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+cell_t InfectedChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
+{
+	InfectedChasePath *obj = InfectedChasePath::create((ChasePath::SubjectChaseType)params[1]);
+	return handlesys->CreateHandle(InfectedChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+}
+#endif
 
 cell_t RetreatPathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
@@ -8704,6 +8914,27 @@ cell_t PathFollowerIsAtGoal(IPluginContext *pContext, const cell_t *params)
 	INextBot *bot = (INextBot *)params[2];
 	
 	return obj->IsAtGoal(bot);
+}
+
+cell_t PathFollowerFindBlocker(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	PathFollower *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], PathFollowerHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	INextBot *bot = (INextBot *)params[2];
+	
+	CBaseEntity *pEntity = obj->FindBlocker(bot);
+	if(!pEntity) {
+		return -1;
+	}
+	
+	return gamehelpers->EntityToBCompatRef(pEntity);
 }
 
 #if SOURCE_ENGINE == SE_TF2
@@ -10300,6 +10531,7 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"PathFollower.IsDiscontinuityAhead", PathFollowerIsDiscontinuityAhead},
 	{"PathFollower.IsAtGoal", PathFollowerIsAtGoal},
+	{"PathFollower.FindBlocker", PathFollowerFindBlocker},
 	{"PathFollower.Hindrance.get", PathFollowerHindranceget},
 #if SOURCE_ENGINE == SE_TF2
 	{"CTFPathFollower.MinLookAheadDistance.get", CTFPathFollowerMinLookAheadDistanceget},
@@ -10590,7 +10822,14 @@ void Sample::OnHandleDestroy(HandleType_t type, void *object)
 	} else if(type == DirectChasePathHandleType) {
 		DirectChasePath *obj = (DirectChasePath *)object;
 		delete obj;
-	} else if(type == RetreatPathHandleType) {
+	}
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	else if(type == InfectedChasePathHandleType) {
+		InfectedChasePath *obj = (InfectedChasePath *)object;
+		delete obj;
+	}
+#endif
+	else if(type == RetreatPathHandleType) {
 		RetreatPath *obj = (RetreatPath *)object;
 		delete obj;
 	} else if(type == BehaviorEntryHandleType) {
@@ -10638,6 +10877,32 @@ DETOUR_DECL_MEMBER1(ResolveZombieCollisions, Vector, const Vector &, pos)
 }
 #endif
 
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+IEntityFactoryDictionary *dictionary = nullptr;
+#endif
+
+void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
+{
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	if(!infectedvtable) {
+		IServerNetworkable *network = dictionary->Create("infected");
+		CBaseEntity *pEntity = network->GetBaseEntity();
+		
+		infectedvtable = *(void ***)pEntity;
+		
+		static int m_iEFlagsOffset = -1;
+		if(m_iEFlagsOffset == -1) {
+			datamap_t *pMap = gamehelpers->GetDataMap(pEntity);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(pMap, "m_iEFlags", &info);
+			m_iEFlagsOffset = info.actual_offset;
+		}
+		
+		*(int *)((unsigned char *)pEntity + m_iEFlagsOffset) |= EFL_KILLME;
+	}
+#endif
+}
+
 #include "funnyfile.h"
 
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
@@ -10678,12 +10943,19 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("Path::Compute(CBaseCombatCharacter)", &PathComputeEntity);
 	g_pGameConf->GetMemSig("Path::Compute(Vector)", &PathComputeVector);
 	g_pGameConf->GetMemSig("INextBot::IsDebugging", &INextBotIsDebuggingPtr);
+	g_pGameConf->GetMemSig("InfectedChasePath::ComputeAreaCrossing", &InfectedChasePathComputeAreaCrossing);
+	g_pGameConf->GetMemSig("EntityFactoryDictionary", &EntityFactoryDictionaryPtr);
+
+	dictionary = (void_to_func<IEntityFactoryDictionary *(*)()>(EntityFactoryDictionaryPtr))();
+	
+	sizeofInfected = dictionary->FindFactory("infected")->GetEntitySize();
 #endif
 	
 	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
 	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
 	g_pGameConf->GetMemSig("NDebugOverlay::HorzArrow", &NDebugOverlayHorzArrow);
 	g_pGameConf->GetMemSig("NDebugOverlay::Triangle", &NDebugOverlayTriangle);
+	g_pGameConf->GetMemSig("NDebugOverlay::Circle", &NDebugOverlayCircle);
 	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
@@ -10749,6 +11021,11 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_hGroundEntity", &info);
 	m_hGroundEntityOffset = info.actual_offset;
 	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	gamehelpers->FindSendPropInfo("CTerrorPlayer", "m_isGhost", &info);
+	m_isGhostOffset = info.actual_offset;
+#endif
+	
 	g_pEntityList = reinterpret_cast<CBaseEntityList *>(gamehelpers->GetGlobalEntityList());
 	
 	PathHandleType = handlesys->CreateType("Path", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
@@ -10760,6 +11037,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	ChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("ChasePath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	RetreatPathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("RetreatPath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	DirectChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("DirectChasePath", this, ChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	InfectedChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("InfectedChasePath", this, DirectChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+#endif
 	
 	BehaviorEntryHandleType = handlesys->CreateType("BehaviorActionEntry", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
@@ -10822,6 +11102,9 @@ void Sample::SDK_OnUnload()
 #endif
 	handlesys->RemoveType(ChasePathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(DirectChasePathHandleType, myself->GetIdentity());
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	handlesys->RemoveType(InfectedChasePathHandleType, myself->GetIdentity());
+#endif
 	handlesys->RemoveType(RetreatPathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(BehaviorEntryHandleType, myself->GetIdentity());
 	gameconfs->CloseGameConfigFile(g_pGameConf);

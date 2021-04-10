@@ -1155,6 +1155,8 @@ methodmap PathFollower < Path
 	public native bool IsAtGoal(INextBot bot);
 
 	public native void Update(INextBot bot);
+	
+	public native int FindBlocker(INextBot bot);
 };
 
 enum SubjectChaseType
@@ -1174,6 +1176,13 @@ methodmap DirectChasePath < ChasePath
 {
 	public native DirectChasePath(SubjectChaseType chaseHow);
 };
+
+#if defined GAME_L4D2
+methodmap InfectedChasePath < ChasePath
+{
+	public native InfectedChasePath(SubjectChaseType chaseHow);
+};
+#endif
 
 methodmap RetreatPath < PathFollower
 {

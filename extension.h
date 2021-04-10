@@ -52,6 +52,8 @@ public:
 	
 	virtual bool RegisterConCommandBase(ConCommandBase *pCommand);
 	
+	virtual void OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax);
+	
 	bool QueryInterfaceDrop(SMInterface *pInterface);
 	virtual void NotifyInterfaceDrop(SMInterface *pInterface);
 	
