@@ -60,6 +60,11 @@
 				"library"	"server"
 				"linux"		"@TheNavMesh"
 			}
+			"TheNavAreas"
+			{
+				"library"	"server"
+				"linux"		"@TheNavAreas"
+			}
 			"CBaseEntity::SetAbsOrigin"
 			{
 				"library"	"server"
@@ -207,6 +212,10 @@
 			"sizeof(NextBotCombatCharacter)"
 			{
 				"linux" "7604"
+			}
+			"NextBotCombatCharacter::GetNextBotCombatCharacter"
+			{
+				"linux" "349"
 			}
 		}
 	}

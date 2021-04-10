@@ -169,6 +169,9 @@ int CBaseEntityEyeAngles = -1;
 #if SOURCE_ENGINE == SE_TF2
 int CFuncNavCostGetCostMultiplier = -1;
 #endif
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+int NextBotCombatCharacterGetNextBotCombatCharacter = -1;
+#endif
 
 int m_vecAbsOriginOffset = -1;
 int m_iTeamNumOffset = -1;
@@ -521,6 +524,7 @@ public:
 #define FCAP_IMPULSE_USE 0
 
 #define private public
+#define protected public
 
 #define VPROF_BUDGET(...) 
 
@@ -528,6 +532,8 @@ public:
 #include <nav_ladder.h>
 #include <nav_area.h>
 #include <nav_mesh.h>
+
+NavAreaVector *TheNavAreas = nullptr;
 
 #if SOURCE_ENGINE == SE_TF2
 class CFuncNavCost : public CBaseEntity
@@ -3019,7 +3025,197 @@ public:
 	}
 };
 
+SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0)
+
+#include <sourcehook/sh_memory.h>
+
 #include "NextBotBehavior.h"
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+SH_DECL_MANUALHOOK0(MyInfectedPointer, 0, 0, 0, CBaseEntity *)
+
+namespace __cxxabiv1
+{
+	struct vtable_prefix 
+	{
+		// Offset to most derived object.
+		ptrdiff_t whole_object;
+
+		// Additional padding if necessary.
+#ifdef _GLIBCXX_VTABLE_PADDING
+		ptrdiff_t padding1;
+#endif
+
+		// Pointer to most derived type_info.
+		const __class_type_info *whole_type;
+
+		// Additional padding if necessary.
+#ifdef _GLIBCXX_VTABLE_PADDING
+		ptrdiff_t padding2;
+#endif
+
+		// What a class's vptr points to.
+		const void *origin;
+	};
+}
+
+class NextBotCombatCharacterInfected : public NextBotCombatCharacter
+{
+public:
+	void HookDoBloodEffect(float, CTakeDamageInfo const&, Vector const&, CGameTrace*)
+	{
+		
+	}
+	
+	bool HookIsSacrificeFor(int) const
+	{
+		return false;
+	}
+	
+	bool HookTryToCull()
+	{
+		return false;
+	}
+	
+	Action<NextBotCombatCharacterInfected> *HookCreateDeathAction(CTakeDamageInfo const&)
+	{
+		return nullptr;
+	}
+	
+	float HookGetEyeOffsetUpdateInterval() const
+	{
+		return 0.0f;
+	}
+	
+	void HookMakeLowViolence()
+	{
+		
+	}
+	
+	void HookCreateComponents()
+	{
+		
+	}
+	
+	void HookUpdate()
+	{ MyNextBotPointer()->Update(); }
+	
+	void HookUpkeep()
+	{ MyNextBotPointer()->Upkeep(); }
+	
+	bool HookReactToSurvivorVisibility()
+	{ return MyNextBotPointer()->ReactToSurvivorVisibility(); }
+	
+	bool HookReactToSurvivorNoise()
+	{ return MyNextBotPointer()->ReactToSurvivorNoise(); }
+	
+	bool HookReactToSurvivorContact()
+	{ return MyNextBotPointer()->ReactToSurvivorContact(); }
+	
+	ILocomotion *HookGetLocomotionInterface()
+	{ return MyNextBotPointer()->GetLocomotionInterface(); }
+	
+	IBody *HookGetBodyInterface()
+	{ return MyNextBotPointer()->GetBodyInterface(); }
+	
+	IIntention *HookGetIntentionInterface()
+	{ return MyNextBotPointer()->GetIntentionInterface(); }
+	
+	IVision *HookGetVisionInterface()
+	{ return MyNextBotPointer()->GetVisionInterface(); }
+	
+	void HookOnIgnite()
+	{ return MyNextBotPointer()->OnIgnite(); }
+	
+	bool HookShouldTouch(CBaseEntity *object)
+	{ return MyNextBotPointer()->ShouldTouch(object); }
+	
+	bool HookIsAbleToClimbOnto(CBaseEntity *object)
+	{ return MyNextBotPointer()->IsAbleToClimbOnto(object); }
+	
+	bool HookIsAbleToBreak(CBaseEntity *object)
+	{ return MyNextBotPointer()->IsAbleToBreak(object); }
+	
+	bool HookIsAbleToBlockMovementOf(INextBot *object)
+	{ return MyNextBotPointer()->IsAbleToBlockMovementOf(object); }
+	
+	CBaseEntity *HookMyInfectedPointer()
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, this);
+	}
+	
+	void dtor()
+	{
+		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &NextBotCombatCharacterInfected::dtor), false);
+		SH_REMOVE_MANUALHOOK(MyInfectedPointer, this, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
+		RETURN_META(MRES_IGNORED);
+	}
+	
+	static NextBotCombatCharacter *create(size_t size_modifier)
+	{
+		NextBotCombatCharacterInfected *bytes = (NextBotCombatCharacterInfected *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
+		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
+		
+		static void **infectvtable = nullptr;
+		if(!infectvtable) {
+			static void **nbcbvtable = nullptr;
+			if(!nbcbvtable) {
+				nbcbvtable = *(void ***)bytes;
+			}
+			
+			static void *infectfuncs[] =
+			{
+				func_to_void(&NextBotCombatCharacterInfected::HookUpdate),
+				func_to_void(&NextBotCombatCharacterInfected::HookUpkeep),
+				func_to_void(&NextBotCombatCharacterInfected::HookDoBloodEffect),
+				func_to_void(&NextBotCombatCharacterInfected::HookReactToSurvivorVisibility),
+				func_to_void(&NextBotCombatCharacterInfected::HookReactToSurvivorNoise),
+				func_to_void(&NextBotCombatCharacterInfected::HookReactToSurvivorContact),
+				func_to_void(&NextBotCombatCharacterInfected::HookGetLocomotionInterface),
+				func_to_void(&NextBotCombatCharacterInfected::HookGetBodyInterface),
+				func_to_void(&NextBotCombatCharacterInfected::HookGetIntentionInterface),
+				func_to_void(&NextBotCombatCharacterInfected::HookGetVisionInterface),
+				func_to_void(&NextBotCombatCharacterInfected::HookOnIgnite),
+				func_to_void(&NextBotCombatCharacterInfected::HookIsAbleToClimbOnto),
+				func_to_void(&NextBotCombatCharacterInfected::HookIsAbleToBreak),
+				func_to_void(&NextBotCombatCharacterInfected::HookIsAbleToBlockMovementOf),
+				func_to_void(&NextBotCombatCharacterInfected::HookShouldTouch),
+				func_to_void(&NextBotCombatCharacterInfected::HookIsSacrificeFor),
+				func_to_void(&NextBotCombatCharacterInfected::HookTryToCull),
+				func_to_void(&NextBotCombatCharacterInfected::HookCreateDeathAction),
+				func_to_void(&NextBotCombatCharacterInfected::HookGetEyeOffsetUpdateInterval),
+				func_to_void(&NextBotCombatCharacterInfected::HookMakeLowViolence),
+				func_to_void(&NextBotCombatCharacterInfected::HookCreateComponents),
+			};
+			static int infectfuncsnum = (sizeof(infectfuncs) / 4);
+			
+			using vtable_prefix = __cxxabiv1::vtable_prefix;
+			
+			static unsigned char *tablememory = (unsigned char *)calloc(1, sizeof(vtable_prefix) + (((NextBotCombatCharacterGetNextBotCombatCharacter + infectfuncsnum) + 1) * 4));
+			
+			vtable_prefix &prefix = *(vtable_prefix *)tablememory;
+			prefix = *(vtable_prefix *)(((unsigned char *)nbcbvtable) - sizeof(vtable_prefix));
+			
+			infectvtable = (void **)&tablememory[sizeof(vtable_prefix)];
+			
+			int i = 0;
+			for(; i <= NextBotCombatCharacterGetNextBotCombatCharacter; ++i) {
+				infectvtable[i] = nbcbvtable[i];
+			}
+			for(int j = 0; j < infectfuncsnum; ++j) {
+				infectvtable[i++] = infectfuncs[j];
+			}
+		}
+		
+		(*(void ***)bytes) = infectvtable;
+		
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::dtor), false);
+		SH_ADD_MANUALHOOK(MyInfectedPointer, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
+		
+		return bytes;
+	}
+};
+#endif
 
 HandleType_t BehaviorEntryHandleType = 0;
 
@@ -4307,9 +4503,6 @@ const Vector &IBody::GetViewVector( void )
 	return view;
 }
 
-#include <sourcehook/sh_memory.h>
-
-SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0)
 SH_DECL_MANUALHOOK0(MyNextBotPointer, 0, 0, 0, INextBot *)
 SH_DECL_MANUALHOOK4_void(PerformCustomPhysics, 0, 0, 0, Vector *, Vector *, QAngle *, QAngle *)
 SH_DECL_MANUALHOOK1(IsAreaTraversable, 0, 0, 0, bool, const CNavArea *)
@@ -7110,12 +7303,11 @@ cell_t PathComputeVectorNative(IPluginContext *pContext, const cell_t *params)
 		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
 	}
 	
+	INextBot *bot = (INextBot *)params[2];
+	
 	cell_t *value = nullptr;
 	pContext->LocalToPhysAddr(params[3], &value);
-	
 	Vector goal = Vector(sp_ctof(value[0]), sp_ctof(value[1]), sp_ctof(value[2]));
-	
-	INextBot *bot = (INextBot *)params[2];
 	
 	IPluginFunction *callback = pContext->GetFunctionById(params[4]);
 	SPPathCost cost(bot, callback, params[5]);
@@ -7184,7 +7376,6 @@ cell_t PathFollowerUpdateNative(IPluginContext *pContext, const cell_t *params)
 	INextBot *bot = (INextBot *)params[2];
 	
 	obj->Update(bot);
-	
 	return 0;
 }
 
@@ -8769,6 +8960,12 @@ cell_t ILocomotionOnGroundget(IPluginContext *pContext, const cell_t *params)
 	return area->IsOnGround();
 }
 
+cell_t ILocomotionAttemptingToMoveget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return area->IsAttemptingToMove();
+}
+
 cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -9760,6 +9957,13 @@ cell_t AllocateNextBotCombatCharacter(IPluginContext *pContext, const cell_t *pa
 	return (cell_t)NextBotCombatCharacter::create(params[1]);
 }
 
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+cell_t AllocateInfectedNextBotCombatCharacter(IPluginContext *pContext, const cell_t *params)
+{
+	return (cell_t)NextBotCombatCharacterInfected::create(params[1]);
+}
+#endif
+
 cell_t GetNextBotCombatCharacterSize(IPluginContext *pContext, const cell_t *params)
 {
 	return sizeofNextBotCombatCharacter;
@@ -10033,6 +10237,22 @@ cell_t IIntentionCustomset_function(IPluginContext *pContext, const cell_t *para
 	return 0;
 }
 
+cell_t GetNavAreaVectorCount(IPluginContext *pContext, const cell_t *params)
+{
+	return TheNavAreas->Count();
+}
+
+cell_t GetNavAreaFromVector(IPluginContext *pContext, const cell_t *params)
+{
+	int idx = params[1];
+	
+	if(idx < 0 || idx >= TheNavAreas->Count()) {
+		return pContext->ThrowNativeError("invalid index %i", idx);
+	}
+	
+	return (cell_t)(*TheNavAreas)[idx];
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -10142,6 +10362,7 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.Running.get", ILocomotionIsRunning},
 	{"ILocomotion.Stuck.get", ILocomotionIsStuck},
 	{"ILocomotion.OnGround.get", ILocomotionOnGroundget},
+	{"ILocomotion.AttemptingToMove.get", ILocomotionAttemptingToMoveget},
 	{"ILocomotion.SetDesiredLean", ILocomotionSetDesiredLean},
 	{"ILocomotion.GetDesiredLean", ILocomotionGetDesiredLean},
 	{"ILocomotion.Run", ILocomotionRun},
@@ -10308,6 +10529,9 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
 #endif
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	{"AllocateInfectedNextBotCombatCharacter", AllocateInfectedNextBotCombatCharacter},
+#endif
 	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
 	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
@@ -10321,6 +10545,8 @@ sp_nativeinfo_t natives[] =
 	{"BehaviorAction.get_data", BehaviorActionget_data},
 	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
 	{"IIntentionCustom.set_function", IIntentionCustomset_function},
+	{"GetNavAreaVectorCount", GetNavAreaVectorCount},
+	{"GetNavAreaFromVector", GetNavAreaFromVector},
 	{NULL, NULL}
 };
 
@@ -10474,9 +10700,14 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	SH_MANUALHOOK_RECONFIGURE(Spawn, offset, 0, 0);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	g_pGameConf->GetOffset("CBaseEntity::MyInfectedPointer", &CBaseEntityMyInfectedPointer);
+	SH_MANUALHOOK_RECONFIGURE(MyInfectedPointer, CBaseEntityMyInfectedPointer, 0, 0);
+	
+	g_pGameConf->GetOffset("NextBotCombatCharacter::GetNextBotCombatCharacter", &NextBotCombatCharacterGetNextBotCombatCharacter);
 #endif
+
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
 	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
@@ -10486,6 +10717,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #endif
 	
 	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMesh);
+	g_pGameConf->GetMemSig("TheNavAreas", (void **)&TheNavAreas);
 	
 #if SOURCE_ENGINE == SE_TF2
 	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_STATIC(HookIsAuthoritative), false);
