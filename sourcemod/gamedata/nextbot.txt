@@ -125,6 +125,11 @@
 				"library" "server"
 				"linux" "@_ZN13NDebugOverlay6CircleERK6VectorRK6QAnglefiiiibf"
 			}
+			"CBaseCombatCharacter::Event_Killed"
+			{
+				"library" "server"
+				"linux" "@_ZN20CBaseCombatCharacter12Event_KilledERK15CTakeDamageInfo"
+			}
 		}
 	}
 	"left4dead2"
@@ -181,6 +186,16 @@
 				"library" "server"
 				"linux" "@_Z23EntityFactoryDictionaryv"
 			}
+			"Infected::Vocalize"
+			{
+				"library" "server"
+				"linux" "@_ZN8Infected8VocalizeEPKcb"
+			}
+			"SurvivorIntention::IsTankImmediatelyDangerousTo"
+			{
+				"library" "server"
+				"linux" "@_ZNK17SurvivorIntention28IsTankImmediatelyDangerousToEPK13CTerrorPlayerP20CBaseCombatCharacter"
+			}
 		}
 		"Offsets"
 		{
@@ -231,6 +246,18 @@
 			"NextBotCombatCharacter::GetNextBotCombatCharacter"
 			{
 				"linux" "349"
+			}
+			"CBaseCombatCharacter::GetClass"
+			{
+				"linux" "337"
+			}
+			"CBaseCombatCharacter::CanBeA"
+			{
+				"linux" "338"
+			}
+			"CBaseEntity::Classify"
+			{
+				"linux" "64"
 			}
 		}
 	}

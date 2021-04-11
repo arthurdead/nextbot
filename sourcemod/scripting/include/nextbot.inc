@@ -23,6 +23,8 @@ enum struct BehaviorResult
 	}
 }
 
+#tryinclude <damagerules>
+
 typeset nextbot_functions
 {
 #if defined GAME_TF2
@@ -95,13 +97,19 @@ typeset nextbot_functions
 	//BehaviorActionEntry.OnPickUp
 	function BehaviorResultType (BehaviorAction action, int entity, int who, int weapon, BehaviorResult result);
 	
+#if defined damagerules_included
 	//BehaviorActionEntry.OnInjured
 	//BehaviorActionEntry.OnKilled
-	function BehaviorResultType (BehaviorAction action, int entity, BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, int entity, CTakeDamageInfo info, BehaviorResult result);
 	
 	//BehaviorActionEntry.OnOtherKilled
-	function BehaviorResultType (BehaviorAction action, int entity, int victim, BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, int entity, int victim, CTakeDamageInfo info, BehaviorResult result);
+#endif
 };
+
+#if defined damagerules_included
+native void CombatCharacterEventKilled(int entity, const CTakeDamageInfoVar info);
+#endif
 
 enum NavAttributeType
 {
@@ -1213,15 +1221,16 @@ native Address AllocateNextBotCombatCharacter(int size_modifier);
 native int GetNextBotCombatCharacterSize();
 
 #if defined GAME_L4D2
-native Address AllocateInfectedNextBotCombatCharacter(int size_modifier);
+native Address AllocateInfectedNextBotCombatCharacter(int size_modifier, int cls);
+native int GetInfectedSize();
 #endif
 
-stock Address datamaps_allocatenextbot(int size_modifier)
+stock Address datamaps_allocatenextbot(int size_modifier, any data)
 { return AllocateNextBotCombatCharacter(size_modifier); }
 
 #if defined GAME_L4D2
-stock Address datamaps_allocateinfectednextbot(int size_modifier)
-{ return AllocateInfectedNextBotCombatCharacter(size_modifier); }
+stock Address datamaps_allocateinfectednextbot(int size_modifier, int data)
+{ return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
 #endif
 
 #if defined datamaps_included
@@ -1241,9 +1250,13 @@ stock CustomEntityFactory register_nextbot_factory(const char[] classname, Custo
 }
 
 #if defined GAME_L4D2
-stock CustomEntityFactory register_infected_nextbot_factory(const char[] classname, CustomSendtable &table = null)
+#if defined _moreinfected_inc_
+stock CustomEntityFactory register_infected_nextbot_factory(const char[] classname, CustomSendtable &table = null, ZombieClassType cls = ZombieClass_Common)
+#else
+stock CustomEntityFactory register_infected_nextbot_factory(const char[] classname, CustomSendtable &table = null, int cls = 0)
+#endif
 {
-	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocateinfectednextbot, GetNextBotCombatCharacterSize());
+	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocateinfectednextbot, GetInfectedSize(), cls);
 	table = sendtable_from_nextbot_factory(factory);
 	return factory;
 }

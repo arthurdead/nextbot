@@ -81,6 +81,12 @@ class IStaticPropMgrServer *staticpropmgr = nullptr;
 #include <tier1/utlvector.h>
 #include <CDetour/detours.h>
 
+#include <takedamageinfo.h>
+
+#ifdef __HAS_DAMAGERULES
+#include <IDamageRules.h>
+#endif
+
 /**
  * @file extension.cpp
  * @brief Implement extension code here.
@@ -159,6 +165,7 @@ void *INextBotIsDebuggingPtr = nullptr;
 void *InfectedChasePathComputeAreaCrossing = nullptr;
 void *EntityFactoryDictionaryPtr = nullptr;
 #endif
+void *CBaseCombatCharacterEvent_Killed = nullptr;
 
 void *NavAreaBuildPathPtr = nullptr;
 
@@ -176,6 +183,7 @@ int CFuncNavCostGetCostMultiplier = -1;
 #endif
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 int NextBotCombatCharacterGetNextBotCombatCharacter = -1;
+int CBaseCombatCharacterCanBeA = -1;
 #endif
 
 int m_vecAbsOriginOffset = -1;
@@ -538,6 +546,18 @@ public:
 	}
 	
 	void OnNavAreaRemoved(CNavArea *) {}
+	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	bool CanBeA(int cls)
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, int>(this, CBaseCombatCharacterCanBeA, cls);
+	}
+#endif
+
+	void Event_Killed(const CTakeDamageInfo &info)
+	{
+		call_mfunc<void, CBaseCombatCharacter, const CTakeDamageInfo &>(this, CBaseCombatCharacterEvent_Killed, info);
+	}
 };
 
 class CBasePlayer : public CBaseCombatCharacter
@@ -3062,8 +3082,16 @@ SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0)
 
 #include "NextBotBehavior.h"
 
+#ifdef __HAS_DAMAGERULES
+IDamageRules *g_pDamageRules = nullptr;
+#endif
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 SH_DECL_MANUALHOOK0(MyInfectedPointer, 0, 0, 0, CBaseEntity *)
+SH_DECL_MANUALHOOK0(GetClass, 0, 0, 0, int)
+SH_DECL_MANUALHOOK0(Classify, 0, 0, 0, int)
+SH_DECL_MANUALHOOK1(CanBeA, 0, 0, 0, bool, int)
+SH_DECL_HOOK0(CBaseEntity, GetDataDescMap, SH_NOATTRIB, 0, datamap_t *);
 
 namespace __cxxabiv1
 {
@@ -3091,6 +3119,12 @@ namespace __cxxabiv1
 }
 
 void **infectedvtable = nullptr;
+
+class NextBotCombatCharacterInfected;
+
+#include <unordered_map>
+
+std::unordered_map<NextBotCombatCharacterInfected *, int> nbinfectclsmap{};
 
 class NextBotCombatCharacterInfected : public NextBotCombatCharacter
 {
@@ -3177,15 +3211,41 @@ public:
 		RETURN_META_VALUE(MRES_SUPERCEDE, this);
 	}
 	
+	int GetDesiredClass()
+	{
+		return nbinfectclsmap[this];
+	}
+	
+	#define NBINFECT_MAGIC_NUMBER 69
+	
+	bool HookCanBeA(int cls)
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, cls == GetDesiredClass() || cls == NBINFECT_MAGIC_NUMBER);
+	}
+	
+	int HookGetClass()
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, GetDesiredClass());
+	}
+	
+	int HookClassify()
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, 4);
+	}
+	
 	void dtor()
 	{
 		NextBotCombatCharacterInfected *pEntity = META_IFACEPTR(NextBotCombatCharacterInfected);
+		nbinfectclsmap.erase(this);
 		SH_REMOVE_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::dtor), false);
 		SH_REMOVE_MANUALHOOK(MyInfectedPointer, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
+		SH_REMOVE_MANUALHOOK(CanBeA, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookCanBeA), false);
+		SH_REMOVE_MANUALHOOK(GetClass, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookGetClass), false);
+		SH_REMOVE_MANUALHOOK(Classify, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookClassify), false);
 		RETURN_META(MRES_IGNORED);
 	}
 	
-	static NextBotCombatCharacter *create(size_t size_modifier)
+	static NextBotCombatCharacter *create(size_t size_modifier, int cls)
 	{
 		NextBotCombatCharacterInfected *bytes = (NextBotCombatCharacterInfected *)engine->PvAllocEntPrivateData(sizeofInfected + size_modifier);
 		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
@@ -3242,10 +3302,15 @@ public:
 			}
 		}
 		
+		nbinfectclsmap.emplace(std::pair<NextBotCombatCharacterInfected *, int>{bytes, cls});
+		
 		(*(void ***)bytes) = fakeinfectvtbl;
 		
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::dtor), false);
 		SH_ADD_MANUALHOOK(MyInfectedPointer, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
+		SH_ADD_MANUALHOOK(CanBeA, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookCanBeA), false);
+		SH_ADD_MANUALHOOK(GetClass, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookGetClass), false);
+		SH_ADD_MANUALHOOK(Classify, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookClassify), false);
 		
 		return bytes;
 	}
@@ -3848,6 +3913,9 @@ public:
 		
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+#ifdef __HAS_DAMAGERULES
+		g_pDamageRules->PushDamageInfo(func, info);
+#endif
 		cell_t resvars[RESVARS_SIZE]{0};
 		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
@@ -3873,6 +3941,9 @@ public:
 		
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+#ifdef __HAS_DAMAGERULES
+		g_pDamageRules->PushDamageInfo(func, info);
+#endif
 		cell_t resvars[RESVARS_SIZE]{0};
 		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
@@ -3899,6 +3970,9 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(victim));
+#ifdef __HAS_DAMAGERULES
+		g_pDamageRules->PushDamageInfo(func, info);
+#endif
 		cell_t resvars[RESVARS_SIZE]{0};
 		initvars(resvars, result);
 		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
@@ -10188,17 +10262,22 @@ cell_t AllocateNextBotCombatCharacter(IPluginContext *pContext, const cell_t *pa
 	return (cell_t)NextBotCombatCharacter::create(params[1]);
 }
 
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-cell_t AllocateInfectedNextBotCombatCharacter(IPluginContext *pContext, const cell_t *params)
-{
-	return (cell_t)NextBotCombatCharacterInfected::create(params[1]);
-}
-#endif
-
 cell_t GetNextBotCombatCharacterSize(IPluginContext *pContext, const cell_t *params)
 {
 	return sizeofNextBotCombatCharacter;
 }
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+cell_t AllocateInfectedNextBotCombatCharacter(IPluginContext *pContext, const cell_t *params)
+{
+	return (cell_t)NextBotCombatCharacterInfected::create(params[1], params[2]);
+}
+
+cell_t GetInfectedSize(IPluginContext *pContext, const cell_t *params)
+{
+	return sizeofInfected;
+}
+#endif
 
 cell_t EntityIsCombatCharacter(IPluginContext *pContext, const cell_t *params)
 {
@@ -10484,6 +10563,29 @@ cell_t GetNavAreaFromVector(IPluginContext *pContext, const cell_t *params)
 	return (cell_t)(*TheNavAreas)[idx];
 }
 
+cell_t CombatCharacterEventKilled(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+	
+	CTakeDamageInfo info{};
+#ifdef __HAS_DAMAGERULES
+	g_pDamageRules->ParamToDamageInfo(pContext, params[2], info);
+#endif
+	
+	pCombat->Event_Killed(info);
+	return 0;
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -10761,10 +10863,11 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.GetLastKnownPosition", CKnownEntityGetLastKnownPosition},
 #endif
 	{"AllocateNextBotCombatCharacter", AllocateNextBotCombatCharacter},
+	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	{"AllocateInfectedNextBotCombatCharacter", AllocateInfectedNextBotCombatCharacter},
+	{"GetInfectedSize", GetInfectedSize},
 #endif
-	{"GetNextBotCombatCharacterSize", GetNextBotCombatCharacterSize},
 	{"EntityIsCombatCharacter", EntityIsCombatCharacter},
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
@@ -10779,6 +10882,7 @@ sp_nativeinfo_t natives[] =
 	{"IIntentionCustom.set_function", IIntentionCustomset_function},
 	{"GetNavAreaVectorCount", GetNavAreaVectorCount},
 	{"GetNavAreaFromVector", GetNavAreaFromVector},
+	{"CombatCharacterEventKilled", CombatCharacterEventKilled},
 	{NULL, NULL}
 };
 
@@ -10863,6 +10967,8 @@ CDetour *pUpdatePosition = nullptr;
 CDetour *pUpdateGroundConstraint = nullptr;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 CDetour *pResolveZombieCollisions = nullptr;
+CDetour *pVocalize = nullptr;
+CDetour *pIsTankImmediatelyDangerousTo = nullptr;
 
 DETOUR_DECL_MEMBER1(ResolveZombieCollisions, Vector, const Vector &, pos)
 {
@@ -10874,6 +10980,27 @@ DETOUR_DECL_MEMBER1(ResolveZombieCollisions, Vector, const Vector &, pos)
 	}
 	
 	return DETOUR_MEMBER_CALL(ResolveZombieCollisions)(pos);
+}
+
+DETOUR_DECL_MEMBER2(Vocalize, void, const char *, str, bool, unk)
+{
+	CBaseCombatCharacter *loc = (CBaseCombatCharacter *)this;
+	
+	if(loc->CanBeA(NBINFECT_MAGIC_NUMBER)) {
+		return;
+	}
+	
+	DETOUR_MEMBER_CALL(Vocalize)(str, unk);
+}
+
+//TODO!!! what to do about this ? the plugin should tell this
+DETOUR_DECL_MEMBER2(IsTankImmediatelyDangerousTo, bool, CBasePlayer *, pPlayer, CBaseCombatCharacter *, pBCC)
+{
+	if(pBCC->CanBeA(NBINFECT_MAGIC_NUMBER)) {
+		return false;
+	}
+	
+	return DETOUR_MEMBER_CALL(IsTankImmediatelyDangerousTo)(pPlayer, pBCC);
 }
 #endif
 
@@ -10950,6 +11077,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	sizeofInfected = dictionary->FindFactory("infected")->GetEntitySize();
 #endif
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::Event_Killed", &CBaseCombatCharacterEvent_Killed);
 	
 	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
 	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
@@ -10978,6 +11106,15 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	SH_MANUALHOOK_RECONFIGURE(MyInfectedPointer, CBaseEntityMyInfectedPointer, 0, 0);
 	
 	g_pGameConf->GetOffset("NextBotCombatCharacter::GetNextBotCombatCharacter", &NextBotCombatCharacterGetNextBotCombatCharacter);
+	
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetClass", &offset);
+	SH_MANUALHOOK_RECONFIGURE(GetClass, offset, 0, 0);
+	
+	g_pGameConf->GetOffset("CBaseCombatCharacter::CanBeA", &CBaseCombatCharacterCanBeA);
+	SH_MANUALHOOK_RECONFIGURE(CanBeA, CBaseCombatCharacterCanBeA, 0, 0);
+	
+	g_pGameConf->GetOffset("CBaseEntity::Classify", &offset);
+	SH_MANUALHOOK_RECONFIGURE(Classify, offset, 0, 0);
 #endif
 
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
@@ -11012,6 +11149,12 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	pResolveZombieCollisions = DETOUR_CREATE_MEMBER(ResolveZombieCollisions, "ZombieBotLocomotion::ResolveZombieCollisions")
 	pResolveZombieCollisions->EnableDetour();
+	
+	pVocalize = DETOUR_CREATE_MEMBER(Vocalize, "Infected::Vocalize")
+	pVocalize->EnableDetour();
+	
+	pIsTankImmediatelyDangerousTo = DETOUR_CREATE_MEMBER(IsTankImmediatelyDangerousTo, "SurvivorIntention::IsTankImmediatelyDangerousTo")
+	pIsTankImmediatelyDangerousTo->EnableDetour();
 #endif
 	
 	sm_sendprop_info_t info{};
@@ -11045,6 +11188,10 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	plsys->AddPluginsListener(this);
 	
+#ifdef __HAS_DAMAGERULES
+	sharesys->AddDependency(myself, "damagerules.ext", false, true);
+#endif
+	
 	sharesys->RegisterLibrary(myself, "nextbot");
 
 	return true;
@@ -11066,22 +11213,37 @@ void Sample::OnPluginUnloaded(IPlugin *plugin)
 
 void Sample::SDK_OnAllLoaded()
 {
+#ifdef __HAS_DAMAGERULES
+	SM_GET_LATE_IFACE(DAMAGERULES, g_pDamageRules);
+#endif
 	sharesys->AddNatives(myself, natives);
 }
 
 bool Sample::QueryRunning(char *error, size_t maxlength)
 {
+#ifdef __HAS_DAMAGERULES
+	SM_CHECK_IFACE(DAMAGERULES, g_pDamageRules);
+#endif
 	return true;
 }
 
 bool Sample::QueryInterfaceDrop(SMInterface *pInterface)
 {
+#ifdef __HAS_DAMAGERULES
+	if(pInterface == g_pDamageRules)
+		return false;
+#endif
 	return IExtensionInterface::QueryInterfaceDrop(pInterface);
 }
 
 void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 {
-	
+#ifdef __HAS_DAMAGERULES
+	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_DAMAGERULES_NAME) == 0)
+	{
+		g_pDamageRules = NULL;
+	}
+#endif
 }
 
 void Sample::SDK_OnUnload()
@@ -11093,6 +11255,8 @@ void Sample::SDK_OnUnload()
 	pUpdateGroundConstraint->Destroy();
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	pResolveZombieCollisions->Destroy();
+	pVocalize->Destroy();
+	pIsTankImmediatelyDangerousTo->Destroy();
 #endif
 	plsys->RemovePluginsListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
