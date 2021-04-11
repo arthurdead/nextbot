@@ -196,6 +196,11 @@
 				"library" "server"
 				"linux" "@_ZNK17SurvivorIntention28IsTankImmediatelyDangerousToEPK13CTerrorPlayerP20CBaseCombatCharacter"
 			}
+			"ZombieBotLocomotion::TraverseLadder"
+			{
+				"library" "server"
+				"linux" "@_ZN19ZombieBotLocomotion14TraverseLadderEv"
+			}
 		}
 		"Offsets"
 		{
@@ -356,6 +361,11 @@
 			{
 				"library"	"server"
 				"linux"		"@_ZN7IVisionC2EP8INextBot"
+			}
+			"NextBotGroundLocomotion::TraverseLadder"
+			{
+				"library" "server"
+				"linux" "@_ZN23NextBotGroundLocomotion14TraverseLadderEv"
 			}
 		}
 	}

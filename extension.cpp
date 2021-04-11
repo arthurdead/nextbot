@@ -2705,7 +2705,7 @@ public:
 
 	}
 	
-	static IIntentionStub *create(INextBot *bot, bool reg)
+	static IIntentionStub *create(INextBot *bot, bool reg, IdentityToken_t *)
 	{
 		return new IIntentionStub(bot, reg);
 	}
@@ -3123,8 +3123,6 @@ void **infectedvtable = nullptr;
 
 class NextBotCombatCharacterInfected;
 
-#include <unordered_map>
-
 std::unordered_map<NextBotCombatCharacterInfected *, int> nbinfectclsmap{};
 
 class NextBotCombatCharacterInfected : public NextBotCombatCharacter
@@ -3347,8 +3345,8 @@ class SPAction;
 
 struct SPActionEntry
 {
-	SPActionEntry(std::string &&name_)
-		: name{std::move(name_)}
+	SPActionEntry(std::string &&name_, IdentityToken_t *id)
+		: name{std::move(name_)}, pId{id}
 	{
 	}
 	
@@ -3394,6 +3392,93 @@ struct SPActionEntry
 	IPluginFunction *actemote = nullptr;
 	IPluginFunction *pickup = nullptr;
 	
+	IdentityToken_t *pId = nullptr;
+	
+	bool set_function(const std::string &name, IPluginFunction *func)
+	{
+		if(name == "OnStart") {
+			onstart = func;
+		} else if(name == "Update") {
+			onupdate = func;
+		} else if(name == "OnSuspend") {
+			onsus = func;
+		} else if(name == "OnResume") {
+			onresume = func;
+		} else if(name == "OnEnd") {
+			onend = func;
+		} else if(name == "OnEnd") {
+			onend = func;
+		} else if(name == "InitialContainedAction") {
+			intialact = func;
+		} else if(name == "OnLandOnGround") {
+			landgrnd = func;
+		} else if(name == "OnContact") {
+			oncontact = func;
+		} else if(name == "OnAnimationActivityComplete") {
+			animcompl = func;
+		} else if(name == "OnAnimationActivityInterrupted") {
+			animinter = func;
+		} else if(name == "OnAnimationEvent") {
+			animevent = func;
+		} else if(name == "OnOtherKilled") {
+			otherkilled = func;
+		} else if(name == "OnSight") {
+			onsight = func;
+		} else if(name == "OnLostSight") {
+			onlosesight = func;
+		} else if(name == "OnShoved") {
+			shoved = func;
+		} else if(name == "OnBlinded") {
+			blinded = func;
+		} else if(name == "OnTerritoryContested") {
+			terrcontest = func;
+		} else if(name == "OnTerritoryCaptured") {
+			terrcap = func;
+		} else if(name == "OnTerritoryLost") {
+			terrlost = func;
+		} else if(name == "OnThreatChanged") {
+			threachngd = func;
+		} else if(name == "OnHitByVomitJar") {
+			hitvom = func;
+		} else if(name == "OnDrop") {
+			drop = func;
+		} else if(name == "OnMoveToSuccess") {
+			movesucc = func;
+		} else if(name == "OnStuck") {
+			stuck = func;
+		} else if(name == "OnUnStuck") {
+			unstuck = func;
+		} else if(name == "OnIgnite") {
+			ignite = func;
+		} else if(name == "OnInjured") {
+			injured = func;
+		} else if(name == "OnKilled") {
+			killed = func;
+		} else if(name == "OnWin") {
+			win = func;
+		} else if(name == "OnLose") {
+			lose = func;
+		} else if(name == "OnEnteredSpit") {
+			enterspit = func;
+		} else if(name == "OnModelChanged") {
+			mdlchnd = func;
+		} else if(name == "OnMoveToFailure") {
+			movefail = func;
+		} else if(name == "OnSound") {
+			sound = func;
+		} else if(name == "OnWeaponFired") {
+			wepfired = func;
+		} else if(name == "OnActorEmoted") {
+			actemote = func;
+		} else if(name == "OnPickUp") {
+			pickup = func;
+		} else {
+			return false;
+		}
+		
+		return true;
+	}
+	
 	Handle_t hndl = BAD_HANDLE;
 	IPluginContext *pContext = nullptr;
 	
@@ -3421,6 +3506,8 @@ struct SPActionEntry
 #define RESVARS_SIZE (RESVARS_REASON_SIZE+2)
 
 #include <npcevent.h>
+
+using spvarmap_t = std::unordered_map<std::string, std::vector<cell_t>>;
 
 class SPAction : public Action<SPActor>
 {
@@ -3462,7 +3549,7 @@ public:
 	}
 	
 	SPActionEntry *entry = nullptr;
-	std::unordered_map<std::string, cell_t> data{};
+	spvarmap_t data{};
 	std::string name{};
 	
 	virtual BaseClass *InitialContainedAction(SPActor *me)
@@ -4475,36 +4562,107 @@ SPAction *SPActionEntry::create()
 	return action;
 }
 
-class IIntentionCustom;
+class IPluginNextBotComponent;
 
-std::vector<IIntentionCustom *> customintentions{};
+std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> spnbcomponents{};
 
-#define IS_ANY_HINDRANCE_POSSIBLE	( (CBaseEntity*)0xFFFFFFFF )
-
-class IIntentionCustom : public IIntention
+class IPluginNextBotComponent
 {
 public:
-	IIntentionCustom( INextBot *bot, bool reg, IPluginFunction *initact_, IdentityToken_t *id )
-		: IIntention( bot, reg )
+	IPluginNextBotComponent(IdentityToken_t *id)
+		: pId{id}
 	{
-		pId = id;
-		customintentions.emplace_back(this);
-		initact = initact_;
-		m_behavior = new SPBehavior( initialaction(bot) );
+		spnbcomponents[pId].emplace_back(this);
 	}
-	virtual ~IIntentionCustom()
+	
+	virtual ~IPluginNextBotComponent()
 	{
-		delete m_behavior;
+		std::vector<IPluginNextBotComponent *> &vec = spnbcomponents[pId];
 		
-		auto it = customintentions.begin();
-		while(it != customintentions.end()) {
+		auto it = vec.begin();
+		while(it != vec.end()) {
 			if(*it == this) {
-				customintentions.erase(it);
+				vec.erase(it);
 				break;
 			}
 			
 			++it;
 		}
+	}
+	
+	cell_t handle_set_function(IPluginContext *pContext, const cell_t *params)
+	{
+		if(pId != pContext->GetIdentity()) {
+			return pContext->ThrowNativeError("this plugin doenst own this component");
+		}
+		
+		char *name = nullptr;
+		pContext->LocalToString(params[2], &name);
+		
+		IPluginFunction *func = pContext->GetFunctionById(params[3]);
+		
+		if(!set_function(name, func)) {
+			return pContext->ThrowNativeError("invalid name %s", name);
+		}
+		
+		return 0;
+	}
+	
+	virtual void plugin_unloaded()
+	{
+		pId = nullptr;
+	}
+	
+	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	{ return false; }
+	
+	IdentityToken_t *pId = nullptr;
+	
+	spvarmap_t data{};
+};
+
+#define IS_ANY_HINDRANCE_POSSIBLE	( (CBaseEntity*)0xFFFFFFFF )
+
+class IIntentionCustom : public IIntention, public IPluginNextBotComponent
+{
+public:
+	IIntentionCustom( INextBot *bot, bool reg, IdentityToken_t *id, IPluginFunction *initact_ )
+		: IIntention( bot, reg ), IPluginNextBotComponent{id}
+	{
+		initact = initact_;
+		m_behavior = new SPBehavior( initialaction(bot) );
+	}
+	
+	template <typename... Args>
+	static IIntentionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id, Args &&... args)
+	{
+		return new IIntentionCustom(bot, reg, id, std::forward<Args>(args)...);
+	}
+	
+	virtual ~IIntentionCustom()
+	{
+		delete m_behavior;
+	}
+	
+	virtual void plugin_unloaded()
+	{
+		IPluginNextBotComponent::plugin_unloaded();
+		
+		initact = nullptr;
+		ishinder = nullptr;
+	}
+	
+	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	{
+		if(name == "InitialContainedAction") {
+			initact = func;
+		} else if(name == "IsHindrance") {
+			ishinder = func;
+		} else {
+			return false;
+		}
+		
+		return true;
 	}
 	
 	SPAction *initialaction(INextBot *bot)
@@ -4545,13 +4703,6 @@ public:
 		return ANSWER_UNDEFINED;
 	}
 	
-	void plugin_unloaded()
-	{
-		initact = nullptr;
-		ishinder = nullptr;
-		pId = nullptr;
-	}
-	
 	virtual void Reset( void )
 	{
 		IIntention::Reset();
@@ -4574,13 +4725,6 @@ public:
 	
 	IPluginFunction *initact = nullptr;
 	IPluginFunction *ishinder = nullptr;
-	IdentityToken_t *pId = nullptr;
-	
-	template <typename... Args>
-	static IIntentionCustom *create(INextBot *bot, bool reg, Args &&... args)
-	{
-		return new IIntentionCustom(bot, reg, std::forward<Args>(args)...);
-	}
 };
 
 SPActionEntry::~SPActionEntry()
@@ -4824,10 +4968,16 @@ SH_DECL_HOOK0(ILocomotion, GetMaxDeceleration, SH_NOATTRIB, 0, float);
 #endif
 SH_DECL_HOOK0(ILocomotion, GetSpeedLimit, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetTraversableSlopeLimit, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0_void(ILocomotion, Update, SH_NOATTRIB, 0);
 
-struct customlocomotion_base_vars_t
+bool g_bInCustomLocomotion = false;
+
+struct customlocomotion_base_vars_t : IPluginNextBotComponent
 {
 public:
+	customlocomotion_base_vars_t(IdentityToken_t *id)
+		: IPluginNextBotComponent{id} {}
+	
 	virtual ~customlocomotion_base_vars_t() {}
 	
 	float step = 18.0f;
@@ -4841,9 +4991,50 @@ public:
 #endif
 	float limit = 99999999.9f;
 	float slope = 0.6f;
+	spvarmap_t data{};
+	
+	virtual void plugin_unloaded()
+	{
+		IPluginNextBotComponent::plugin_unloaded();
+	}
+	
+	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	{
+		return false;
+	}
+	
+	void HookUpdate()
+	{
+		ILocomotion *loc = META_IFACEPTR(ILocomotion);
+		g_bInCustomLocomotion = true;
+		SH_CALL(loc, &ILocomotion::Update)();
+		g_bInCustomLocomotion = false;
+		RETURN_META(MRES_SUPERCEDE);
+	}
+	
+	virtual void remove_hooks(ILocomotion *bytes)
+	{
+		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
+	
+		SH_REMOVE_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
+		SH_REMOVE_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false);
+		SH_REMOVE_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetDeathDropHeight), false);
+		SH_REMOVE_HOOK(ILocomotion, GetRunSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetRunSpeed), false);
+		SH_REMOVE_HOOK(ILocomotion, GetWalkSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetWalkSpeed), false);
+#if SOURCE_ENGINE == SE_TF2
+		SH_REMOVE_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxAcceleration), false);
+		SH_REMOVE_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxDeceleration), false);
+#endif
+		SH_REMOVE_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetSpeedLimit), false);
+		SH_REMOVE_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetTraversableSlopeLimit), false);
+	}
 	
 	void dtor()
 	{
+		ILocomotion *loc = META_IFACEPTR(ILocomotion);
+		
+		remove_hooks(loc);
+		
 		this->~customlocomotion_base_vars_t();
 		
 		RETURN_META(MRES_IGNORED);
@@ -4870,7 +5061,7 @@ public:
 	float HookGetTraversableSlopeLimit()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, slope); }
 	
-	void add_hooks(ILocomotion *bytes)
+	virtual void add_hooks(ILocomotion *bytes)
 	{
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
 	
@@ -4953,20 +5144,92 @@ void CNavArea::DrawFilled( int r, int g, int b, int a, float deltaT, bool noDept
 }
 
 #if SOURCE_ENGINE == SE_TF2
+SH_DECL_HOOK0(NextBotGroundLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
+#define GameLocomotion NextBotGroundLocomotion
+#define GameLocomotionCustom NextBotGroundLocomotionCustom
+#define SH_ADD_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
+	SH_ADD_HOOK(NextBotGroundLocomotion, x2, x3, x4, x5);
+#define SH_REMOVE_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
+	SH_REMOVE_HOOK(NextBotGroundLocomotion, x2, x3, x4, x5);
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+SH_DECL_HOOK0(ZombieBotLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
+#define GameLocomotion ZombieBotLocomotion
+#define GameLocomotionCustom ZombieBotLocomotionCustom
+#define SH_ADD_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
+	SH_ADD_HOOK(ZombieBotLocomotion, x2, x3, x4, x5);
+#define SH_REMOVE_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
+	SH_REMOVE_HOOK(ZombieBotLocomotion, x2, x3, x4, x5);
+#endif
+
+struct customlocomotion_vars_t : customlocomotion_base_vars_t
+{
+	customlocomotion_vars_t(IdentityToken_t *id)
+		: customlocomotion_base_vars_t{id} {}
+	
+	float yaw = 250.0f;
+	
+	IPluginFunction *travladdr = nullptr;
+	
+	float HookGetMaxYawRate()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, yaw); }
+	
+	virtual void plugin_unloaded()
+	{
+		customlocomotion_base_vars_t::plugin_unloaded();
+		
+		travladdr = nullptr;
+	}
+	
+	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	{
+		if(customlocomotion_base_vars_t::set_function(name, func)) {
+			return true;
+		}
+		
+		if(name == "TraverseLadder") {
+			travladdr = func;
+		} else {
+			return false;
+		}
+		
+		return true;
+	}
+	
+	virtual void remove_hooks(ILocomotion *loc)
+	{
+		customlocomotion_base_vars_t::remove_hooks(loc);
+		
+		GameLocomotion *gameloc = (GameLocomotion *)loc;
+		
+		SH_REMOVE_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
+	}
+	
+	virtual void add_hooks(ILocomotion *loc)
+	{
+		customlocomotion_base_vars_t::add_hooks(loc);
+		
+		GameLocomotion *gameloc = (GameLocomotion *)loc;
+		
+		SH_ADD_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
+	}
+};
+
+#if SOURCE_ENGINE == SE_TF2
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetGravity, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionForward, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(NextBotGroundLocomotion, GetFrictionSideways, SH_NOATTRIB, 0, float);
-SH_DECL_HOOK0(NextBotGroundLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
 
 class NextBotGroundLocomotionCustom : public NextBotGroundLocomotion
 {
 public:
-	struct vars_t : customlocomotion_base_vars_t
+	struct vars_t : customlocomotion_vars_t
 	{
+		vars_t(IdentityToken_t *id)
+			: customlocomotion_vars_t{id} {}
+		
 		float gravity = 1000.0f;
 		float fricforward = 0.0f;
 		float fricsideway = 3.0f;
-		float yaw = 250.0f;
 	};
 	
 	float HookGetGravity()
@@ -4975,8 +5238,6 @@ public:
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricforward); }
 	float HookGetFrictionSideways()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricsideway); }
-	float HookGetMaxYawRate()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().yaw); }
 	
 	unsigned char *vars_ptr()
 	{ return (((unsigned char *)this) + sizeof(NextBotGroundLocomotion)); }
@@ -5284,19 +5545,18 @@ public:
 	
 	static bool vtable_assigned;
 	
-	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg)
+	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
 	{
 		NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeof(NextBotGroundLocomotion) + sizeof(vars_t));
 		call_mfunc<void, NextBotGroundLocomotion, INextBot *>(bytes, NextBotGroundLocomotionCTOR, bot);
 		
-		new (bytes->vars_ptr()) vars_t();
+		new (bytes->vars_ptr()) vars_t(id);
 		
 		bytes->getvars().add_hooks(bytes);
 		
 		SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetGravity), false);
 		SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
 		SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionSideways), false);
-		SH_ADD_HOOK(NextBotGroundLocomotion, GetMaxYawRate, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetMaxYawRate), false);
 		
 		if(!vtable_assigned) {
 			void **vtable = *(void ***)bytes;
@@ -5335,34 +5595,28 @@ DETOUR_DECL_MEMBER0(UpdateGroundConstraint, void)
 	((NextBotGroundLocomotionCustom *)this)->HookUpdateGroundConstraint();
 }
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-SH_DECL_HOOK0(ZombieBotLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
-
 class ZombieBotLocomotionCustom : public ZombieBotLocomotion
 {
 public:
-	struct vars_t : customlocomotion_base_vars_t
+	struct vars_t : customlocomotion_vars_t
 	{
-		float yaw = 250.0f;
+		vars_t(IdentityToken_t *id)
+			: customlocomotion_vars_t{id} {}
 	};
-	
-	float HookGetMaxYawRate()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().yaw); }
 	
 	unsigned char *vars_ptr()
 	{ return (((unsigned char *)this) + sizeof(ZombieBotLocomotion)); }
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
-	static ZombieBotLocomotionCustom *create(INextBot *bot, bool reg)
+	static ZombieBotLocomotionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
 	{
 		ZombieBotLocomotionCustom *bytes = (ZombieBotLocomotionCustom *)calloc(1, sizeof(ZombieBotLocomotion) + sizeof(vars_t));
 		call_mfunc<void, ZombieBotLocomotion, INextBot *>(bytes, ZombieBotLocomotionCTOR, bot);
 		
-		new (bytes->vars_ptr()) vars_t();
+		new (bytes->vars_ptr()) vars_t(id);
 		
 		bytes->getvars().add_hooks(bytes);
-		
-		SH_ADD_HOOK(ZombieBotLocomotion, GetMaxYawRate, bytes, SH_MEMBER(bytes, &ZombieBotLocomotionCustom::HookGetMaxYawRate), false);
 		
 		if(!reg) {
 			bot->m_componentList = bytes->m_nextComponent;
@@ -5373,6 +5627,26 @@ public:
 	}
 };
 #endif
+
+DETOUR_DECL_MEMBER0(TraverseLadder, bool)
+{
+	if(!g_bInCustomLocomotion) {
+		return DETOUR_MEMBER_CALL(TraverseLadder)();
+	}
+	
+	GameLocomotionCustom *gameloc = (GameLocomotionCustom *)this;
+	
+	IPluginFunction *travladdr = gameloc->getvars().travladdr;
+	if(!travladdr) {
+		return DETOUR_MEMBER_CALL(TraverseLadder)();
+	}
+	
+	travladdr->PushCell((cell_t)this);
+	cell_t res = false;
+	travladdr->Execute(&res);
+	
+	return res;
+}
 
 SH_DECL_HOOK0(INextBot, GetEntity, SH_NOATTRIB, 0, CBaseCombatCharacter *);
 SH_DECL_HOOK0(INextBot, GetNextBotCombatCharacter, SH_NOATTRIB, 0, NextBotCombatCharacter *);
@@ -5422,10 +5696,12 @@ INextBotComponent::~INextBotComponent()
 	m_bot->UnregisterComponent( this );
 }
 
-class IBodyCustom : public IBody
+class IBodyCustom : public IBody, public IPluginNextBotComponent
 {
 public:
-	IBodyCustom( INextBot *bot, bool reg ) : IBody( bot, reg ) {
+	IBodyCustom( INextBot *bot, bool reg, IdentityToken_t *id )
+		: IBody( bot, reg ), IPluginNextBotComponent(id)
+	{
 		
 		HullWidth = 26.0f;
 		HullHeight = 68.0f;
@@ -5482,9 +5758,9 @@ public:
 	unsigned int GetCollisionGroup( void ) override { return CollisionGroup; }
 #endif
 
-	static IBodyCustom *create(INextBot *bot, bool reg)
+	static IBodyCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
 	{
-		return new IBodyCustom(bot, reg);
+		return new IBodyCustom(bot, reg, id);
 	}
 };
 
@@ -5494,62 +5770,116 @@ SH_DECL_HOOK0(IVision, GetMinRecognizeTime, SH_NOATTRIB, 0, float);
 #endif
 SH_DECL_HOOK0(IVision, GetDefaultFieldOfView, SH_NOATTRIB, 0, float);
 
-#if SOURCE_ENGINE == SE_TF2
-class IVisionCustom : public IVision
-{
-public:
-	typedef IVision BaseClass;
-	typedef IVisionCustom ThisClass;
-	
-	static void *getctorptr() { return IVisionCTOR; }
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
 class ZombieBotVision : public IVision
 {
 public:
 	char pad1[36];
 };
+#endif
 
-class ZombieBotVisionCustom : public ZombieBotVision
+#if SOURCE_ENGINE == SE_TF2
+#define GameVision IVision
+#define GameVisionCustom IVisionCustom
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+#define GameVision ZombieBotVision
+#define GameVisionCustom ZombieBotVisionCustom
+#endif
+
+struct customvision_base_vars_t : IPluginNextBotComponent
 {
 public:
-	typedef ZombieBotVision BaseClass;
-	typedef ZombieBotVisionCustom ThisClass;
+	customvision_base_vars_t(IdentityToken_t *id)
+		: IPluginNextBotComponent{id} {}
 	
+	virtual ~customvision_base_vars_t() {}
+	
+#if SOURCE_ENGINE == SE_TF2
+	float maxrange = 2000.0;
+	float minreco = 0.0;
+#endif
+	float deffov = 90.0;
+	spvarmap_t data{};
+	
+	virtual void plugin_unloaded()
+	{
+		IPluginNextBotComponent::plugin_unloaded();
+	}
+	
+	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	{
+		return false;
+	}
+	
+	virtual void remove_hooks(IVision *bytes)
+	{
+		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customvision_base_vars_t::dtor), false);
+	
+#if SOURCE_ENGINE == SE_TF2
+		SH_REMOVE_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMaxVisionRange), false);
+		SH_REMOVE_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMinRecognizeTime), false);
+#endif
+		SH_REMOVE_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetDefaultFieldOfView), false);
+	}
+	
+	void dtor()
+	{
+		IVision *loc = META_IFACEPTR(IVision);
+		
+		remove_hooks(loc);
+		
+		this->~customvision_base_vars_t();
+		
+		RETURN_META(MRES_IGNORED);
+	}
+	
+#if SOURCE_ENGINE == SE_TF2
+	float HookGetMaxVisionRange() { RETURN_META_VALUE(MRES_SUPERCEDE, maxrange); }
+	float HookGetMinRecognizeTime() { RETURN_META_VALUE(MRES_SUPERCEDE, minreco); }
+#endif
+	float HookGetDefaultFieldOfView() { RETURN_META_VALUE(MRES_SUPERCEDE, deffov); }
+	
+	virtual void add_hooks(IVision *bytes)
+	{
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customvision_base_vars_t::dtor), false);
+	
+#if SOURCE_ENGINE == SE_TF2
+		SH_ADD_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMaxVisionRange), false);
+		SH_ADD_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMinRecognizeTime), false);
+#endif
+		SH_ADD_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetDefaultFieldOfView), false);
+	}
+};
+
+class GameVisionCustom : public GameVision
+{
+public:
+#if SOURCE_ENGINE == SE_TF2
+	static void *getctorptr() { return IVisionCTOR; }
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	static void *getctorptr() { return ZombieBotVisionCTOR; }
 #endif
-	struct vars_t
+
+	struct vars_t : customvision_base_vars_t
 	{
-#if SOURCE_ENGINE == SE_TF2
-		float maxrange = 2000.0;
-		float minreco = 0.0;
-#endif
-		float deffov = 90.0;
+		vars_t(IdentityToken_t *id)
+			: customvision_base_vars_t{id} {}
 	};
 	
 	unsigned char *vars_ptr()
-	{ return (((unsigned char *)this) + sizeof(BaseClass)); }
+	{ return (((unsigned char *)this) + sizeof(GameVision)); }
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
-#if SOURCE_ENGINE == SE_TF2
-	float HookGetMaxVisionRange() { RETURN_META_VALUE(MRES_SUPERCEDE, getvars().maxrange); }
-	float HookGetMinRecognizeTime() { RETURN_META_VALUE(MRES_SUPERCEDE, getvars().minreco); }
-#endif
-	float HookGetDefaultFieldOfView() { RETURN_META_VALUE(MRES_SUPERCEDE, getvars().deffov); }
-	
-	static ThisClass *create(INextBot *bot, bool reg)
+	static GameVisionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
 	{
-		ThisClass *bytes = (ThisClass *)calloc(1, sizeof(BaseClass) + sizeof(vars_t));
-		call_mfunc<void, BaseClass, INextBot *>(bytes, getctorptr(), bot);
+		GameVisionCustom *bytes = (GameVisionCustom *)calloc(1, sizeof(GameVision) + sizeof(vars_t));
+		call_mfunc<void, GameVision, INextBot *>(bytes, getctorptr(), bot);
 		
-		new (bytes->vars_ptr()) vars_t();
+		new (bytes->vars_ptr()) vars_t(id);
 		
-#if SOURCE_ENGINE == SE_TF2
-		SH_ADD_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(bytes, &ThisClass::HookGetMaxVisionRange), false);
-		SH_ADD_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(bytes, &ThisClass::HookGetMinRecognizeTime), false);
-#endif
-		SH_ADD_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(bytes, &ThisClass::HookGetDefaultFieldOfView), false);
-		
+		bytes->getvars().add_hooks(bytes);
+
 		if(!reg) {
 			bot->m_componentList = bytes->m_nextComponent;
 			bytes->m_nextComponent = nullptr;
@@ -8489,7 +8819,7 @@ cell_t INextBotAllocateCustomComponent(IPluginContext *pContext, const cell_t *p
 {
 	INextBot *bot = (INextBot *)params[1];
 	
-	T *locomotion = T::create(bot, false, std::forward<Args>(args)...);
+	T *locomotion = T::create(bot, false, pContext->GetIdentity(), std::forward<Args>(args)...);
 	
 	auto old = (bot->*getfunc)();
 	
@@ -8603,8 +8933,7 @@ cell_t INextBotStubIntention(IPluginContext *pContext, const cell_t *params)
 cell_t INextBotAllocateCustomIntention(IPluginContext *pContext, const cell_t *params)
 {
 	IPluginFunction *initact = pContext->GetFunctionById(params[2]);
-	
-	return INextBotAllocateIntention<IIntentionCustom>(pContext, params, initact, pContext->GetIdentity());
+	return INextBotAllocateIntention<IIntentionCustom>(pContext, params, initact);
 }
 
 cell_t PathLengthget(IPluginContext *pContext, const cell_t *params)
@@ -9272,6 +9601,18 @@ cell_t ILocomotionAttemptingToMoveget(IPluginContext *pContext, const cell_t *pa
 	return area->IsAttemptingToMove();
 }
 
+cell_t ILocomotionUsingLadderget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return area->IsUsingLadder();
+}
+
+cell_t ILocomotionAscendingOrDescendingLadderget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return area->IsAscendingOrDescendingLadder();
+}
+
 cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -9494,6 +9835,149 @@ cell_t ILocomotionDriveTo(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
+cell_t handle_set_data(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{data.find(name)};
+	if(it == data.end()) {
+		it = data.emplace(spvarmap_t::value_type{name, {}}).first;
+	}
+	
+	std::vector<cell_t> &vec = it->second;
+	if(vec.size() == 0) {
+		vec.resize(1);
+	}
+	
+	vec[0] = params[3];
+	
+	return 0;
+}
+
+cell_t handle_get_data(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{data.find(name)};
+	if(it == data.end() || it->second.size() == 0) {
+		return pContext->ThrowNativeError("theres no data with the name %s", name);
+	}
+	
+	return it->second[0];
+}
+
+cell_t handle_set_data_array(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{data.find(name)};
+	if(it == data.end()) {
+		it = data.emplace(spvarmap_t::value_type{name, {}}).first;
+	}
+	
+	std::vector<cell_t> &vec = it->second;
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	
+	size_t len = params[4];
+	vec.resize(len);
+	for(int i = 0; i < len; ++i) {
+		vec[i] = addr[i];
+	}
+	
+	return 0;
+}
+
+cell_t handle_get_data_array(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{data.find(name)};
+	if(it == data.end()) {
+		it = data.emplace(spvarmap_t::value_type{name, {}}).first;
+	}
+	
+	std::vector<cell_t> &vec = it->second;
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	
+	size_t len = params[4];
+	vec.resize(len);
+	for(int i = 0; i < len; ++i) {
+		addr[i] = vec[i];
+	}
+	
+	return 0;
+}
+
+template <typename T>
+cell_t CustomComponentset_function(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return vars.handle_set_function(pContext, params);
+}
+
+template <typename T>
+cell_t CustomComponentset_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return handle_set_data(pContext, params, vars.data);
+}
+
+template <typename T>
+cell_t CustomComponentget_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return handle_get_data(pContext, params, vars.data);
+}
+
+template <typename T>
+cell_t CustomComponentset_data_array(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return handle_set_data_array(pContext, params, vars.data);
+}
+
+template <typename T>
+cell_t CustomComponentget_data_array(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return handle_get_data_array(pContext, params, vars.data);
+}
+
+cell_t GameLocomotionCustomset_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_function<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomset_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_data<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomget_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_data<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_data_array<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_data_array<GameLocomotionCustom>(pContext, params); }
+
+cell_t GameVisionCustomset_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_function<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomset_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_data<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomget_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_data<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_data_array<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_data_array<GameVisionCustom>(pContext, params); }
+
 #if SOURCE_ENGINE == SE_TF2
 cell_t NextBotGroundLocomotionGravityget(IPluginContext *pContext, const cell_t *params)
 {
@@ -9511,12 +9995,6 @@ cell_t NextBotGroundLocomotionFrictionSidewaysget(IPluginContext *pContext, cons
 {
 	NextBotGroundLocomotion *area = (NextBotGroundLocomotion *)params[1];
 	return sp_ftoc(area->GetFrictionSideways());
-}
-
-cell_t NextBotGroundLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotion *area = (NextBotGroundLocomotion *)params[1];
-	return sp_ftoc(area->GetMaxYawRate());
 }
 
 cell_t NextBotGroundLocomotionCustomGravityset(IPluginContext *pContext, const cell_t *params)
@@ -9539,43 +10017,22 @@ cell_t NextBotGroundLocomotionCustomFrictionSidewaysset(IPluginContext *pContext
 	locomotion->getvars().fricsideway = sp_ctof(params[2]);
 	return 0;
 }
+#endif
 
-cell_t NextBotGroundLocomotionCustomMaxYawRateset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *params)
 {
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().yaw = sp_ctof(params[2]);
-	return 0;
-}
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-cell_t ZombieBotLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *params)
-{
-	ZombieBotLocomotion *area = (ZombieBotLocomotion *)params[1];
+	GameLocomotion *area = (GameLocomotion *)params[1];
 	return sp_ftoc(area->GetMaxYawRate());
 }
 
-cell_t ZombieBotLocomotionCustomMaxYawRateset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomMaxYawRateset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().yaw = sp_ctof(params[2]);
 	return 0;
 }
-#endif
 
 #if SOURCE_ENGINE == SE_TF2
-cell_t NextBotGoundLocomotionCustomSpeedLimitset(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().limit = sp_ctof(params[2]);
-	return 0;
-}
-
-cell_t NextBotGoundLocomotionCustomTraversableSlopeLimitset(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().slope = sp_ctof(params[2]);
-	return 0;
-}
-
 cell_t NextBotGoundLocomotionCustomMaxAccelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
@@ -9589,91 +10046,79 @@ cell_t NextBotGoundLocomotionCustomMaxDecelerationset(IPluginContext *pContext, 
 	locomotion->getvars().deaccel = sp_ctof(params[2]);
 	return 0;
 }
+#endif
 
-cell_t NextBotGoundLocomotionCustomRunSpeedset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomSpeedLimitset(IPluginContext *pContext, const cell_t *params)
 {
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().run = sp_ctof(params[2]);
-	return 0;
-}
-
-cell_t NextBotGoundLocomotionCustomWalkSpeedset(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().walk = sp_ctof(params[2]);
-	return 0;
-}
-
-cell_t NextBotGoundLocomotionCustomMaxJumpHeightset(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().jump = sp_ctof(params[2]);
-	return 0;
-}
-
-cell_t NextBotGoundLocomotionCustomDeathDropHeightset(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().death = sp_ctof(params[2]);
-	return 0;
-}
-
-cell_t NextBotGoundLocomotionCustomStepHeightset(IPluginContext *pContext, const cell_t *params)
-{
-	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().step = sp_ctof(params[2]);
-	return 0;
-}
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-cell_t ZombieBotLocomotionCustomSpeedLimitset(IPluginContext *pContext, const cell_t *params)
-{
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().limit = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t ZombieBotLocomotionCustomTraversableSlopeLimitset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomTraversableSlopeLimitset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().slope = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t ZombieBotLocomotionCustomRunSpeedset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomRunSpeedset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().run = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t ZombieBotLocomotionCustomWalkSpeedset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomWalkSpeedset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().walk = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t ZombieBotLocomotionCustomMaxJumpHeightset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomMaxJumpHeightset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().jump = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t ZombieBotLocomotionCustomDeathDropHeightset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomDeathDropHeightset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().death = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t ZombieBotLocomotionCustomStepHeightset(IPluginContext *pContext, const cell_t *params)
+cell_t GameLocomotionCustomStepHeightset(IPluginContext *pContext, const cell_t *params)
 {
-	ZombieBotLocomotionCustom *locomotion = (ZombieBotLocomotionCustom *)params[1];
+	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().step = sp_ctof(params[2]);
 	return 0;
 }
+
+#if SOURCE_ENGINE == SE_TF2
+cell_t GameVisionCustomMaxVisionRangeset(IPluginContext *pContext, const cell_t *params)
+{
+	GameVisionCustom *locomotion = (GameVisionCustom *)params[1];
+	locomotion->getvars().maxrange = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t GameVisionCustomMinRecognizeTimeset(IPluginContext *pContext, const cell_t *params)
+{
+	GameVisionCustom *locomotion = (GameVisionCustom *)params[1];
+	locomotion->getvars().minreco = sp_ctof(params[2]);
+	return 0;
+}
 #endif
+
+cell_t GameVisionCustomDefaultFieldOfViewset(IPluginContext *pContext, const cell_t *params)
+{
+	GameVisionCustom *locomotion = (GameVisionCustom *)params[1];
+	locomotion->getvars().deffov = sp_ctof(params[2]);
+	return 0;
+}
 
 cell_t IBodyCustomHullWidthset(IPluginContext *pContext, const cell_t *params)
 {
@@ -10352,7 +10797,7 @@ cell_t BehaviorActionEntryCTOR(IPluginContext *pContext, const cell_t *params)
 	
 	std::string str{name};
 	
-	SPActionEntry *obj = new SPActionEntry{std::move(name)};
+	SPActionEntry *obj = new SPActionEntry{std::move(name), pContext->GetIdentity()};
 	Handle_t hndl = handlesys->CreateHandle(BehaviorEntryHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
 	obj->hndl = hndl;
 	obj->pContext = pContext;
@@ -10371,86 +10816,16 @@ cell_t BehaviorActionEntryset_function(IPluginContext *pContext, const cell_t *p
 		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
 	}
 	
+	if(obj->pId != pContext->GetIdentity()) {
+		return pContext->ThrowNativeError("this plugin doenst own this entry");
+	}
+	
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
 	IPluginFunction *func = pContext->GetFunctionById(params[3]);
 	
-	if(stricmp(name, "OnStart") == 0) {
-		obj->onstart = func;
-	} else if(stricmp(name, "Update") == 0) {
-		obj->onupdate = func;
-	} else if(stricmp(name, "OnSuspend") == 0) {
-		obj->onsus = func;
-	} else if(stricmp(name, "OnResume") == 0) {
-		obj->onresume = func;
-	} else if(stricmp(name, "OnEnd") == 0) {
-		obj->onend = func;
-	} else if(stricmp(name, "OnLeaveGround") == 0) {
-		obj->leavegrnd = func;
-	} else if(stricmp(name, "OnLandOnGround") == 0) {
-		obj->landgrnd = func;
-	} else if(stricmp(name, "OnContact") == 0) {
-		obj->oncontact = func;
-	} else if(stricmp(name, "OnAnimationActivityComplete") == 0) {
-		obj->animcompl = func;
-	} else if(stricmp(name, "OnAnimationActivityInterrupted") == 0) {
-		obj->animinter = func;
-	} else if(stricmp(name, "OnAnimationEvent") == 0) {
-		obj->animevent = func;
-	} else if(stricmp(name, "OnOtherKilled") == 0) {
-		obj->otherkilled = func;
-	} else if(stricmp(name, "OnSight") == 0) {
-		obj->onsight = func;
-	} else if(stricmp(name, "OnLostSight") == 0) {
-		obj->onlosesight = func;
-	} else if(stricmp(name, "OnShoved") == 0) {
-		obj->shoved = func;
-	} else if(stricmp(name, "OnBlinded") == 0) {
-		obj->blinded = func;
-	} else if(stricmp(name, "OnTerritoryContested") == 0) {
-		obj->terrcontest = func;
-	} else if(stricmp(name, "OnTerritoryCaptured") == 0) {
-		obj->terrcap = func;
-	} else if(stricmp(name, "OnTerritoryLost") == 0) {
-		obj->terrlost = func;
-	} else if(stricmp(name, "OnThreatChanged") == 0) {
-		obj->threachngd = func;
-	} else if(stricmp(name, "OnHitByVomitJar") == 0) {
-		obj->hitvom = func;
-	} else if(stricmp(name, "OnDrop") == 0) {
-		obj->drop = func;
-	} else if(stricmp(name, "OnMoveToSuccess") == 0) {
-		obj->movesucc = func;
-	} else if(stricmp(name, "OnStuck") == 0) {
-		obj->stuck = func;
-	} else if(stricmp(name, "OnUnStuck") == 0) {
-		obj->unstuck = func;
-	} else if(stricmp(name, "OnIgnite") == 0) {
-		obj->ignite = func;
-	} else if(stricmp(name, "OnInjured") == 0) {
-		obj->injured = func;
-	} else if(stricmp(name, "OnKilled") == 0) {
-		obj->killed = func;
-	} else if(stricmp(name, "OnWin") == 0) {
-		obj->win = func;
-	} else if(stricmp(name, "OnLose") == 0) {
-		obj->lose = func;
-	} else if(stricmp(name, "OnEnteredSpit") == 0) {
-		obj->enterspit = func;
-	} else if(stricmp(name, "OnModelChanged") == 0) {
-		obj->mdlchnd = func;
-	} else if(stricmp(name, "OnMoveToFailure") == 0) {
-		obj->movefail = func;
-	} else if(stricmp(name, "OnSound") == 0) {
-		obj->sound = func;
-	} else if(stricmp(name, "OnWeaponFired") == 0) {
-		obj->wepfired = func;
-	} else if(stricmp(name, "OnActorEmoted") == 0) {
-		obj->actemote = func;
-	} else if(stricmp(name, "OnPickUp") == 0) {
-		obj->pickup = func;
-	} else {
+	if(!obj->set_function(name, func)) {
 		return pContext->ThrowNativeError("invalid name %s", name);
 	}
 	
@@ -10482,38 +10857,6 @@ cell_t BehaviorActionEntryget(IPluginContext *pContext, const cell_t *params)
 	return obj->entry->hndl;
 }
 
-cell_t BehaviorActionset_data(IPluginContext *pContext, const cell_t *params)
-{
-	SPAction *obj = (SPAction *)params[1];
-	
-	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
-	
-	auto it{obj->data.find(name)};
-	if(it == obj->data.end()) {
-		it = obj->data.emplace(std::pair<std::string, cell_t>{name, 0}).first;
-	}
-	
-	it->second = params[3];
-	
-	return 0;
-}
-
-cell_t BehaviorActionget_data(IPluginContext *pContext, const cell_t *params)
-{
-	SPAction *obj = (SPAction *)params[1];
-	
-	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
-	
-	auto it{obj->data.find(name)};
-	if(it == obj->data.end()) {
-		return pContext->ThrowNativeError("theres no data with the name %s", name);
-	}
-	
-	return it->second;
-}
-
 cell_t IIntentionCustomResetBehavior(IPluginContext *pContext, const cell_t *params)
 {
 	IIntentionCustom *obj = (IIntentionCustom *)params[1];
@@ -10524,29 +10867,71 @@ cell_t IIntentionCustomResetBehavior(IPluginContext *pContext, const cell_t *par
 	return 0;
 }
 
-cell_t IIntentionCustomset_function(IPluginContext *pContext, const cell_t *params)
+template <typename T>
+cell_t Componentset_function(IPluginContext *pContext, const cell_t *params)
 {
-	IIntentionCustom *obj = (IIntentionCustom *)params[1];
-	
-	if(obj->pId != pContext->GetIdentity()) {
-		return pContext->ThrowNativeError("this plugin doenst own this intention");
-	}
-	
-	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
-	
-	IPluginFunction *func = pContext->GetFunctionById(params[3]);
-	
-	if(stricmp(name, "InitialContainedAction") == 0) {
-		obj->initact = func;
-	} else if(stricmp(name, "IsHindrance") == 0) {
-		obj->ishinder = func;
-	} else {
-		return pContext->ThrowNativeError("invalid name %s", name);
-	}
-	
-	return 0;
+	T *locomotion = (T *)params[1];
+	return locomotion->handle_set_function(pContext, params);
 }
+
+template <typename T>
+cell_t Componentset_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return handle_set_data(pContext, params, locomotion->data);
+}
+
+template <typename T>
+cell_t Componentget_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return handle_get_data(pContext, params, locomotion->data);
+}
+
+template <typename T>
+cell_t Componentset_data_array(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return handle_set_data_array(pContext, params, locomotion->data);
+}
+
+template <typename T>
+cell_t Componentget_data_array(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return handle_get_data_array(pContext, params, locomotion->data);
+}
+
+cell_t BehaviorActionset_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_data<SPAction>(pContext, params); }
+cell_t BehaviorActionget_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_data<SPAction>(pContext, params); }
+cell_t BehaviorActionset_data_array(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_data_array<SPAction>(pContext, params); }
+cell_t BehaviorActionget_data_array(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_data_array<SPAction>(pContext, params); }
+
+cell_t IIntentionCustomset_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_function<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomset_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_data<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomget_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_data<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_data_array<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_data_array<IIntentionCustom>(pContext, params); }
+
+cell_t IBodyCustomset_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_function<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomset_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_data<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomget_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_data<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomset_data_array(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_data_array<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomget_data_array(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_data_array<IBodyCustom>(pContext, params); }
 
 cell_t GetNavAreaVectorCount(IPluginContext *pContext, const cell_t *params)
 {
@@ -10698,6 +11083,8 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.Stuck.get", ILocomotionIsStuck},
 	{"ILocomotion.OnGround.get", ILocomotionOnGroundget},
 	{"ILocomotion.AttemptingToMove.get", ILocomotionAttemptingToMoveget},
+	{"ILocomotion.UsingLadder.get", ILocomotionUsingLadderget},
+	{"ILocomotion.AscendingOrDescendingLadder.get", ILocomotionAscendingOrDescendingLadderget},
 	{"ILocomotion.SetDesiredLean", ILocomotionSetDesiredLean},
 	{"ILocomotion.GetDesiredLean", ILocomotionGetDesiredLean},
 	{"ILocomotion.Run", ILocomotionRun},
@@ -10749,37 +11136,61 @@ sp_nativeinfo_t natives[] =
 	{"DirectChasePath.DirectChasePath", DirectChasePathCTORNative},
 	{"RetreatPath.RetreatPath", RetreatPathCTORNative},
 #if SOURCE_ENGINE == SE_TF2
-	{"NextBotGoundLocomotionCustom.StepHeight.set", NextBotGoundLocomotionCustomStepHeightset},
-	{"NextBotGoundLocomotionCustom.MaxJumpHeight.set", NextBotGoundLocomotionCustomMaxJumpHeightset},
-	{"NextBotGoundLocomotionCustom.DeathDropHeight.set", NextBotGoundLocomotionCustomDeathDropHeightset},
-	{"NextBotGoundLocomotionCustom.RunSpeed.set", NextBotGoundLocomotionCustomRunSpeedset},
-	{"NextBotGoundLocomotionCustom.WalkSpeed.set", NextBotGoundLocomotionCustomWalkSpeedset},
 	{"NextBotGoundLocomotionCustom.MaxAcceleration.set", NextBotGoundLocomotionCustomMaxAccelerationset},
 	{"NextBotGoundLocomotionCustom.MaxDeceleration.set", NextBotGoundLocomotionCustomMaxDecelerationset},
-	{"NextBotGoundLocomotionCustom.SpeedLimit.set", NextBotGoundLocomotionCustomSpeedLimitset},
-	{"NextBotGoundLocomotionCustom.TraversableSlopeLimit.set", NextBotGoundLocomotionCustomTraversableSlopeLimitset},
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	{"ZombieBotLocomotionCustom.StepHeight.set", ZombieBotLocomotionCustomStepHeightset},
-	{"ZombieBotLocomotionCustom.MaxJumpHeight.set", ZombieBotLocomotionCustomMaxJumpHeightset},
-	{"ZombieBotLocomotionCustom.DeathDropHeight.set", ZombieBotLocomotionCustomDeathDropHeightset},
-	{"ZombieBotLocomotionCustom.RunSpeed.set", ZombieBotLocomotionCustomRunSpeedset},
-	{"ZombieBotLocomotionCustom.WalkSpeed.set", ZombieBotLocomotionCustomWalkSpeedset},
-	{"ZombieBotLocomotionCustom.SpeedLimit.set", ZombieBotLocomotionCustomSpeedLimitset},
-	{"ZombieBotLocomotionCustom.TraversableSlopeLimit.set", ZombieBotLocomotionCustomTraversableSlopeLimitset},
-#endif
-#if SOURCE_ENGINE == SE_TF2
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
 	{"NextBotGroundLocomotion.FrictionForward.get", NextBotGroundLocomotionFrictionForwardget},
 	{"NextBotGroundLocomotion.FrictionSideways.get", NextBotGroundLocomotionFrictionSidewaysget},
-	{"NextBotGroundLocomotion.MaxYawRate.get", NextBotGroundLocomotionMaxYawRateget},
 	{"NextBotGoundLocomotionCustom.Gravity.set", NextBotGroundLocomotionCustomGravityset},
 	{"NextBotGoundLocomotionCustom.FrictionForward.set", NextBotGroundLocomotionCustomFrictionForwardset},
 	{"NextBotGoundLocomotionCustom.FrictionSideways.set", NextBotGroundLocomotionCustomFrictionSidewaysset},
-	{"NextBotGoundLocomotionCustom.MaxYawRate.set", NextBotGroundLocomotionCustomMaxYawRateset},
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	{"ZombieBotLocomotion.MaxYawRate.get", ZombieBotLocomotionMaxYawRateget},
-	{"ZombieBotLocomotionCustom.MaxYawRate.set", ZombieBotLocomotionCustomMaxYawRateset},
 #endif
+
+#define MACRO_STRINGIFY(x) #x
+#define MACRO_FUNC(x, y, f) \
+	{MACRO_STRINGIFY(x) y, x##f},
+
+	MACRO_FUNC(GameLocomotion, ".MaxYawRate.get", MaxYawRateget)
+	MACRO_FUNC(GameLocomotionCustom, ".MaxYawRate.set", MaxYawRateset)
+	
+	MACRO_FUNC(GameLocomotionCustom, ".StepHeight.set", StepHeightset)
+	MACRO_FUNC(GameLocomotionCustom, ".MaxJumpHeight.set", MaxJumpHeightset)
+	MACRO_FUNC(GameLocomotionCustom, ".DeathDropHeight.set", DeathDropHeightset)
+	MACRO_FUNC(GameLocomotionCustom, ".RunSpeed.set", RunSpeedset)
+	MACRO_FUNC(GameLocomotionCustom, ".WalkSpeed.set", WalkSpeedset)
+	MACRO_FUNC(GameLocomotionCustom, ".SpeedLimit.set", SpeedLimitset)
+	MACRO_FUNC(GameLocomotionCustom, ".TraversableSlopeLimit.set", TraversableSlopeLimitset)
+	
+#if SOURCE_ENGINE == SE_TF2
+	MACRO_FUNC(GameVisionCustom, ".MaxVisionRange.set", MaxVisionRangeset)
+	MACRO_FUNC(GameVisionCustom, ".MinRecognizeTime.set", MinRecognizeTimeset)
+#endif
+	MACRO_FUNC(GameVisionCustom, ".DefaultFieldOfView.set", DefaultFieldOfViewset)
+	
+	MACRO_FUNC(GameLocomotionCustom, ".set_function", set_function)
+	MACRO_FUNC(GameLocomotionCustom, ".set_data", set_data)
+	MACRO_FUNC(GameLocomotionCustom, ".get_data", get_data)
+	MACRO_FUNC(GameLocomotionCustom, ".set_data_array", set_data_array)
+	MACRO_FUNC(GameLocomotionCustom, ".get_data_array", get_data_array)
+
+	MACRO_FUNC(GameVisionCustom, ".set_function", set_function)
+	MACRO_FUNC(GameVisionCustom, ".set_data", set_data)
+	MACRO_FUNC(GameVisionCustom, ".get_data", get_data)
+	MACRO_FUNC(GameVisionCustom, ".set_data_array", set_data_array)
+	MACRO_FUNC(GameVisionCustom, ".get_data_array", get_data_array)
+	
+	{"IIntentionCustom.set_function", IIntentionCustomset_function},
+	{"IIntentionCustom.set_data", IIntentionCustomset_data},
+	{"IIntentionCustom.get_data", IIntentionCustomget_data},
+	{"IIntentionCustom.set_data_array", IIntentionCustomset_data_array},
+	{"IIntentionCustom.get_data_array", IIntentionCustomget_data_array},
+	
+	{"IBodyCustom.set_function", IBodyCustomset_function},
+	{"IBodyCustom.set_data", IBodyCustomset_data},
+	{"IBodyCustom.get_data", IBodyCustomget_data},
+	{"IBodyCustom.set_data_array", IBodyCustomset_data_array},
+	{"IBodyCustom.get_data_array", IBodyCustomget_data_array},
+	
 #if SOURCE_ENGINE == SE_TF2
 	{"IVision.ForEachKnownEntity", IVisionForEachKnownEntity},
 	//{"IVision.CollectKnownEntities", IVisionCollectKnownEntities},
@@ -10879,8 +11290,9 @@ sp_nativeinfo_t natives[] =
 	{"BehaviorAction.Entry.get", BehaviorActionEntryget},
 	{"BehaviorAction.set_data", BehaviorActionset_data},
 	{"BehaviorAction.get_data", BehaviorActionget_data},
+	{"BehaviorAction.set_data_array", BehaviorActionset_data_array},
+	{"BehaviorAction.get_data_array", BehaviorActionget_data_array},
 	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
-	{"IIntentionCustom.set_function", IIntentionCustomset_function},
 	{"GetNavAreaVectorCount", GetNavAreaVectorCount},
 	{"GetNavAreaFromVector", GetNavAreaFromVector},
 	{"CombatCharacterEventKilled", CombatCharacterEventKilled},
@@ -10961,6 +11373,8 @@ bool HookIsAuthoritative()
 IGameConfig *g_pGameConf = nullptr;
 
 CDetour *pPathOptimize = nullptr;
+
+CDetour *pTraverseLadder = nullptr;
 
 #if SOURCE_ENGINE == SE_TF2
 CDetour *pApplyAccumulatedApproach = nullptr;
@@ -11158,6 +11572,13 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	pIsTankImmediatelyDangerousTo->EnableDetour();
 #endif
 	
+#if SOURCE_ENGINE == SE_TF2
+	pTraverseLadder = DETOUR_CREATE_MEMBER(TraverseLadder, "NextBotGroundLocomotion::TraverseLadder")
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	pTraverseLadder = DETOUR_CREATE_MEMBER(TraverseLadder, "ZombieBotLocomotion::TraverseLadder")
+#endif
+	pTraverseLadder->EnableDetour();
+	
 	sm_sendprop_info_t info{};
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_iTeamNum", &info);
 	m_iTeamNumOffset = info.actual_offset;
@@ -11205,8 +11626,11 @@ void Sample::OnPluginLoaded(IPlugin *plugin)
 
 void Sample::OnPluginUnloaded(IPlugin *plugin)
 {
-	for(IIntentionCustom *inte : customintentions) {
-		if(plugin->GetIdentity() == inte->pId) {
+	auto it = spnbcomponents.find(plugin->GetIdentity());
+	if(it != spnbcomponents.end()) {
+		std::vector<IPluginNextBotComponent *> &vec = it->second;
+		
+		for(IPluginNextBotComponent *inte : vec) {
 			inte->plugin_unloaded();
 		}
 	}
@@ -11259,6 +11683,7 @@ void Sample::SDK_OnUnload()
 	pVocalize->Destroy();
 	pIsTankImmediatelyDangerousTo->Destroy();
 #endif
+	pTraverseLadder->Destroy();
 	plsys->RemovePluginsListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());

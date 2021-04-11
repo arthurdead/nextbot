@@ -25,6 +25,14 @@ enum struct BehaviorResult
 
 #tryinclude <damagerules>
 
+#if defined GAME_TF2
+#define GameLocomotionCustom NextBotGoundLocomotionCustom
+#define GameVisionCustom IVisionCustom
+#elseif defined GAME_L4D2
+#define GameLocomotionCustom ZombieBotLocomotionCustom
+#define GameVisionCustom ZombieBotVisionCustom
+#endif
+
 typeset nextbot_functions
 {
 #if defined GAME_TF2
@@ -57,6 +65,9 @@ typeset nextbot_functions
 	
 	//IIntentionCustom.IsHindrance
 	function QueryResultType (IIntentionCustom intention, INextBot bot, int blocker);
+	
+	//GameLocomotionCustom.TraverseLadder
+	function bool (GameLocomotionCustom locomotion);
 	
 	//BehaviorActionEntry.OnLeaveGround
 	//BehaviorActionEntry.OnLandOnGround
@@ -439,6 +450,16 @@ methodmap ILocomotion < INextBotComponent
 	{
 		public native get();
 	}
+	
+	property bool UsingLadder
+	{
+		public native get();
+	}
+	
+	property bool AscendingOrDescendingLadder
+	{
+		public native get();
+	}
 
 	public native void GetGroundMotionVector(float ang[3]);
 
@@ -462,10 +483,12 @@ methodmap ILocomotion < INextBotComponent
 };
 
 #if defined GAME_TF2
-methodmap NextBotGoundLocomotion < ILocomotion
+#define GameLocomotion NextBotGoundLocomotion
 #elseif defined GAME_L4D2
-methodmap ZombieBotLocomotion < ILocomotion
+#define GameLocomotion ZombieBotLocomotion
 #endif
+
+methodmap GameLocomotion < ILocomotion
 {
 #if defined GAME_TF2
 	property float Gravity
@@ -490,11 +513,7 @@ methodmap ZombieBotLocomotion < ILocomotion
 	}
 };
 
-#if defined GAME_TF2
-methodmap NextBotGoundLocomotionCustom < NextBotGoundLocomotion
-#elseif defined GAME_L4D2
-methodmap ZombieBotLocomotionCustom < ZombieBotLocomotion
-#endif
+methodmap GameLocomotionCustom < GameLocomotion
 {
 	property float StepHeight
 	{
@@ -574,7 +593,23 @@ methodmap ZombieBotLocomotionCustom < ZombieBotLocomotion
 	public native void GetGroundAcceleration(float vec[3]);
 	*/
 #endif
+
+	public native void set_function(const char[] name, nextbot_functions func);
+
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
 };
+
+#if defined GAME_TF2
+#define NextBotGoundLocomotionCustom_Null (view<NextBotGoundLocomotionCustom>(Address_Null))
+#define GameLocomotionCustom_Null NextBotGoundLocomotionCustom_Null
+#elseif defined GAME_L4D2
+#define ZombieBotLocomotionCustom_Null (view<ZombieBotLocomotionCustom>(Address_Null))
+#define GameLocomotionCustom_Null ZombieBotLocomotionCustom_Null
+#endif
 
 #if defined GAME_TF2
 methodmap CKnownEntity
@@ -707,15 +742,19 @@ methodmap IVision < INextBotComponent
 };
 
 #if defined GAME_TF2
-methodmap IVisionCustom < IVision
+#define GameVision IVision
 #elseif defined GAME_L4D2
+#define GameVision ZombieBotVision
+#endif
+
+#if defined GAME_L4D2
 methodmap ZombieBotVision < IVision
 {
 	
 };
-
-methodmap ZombieBotVisionCustom < ZombieBotVision
 #endif
+
+methodmap GameVisionCustom < GameVision
 {
 #if defined GAME_TF2
 	property float MaxVisionRange
@@ -733,6 +772,14 @@ methodmap ZombieBotVisionCustom < ZombieBotVision
 	{
 		public native set(float height);
 	}
+	
+	public native void set_function(const char[] name, nextbot_functions func);
+
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
 methodmap IBody < INextBotComponent
@@ -811,6 +858,14 @@ methodmap IBodyCustom < IBody
 
 	public native void SetHullMins(float vec[3]);
 	public native void SetHullMaxs(float vec[3]);
+	
+	public native void set_function(const char[] name, nextbot_functions func);
+
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
 enum BehaviorResultType
@@ -848,7 +903,12 @@ methodmap BehaviorAction
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
 };
+
+#define BehaviorAction_Null (view_as<BehaviorAction>(Address_Null))
 
 #define IS_ANY_HINDRANCE_POSSIBLE 0xFFFFFFFF
 
@@ -871,6 +931,12 @@ methodmap IIntentionCustom < IIntention
 	public native void ResetBehavior(BehaviorAction action);
 	
 	public native void set_function(const char[] name, nextbot_functions func);
+	
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
 #define IIntentionCustom_Null (view_as<IIntentionCustom>(IIntention_Null))
@@ -1284,6 +1350,8 @@ enum baseline_cost_flags
 
 #define cost_flags_onlywalk (cost_flags_nojumping| \
 							cost_flags_noladders| \
+							cost_flags_nocrouch)
+#define cost_flags_nostance (cost_flags_nojumping| \
 							cost_flags_nocrouch)
 
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, baseline_cost_flags flags)
