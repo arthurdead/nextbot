@@ -85,6 +85,7 @@ class IStaticPropMgrServer *staticpropmgr = nullptr;
 
 #ifdef __HAS_DAMAGERULES
 #include <IDamageRules.h>
+#include <public/damageinfo.cpp>
 #endif
 
 /**
