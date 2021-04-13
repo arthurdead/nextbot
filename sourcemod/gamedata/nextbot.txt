@@ -130,6 +130,11 @@
 				"library" "server"
 				"linux" "@_ZN20CBaseCombatCharacter12Event_KilledERK15CTakeDamageInfo"
 			}
+			"CBaseEntity::CalcAbsolutePosition"
+			{
+				"library" "server"
+				"linux" "@_ZN11CBaseEntity20CalcAbsolutePositionEv"
+			}
 		}
 	}
 	"left4dead2"

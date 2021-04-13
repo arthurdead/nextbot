@@ -68,6 +68,16 @@ typeset nextbot_functions
 	
 	//GameLocomotionCustom.TraverseLadder
 	function bool (GameLocomotionCustom locomotion);
+	//GameLocomotionCustom.ClimbLadder
+	//GameLocomotionCustom.DescendLadder
+	function void (GameLocomotionCustom locomotion, CNavLadder ladder, CNavArea goal);
+	//GameLocomotionCustom.ClimbUpToLedge
+	function bool (GameLocomotionCustom locomotion, float goal[3], float fwd[3], int obstacle);
+	
+	//INextBotCustom.IsAbleToBlockMovementOf
+	function bool (INextBotCustom custom, INextBot bot, INextBot other);
+	//INextBotCustom.ShouldTouch
+	function bool (INextBotCustom custom, INextBot bot, int other);
 	
 	//BehaviorActionEntry.OnLeaveGround
 	//BehaviorActionEntry.OnLandOnGround
@@ -511,6 +521,29 @@ methodmap GameLocomotion < ILocomotion
 	{
 		public native get();
 	}
+	
+	property CNavLadder Ladder
+	{
+		public native get();
+		public native set(CNavLadder lad);
+	}
+	
+	property CNavArea LadderDismountGoal
+	{
+		public native get();
+		public native set(CNavArea lad);
+	}
+	
+	property bool GoingUpLadder
+	{
+		public native get();
+		public native set(bool lad);
+	}
+	
+	property bool ClimbingUpToLedge
+	{
+		public native set(bool lad);
+	}
 };
 
 methodmap GameLocomotionCustom < GameLocomotion
@@ -756,7 +789,6 @@ methodmap ZombieBotVision < IVision
 
 methodmap GameVisionCustom < GameVision
 {
-#if defined GAME_TF2
 	property float MaxVisionRange
 	{
 		public native set(float height);
@@ -766,7 +798,6 @@ methodmap GameVisionCustom < GameVision
 	{
 		public native set(float height);
 	}
-#endif
 
 	property float DefaultFieldOfView
 	{
@@ -930,6 +961,8 @@ methodmap IIntentionCustom < IIntention
 {
 	public native void ResetBehavior(BehaviorAction action);
 	
+	public native void set_name(const char[] name);
+	
 	public native void set_function(const char[] name, nextbot_functions func);
 	
 	public native void set_data(const char[] name, any data);
@@ -1029,31 +1062,59 @@ methodmap INextBot < INextBotEventResponder
 	public native float Get2DRangeToVector(float vec[3]);
 #endif
 
-#if defined GAME_TF2
-	public native NextBotGoundLocomotionCustom AllocateCustomLocomotion();
-#elseif defined GAME_L4D2
-	public native ZombieBotLocomotionCustom AllocateCustomLocomotion();
-#endif
+	public native bool IsFriend(int entity);
+	public native bool IsEnemy(int entity);
+	public native bool IsSelf(int entity);
 
-#if defined GAME_TF2
-	public native IVisionCustom AllocateCustomVision();
-#elseif defined GAME_L4D2
-	public native ZombieBotVisionCustom AllocateCustomVision();
-#endif
-
+	public native GameLocomotionCustom AllocateCustomLocomotion();
+	public native GameVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
-
-	public native IIntentionCustom AllocateCustomIntention(nextbot_functions func);
+	public native IIntentionCustom AllocateCustomIntention(nextbot_functions func, const char[] name = "");
 	public native void StubIntention();
 	
 	public native bool IsDebugging(NextBotDebugType type);
+	
+	public native INextBotCustom MakeCustom();
 };
 
 #define INextBot_Null (view_as<INextBot>(Address_Null))
 
-methodmap INextBotCustom < INextBot
+methodmap INextBotCustom
 {
+#if defined GAME_L4D2
+	property bool AllowedToClimb
+	{
+		public native set(bool val);
+	}
 	
+	property bool ReactToSurvivorVisibility
+	{
+		public native set(bool val);
+	}
+	
+	property bool ReactToSurvivorNoise
+	{
+		public native set(bool val);
+	}
+	
+	property bool ReactToSurvivorContact
+	{
+		public native set(bool val);
+	}
+#endif
+
+	property INextBot Bot
+	{
+		public native get();
+	}
+
+	public native void set_function(const char[] name, nextbot_functions func);
+	
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
 enum SegmentType
@@ -1080,6 +1141,61 @@ enum NavTraverseType
 	GO_ELEVATOR_DOWN,
 	NUM_TRAVERSE_TYPES
 };
+
+enum NavDirType
+{
+	NORTH = 0,
+	EAST = 1,
+	SOUTH = 2,
+	WEST = 3,
+	NUM_DIRECTIONS
+};
+
+NavDirType AngleToDirection(float angle)
+{
+	while(angle < 0.0) {
+		angle += 360.0;
+	}
+
+	while(angle > 360.0) {
+		angle -= 360.0;
+	}
+
+	if(angle < 45.0 || angle > 315.0) {
+		return EAST;
+	}
+
+	if(angle >= 45.0 && angle < 135.0) {
+		return SOUTH;
+	}
+
+	if(angle >= 135.0 && angle < 225.0) {
+		return WEST;
+	}
+
+	return NORTH;
+}
+
+enum NavRelativeDirType
+{
+	FORWARD = 0,
+	RIGHT,
+	BACKWARD,
+	LEFT,
+	UP,
+	DOWN,
+	NUM_RELATIVE_DIRECTIONS
+};
+
+native NavRelativeDirType DirectionBetweenEntityVector(int ent1, float vec[3]);
+
+stock NavRelativeDirType DirectionBetweenEntities(int ent1, int ent2)
+{
+	float vec[3];
+	GetEntPropVector(ent2, Prop_Data, "m_vecAbsOrigin", vec);
+
+	return DirectionBetweenEntityVector(ent1, vec);
+}
 
 methodmap Segment
 {
@@ -1192,13 +1308,8 @@ methodmap Path < Handle
 
 	public native void Invalidate();
 
-#if defined GAME_TF2
 	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
 	public native bool ComputeEntity(INextBot bot, int subject, nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
-#elseif defined GAME_L4D2
-	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_functions functor, any data = 0, float maxPathLength = 0.0);
-	public native bool ComputeEntity(INextBot bot, int subject, nextbot_functions functor, any data = 0, float maxPathLength = 0.0);
-#endif
 };
 
 methodmap PathFollower < Path
@@ -1229,8 +1340,25 @@ methodmap PathFollower < Path
 	public native bool IsAtGoal(INextBot bot);
 
 	public native void Update(INextBot bot);
-	
-	public native int FindBlocker(INextBot bot);
+};
+
+#if defined GAME_TF2
+methodmap CTFPathFollower < PathFollower
+{
+	public native CTFPathFollower();
+
+	property float MinLookAheadDistance
+	{
+		public native get();
+	}
+};
+#endif
+
+methodmap RetreatPath < PathFollower
+{
+	public native RetreatPath();
+
+	public native void Update(INextBot bot, int entity);
 };
 
 enum SubjectChaseType
@@ -1258,28 +1386,9 @@ methodmap InfectedChasePath < DirectChasePath
 };
 #endif
 
-methodmap RetreatPath < PathFollower
-{
-	public native RetreatPath();
-
-	public native void Update(INextBot bot, int entity);
-};
-
-#if defined GAME_TF2
-methodmap CTFPathFollower < PathFollower
-{
-	public native CTFPathFollower();
-
-	property float MinLookAheadDistance
-	{
-		public native get();
-	}
-};
-#endif
-
 native bool EntityIsCombatCharacter(int entity);
 native CNavArea GetEntityLastKnownArea(int entity);
-native INextBotCustom MakeEntityNextBot(int entity);
+native INextBot MakeEntityNextBot(int entity);
 
 #tryinclude <datamaps>
 

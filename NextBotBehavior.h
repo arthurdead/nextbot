@@ -213,7 +213,7 @@ class Behavior : public INextBotEventResponder, public IContextualQuery
 public:
 	DECLARE_CLASS( Behavior, INextBotEventResponder );
 
-	Behavior( Action< Actor > *initialAction, const char *name = "" ) : m_name( "%s", name )
+	Behavior( Action< Actor > *initialAction, const char *name ) : m_name( "%s", name )
 	{
 		m_action = initialAction;
 		m_me = NULL;
@@ -346,7 +346,7 @@ public:
 		return m_name;
 	}
 	
-	virtual const char *GetDebugString() const { return GetName(); }
+	virtual const char *GetDebugString() const { return m_action ? m_action->DebugString() : "< NULL action >"; }
 
 	// INextBotEventResponder propagation ----------------------------------------------------------------------
 	virtual INextBotEventResponder *FirstContainedResponder( void ) const
@@ -704,7 +704,7 @@ public:
 	virtual const char *GetFullName( void ) const;		// return a temporary string showing the full lineage of this one action
 	Actor *GetActor( void ) const;						// return the Actor performing this Action (valid just before OnStart() is invoked)
 
-	virtual const char *GetDebugString() const { return GetFullName(); }
+	virtual const char *GetDebugString() const { return DebugString(); }
 	
 	//-----------------------------------------------------------------------------------------
 	/**
