@@ -1151,7 +1151,7 @@ enum NavDirType
 	NUM_DIRECTIONS
 };
 
-NavDirType AngleToDirection(float angle)
+stock NavDirType AngleToDirection(float angle)
 {
 	while(angle < 0.0) {
 		angle += 360.0;
