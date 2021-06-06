@@ -26,7 +26,8 @@ project.compiler.cxxincludes += [Extension.sm_root]
 
 damagerulespath = os.path.join(builder.currentSourcePath, '../damagerules')
 if not os.path.exists(damagerulespath):
-	damagerulespath = os.environ['DAMAGERULESSRC']
+	if 'DAMAGERULESSRC' in os.environ:
+		damagerulespath = os.environ['DAMAGERULESSRC']
 
 if os.path.exists(damagerulespath):
 	project.compiler.defines += ['__HAS_DAMAGERULES']

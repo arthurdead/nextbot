@@ -1,4 +1,5 @@
 #include "core/logic/HandleSys.h"
+#include <memory>
 
 class HandleSystemHack : public HandleSystem
 {
@@ -130,7 +131,11 @@ public:
 		pType->dispatch = dispatch;
 		if (name && name[0] != '\0')
 		{
+#ifdef __OLDSM
+			pType->name = new ke::AString(name);
+#else
 			pType->name = std::make_unique<std::string>(name);
+#endif
 			m_TypeLookup.insert(name, pType);
 		}
 

@@ -20,4 +20,6 @@ builder.options.add_option('-s', '--sdks', default='all', dest='sdks',
                        help='Build against specified SDKs; valid args are "all", "present", or '
                             'comma-delimited list of engine names (default: %default)')
 
+builder.options.add_option('--old-sm', action='store_const', const='1', dest='oldsm')
+
 builder.Configure()

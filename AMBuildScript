@@ -306,7 +306,10 @@ class ExtensionConfig(object):
       paths.append(['public', 'game', 'server'])
       paths.append(['public', 'toolframework'])
       paths.append(['common'])
-
+      
+    if builder.options.oldsm == '1':
+       compiler.defines += ['__OLDSM']
+    
     compiler.defines += ['SOURCE_ENGINE=' + sdk.code]
 
     if sdk.name in ['sdk2013', 'bms'] and compiler.like('gcc'):
