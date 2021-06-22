@@ -293,15 +293,15 @@
 			}
 			"CBaseCombatCharacter::GetLastKnownArea"
 			{
-				"linux" "316"
+				"linux" "317"
 			}
 			"CBaseCombatCharacter::UpdateLastKnownArea"
 			{
-				"linux" "319"
+				"linux" "320"
 			}
 			"CFuncNavCost::GetCostMultiplier"
 			{
-				"linux" "192"
+				"linux" "193"
 			}
 			"CBaseEntity::PerformCustomPhysics"
 			{
@@ -309,7 +309,7 @@
 			}
 			"CBaseCombatCharacter::IsAreaTraversable"
 			{
-				"linux" "317"
+				"linux" "318"
 			}
 			"CBaseEntity::Spawn"
 			{
