@@ -26,7 +26,7 @@ enum struct BehaviorResult
 #tryinclude <damagerules>
 
 #if defined GAME_TF2
-#define GameLocomotionCustom NextBotGoundLocomotionCustom
+#define GameLocomotionCustom NextBotGroundLocomotionCustom
 #define GameVisionCustom IVisionCustom
 #elseif defined GAME_L4D2
 #define GameLocomotionCustom ZombieBotLocomotionCustom
