@@ -3110,7 +3110,7 @@ public:
 	
 	const char *GetDebugIdentifier( void )
 	{
-		return MyNextBotPointer()->GetDebugIdentifier();
+		return "";//MyNextBotPointer()->GetDebugIdentifier();
 	}
 	
 	bool IsDebugging( unsigned int type )
@@ -11018,7 +11018,7 @@ cell_t MakeEntityNextBot(IPluginContext *pContext, const cell_t *params)
 
 class INextBotCustom;
 
-std::unordered_map<INextBot *, INextBotCustom *> nbcustomap{};
+std::unordered_map<int, INextBotCustom *> nbcustomap{};
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 SH_DECL_HOOK0(INextBot, IsAllowedToClimb, const, 0, bool);
@@ -11047,12 +11047,15 @@ public:
 	IPluginFunction *shouldtouch = nullptr;
 	IPluginFunction *enemy = nullptr;
 	IPluginFunction *isfren = nullptr;
+
+	int ref = -1;
 	
 	INextBotCustom(INextBot *pNextBot, IdentityToken_t *id)
-		: IPluginNextBotComponent(id)
+		: IPluginNextBotComponent(id), ref{gamehelpers->EntityToBCompatRef(pNextBot->GetEntity())}
 	{
 		bot = pNextBot;
-		nbcustomap[bot] = this;
+
+		nbcustomap[ref] = this;
 		
 		SH_ADD_MANUALHOOK(GenericDtor, bot, SH_MEMBER(this, &INextBotCustom::dtor), false);
 		
@@ -11131,7 +11134,7 @@ public:
 	
 	~INextBotCustom()
 	{
-		nbcustomap.erase(bot);
+		nbcustomap.erase(ref);
 	}
 	
 	virtual void plugin_unloaded()
@@ -11166,9 +11169,11 @@ cell_t INextBotMakeCustom(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *pNextBot = (INextBot *)params[1];
 
+	int ref{gamehelpers->EntityToBCompatRef(pNextBot->GetEntity())};
+
 	INextBotCustom *pcustom = nullptr;
 	
-	auto it = nbcustomap.find(pNextBot);
+	auto it = nbcustomap.find(ref);
 	if(it != nbcustomap.end()) {
 		pcustom = it->second;
 	} else {
@@ -11410,12 +11415,14 @@ cell_t CombatCharacterEventKilled(IPluginContext *pContext, const cell_t *params
 		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
 	}
 	
-	CTakeDamageInfo info{};
 #ifdef __HAS_DAMAGERULES
+	CTakeDamageInfo info{};
 	g_pDamageRules->ParamToDamageInfo(pContext, params[2], info);
-#endif
-	
 	pCombat->Event_Killed(info);
+#else
+	return pContext->ThrowNativeError("Ext was compiled without damagerules");
+#endif
+
 	return 0;
 }
 

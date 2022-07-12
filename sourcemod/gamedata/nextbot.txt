@@ -285,31 +285,31 @@
 			}
 			"CBaseEntity::WorldSpaceCenter"
 			{
-				"linux" "150"
+				"linux" "153"
 			}
 			"CBaseEntity::EyeAngles"
 			{
-				"linux" "132"
+				"linux" "135"
 			}
 			"CBaseCombatCharacter::GetLastKnownArea"
 			{
-				"linux" "317"
+				"linux" "320"
 			}
 			"CBaseCombatCharacter::UpdateLastKnownArea"
 			{
-				"linux" "320"
+				"linux" "323"
 			}
 			"CFuncNavCost::GetCostMultiplier"
 			{
-				"linux" "193"
+				"linux" "196"
 			}
 			"CBaseEntity::PerformCustomPhysics"
 			{
-				"linux" "170"
+				"linux" "173"
 			}
 			"CBaseCombatCharacter::IsAreaTraversable"
 			{
-				"linux" "318"
+				"linux" "321"
 			}
 			"CBaseEntity::Spawn"
 			{
