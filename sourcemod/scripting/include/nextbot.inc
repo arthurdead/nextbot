@@ -69,10 +69,13 @@ typeset nextbot_functions
 	//GameLocomotionCustom.TraverseLadder
 	function bool (GameLocomotionCustom locomotion);
 	//GameLocomotionCustom.ClimbLadder
+	//NextBotFlyingLocomotion.ClimbLadder
 	//GameLocomotionCustom.DescendLadder
-	function void (GameLocomotionCustom locomotion, CNavLadder ladder, CNavArea goal);
+	//NextBotFlyingLocomotion.DescendLadder
+	function void (ILocomotion locomotion, CNavLadder ladder, CNavArea goal);
 	//GameLocomotionCustom.ClimbUpToLedge
-	function bool (GameLocomotionCustom locomotion, float goal[3], float fwd[3], int obstacle);
+	//NextBotFlyingLocomotion.ClimbUpToLedge
+	function bool (ILocomotion locomotion, float goal[3], float fwd[3], int obstacle);
 	
 	//INextBotCustom.IsAbleToBlockMovementOf
 	function bool (INextBotCustom custom, INextBot bot, INextBot other);
@@ -492,6 +495,74 @@ methodmap ILocomotion < INextBotComponent
 	public native void DriveTo(float pos[3]);
 };
 
+methodmap NextBotFlyingLocomotion < ILocomotion
+{
+	property float StepHeight
+	{
+		public native set(float height);
+	}
+
+	property float MaxJumpHeight
+	{
+		public native set(float height);
+	}
+
+	property float DeathDropHeight
+	{
+		public native set(float height);
+	}
+
+	property float RunSpeed
+	{
+		public native set(float height);
+	}
+
+	property float WalkSpeed
+	{
+		public native set(float height);
+	}
+
+#if defined GAME_TF2
+	property float MaxAcceleration
+	{
+		public native set(float height);
+	}
+
+	property float MaxDeceleration
+	{
+		public native set(float height);
+	}
+#endif
+
+	property float SpeedLimit
+	{
+		public native set(float height);
+	}
+
+	property float TraversableSlopeLimit
+	{
+		public native set(float height);
+	}
+
+	public native void set_function(const char[] name, nextbot_functions func);
+
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
+
+	property float DesiredAltitude
+	{
+		public native get();
+		public native set(float altitude);
+	}
+
+	//public native void Deflect(int deflector);
+
+	//public native void SetVelocity(float accel[3]);
+};
+
 #if defined GAME_TF2
 #define GameLocomotion NextBotGoundLocomotion
 #elseif defined GAME_L4D2
@@ -595,6 +666,14 @@ methodmap GameLocomotionCustom < GameLocomotion
 		public native set(float height);
 	}
 
+	public native void set_function(const char[] name, nextbot_functions func);
+
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
+
 #if defined GAME_TF2
 	property float Gravity
 	{
@@ -626,14 +705,6 @@ methodmap GameLocomotionCustom < GameLocomotion
 	public native void GetGroundAcceleration(float vec[3]);
 	*/
 #endif
-
-	public native void set_function(const char[] name, nextbot_functions func);
-
-	public native void set_data(const char[] name, any data);
-	public native any get_data(const char[] name);
-	
-	public native void set_data_array(const char[] name, any[] data, int len);
-	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
 #if defined GAME_TF2
@@ -1067,6 +1138,7 @@ methodmap INextBot < INextBotEventResponder
 	public native bool IsSelf(int entity);
 
 	public native GameLocomotionCustom AllocateCustomLocomotion();
+	public native NextBotFlyingLocomotion AllocateFlyingLocomotion();
 	public native GameVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
 	public native IIntentionCustom AllocateCustomIntention(nextbot_functions func, const char[] name = "");

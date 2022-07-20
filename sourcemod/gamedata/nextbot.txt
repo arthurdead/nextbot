@@ -135,6 +135,11 @@
 				"library" "server"
 				"linux" "@_ZN11CBaseEntity20CalcAbsolutePositionEv"
 			}
+			"ILocomotion::ILocomotion"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11ILocomotionC2EP8INextBot"
+			}
 		}
 	}
 	"left4dead2"
@@ -318,6 +323,10 @@
 			"sizeof(NextBotCombatCharacter)"
 			{
 				"linux" "4320"
+			}
+			"CBaseEntity::EyePosition"
+			{
+				"linux" "134"
 			}
 		}
 		"Signatures"

@@ -138,6 +138,7 @@ void *CTFPathFollowerCTOR = nullptr;
 #endif
 #if SOURCE_ENGINE == SE_TF2
 void *NextBotGroundLocomotionCTOR = nullptr;
+void *ILocomotionCTOR = nullptr;
 void *IVisionCTOR = nullptr;
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 void *ZombieBotLocomotionCTOR = nullptr;
@@ -187,10 +188,12 @@ int CFuncNavCostGetCostMultiplier = -1;
 int NextBotCombatCharacterGetNextBotCombatCharacter = -1;
 int CBaseCombatCharacterCanBeA = -1;
 #endif
+int CBaseEntityEyePosition = -1;
 
 int m_vecAbsOriginOffset = -1;
 int m_iTeamNumOffset = -1;
 int m_vecAbsVelocityOffset = -1;
+int m_vecVelocityOffset = -1;
 int m_iEFlagsOffset = -1;
 int m_fFlagsOffset = -1;
 int m_hGroundEntityOffset = -1;
@@ -199,6 +202,14 @@ int m_MoveTypeOffset = -1;
 int m_isGhostOffset = -1;
 #endif
 int m_rgflCoordinateFrameOffset = -1;
+int m_hMoveParentOffset = -1;
+int m_hMoveChildOffset = -1;
+int m_hMovePeerOffset = -1;
+int m_iParentAttachmentOffset = -1;
+int m_iClassnameOffset = -1;
+int m_flSimulationTimeOffset = -1;
+int m_angAbsRotationOffset = -1;
+int m_angRotationOffset = -1;
 
 ConVar *NextBotStop = nullptr;
 
@@ -344,10 +355,19 @@ __attribute__((__visibility__("default"), __cdecl__)) double __acos_finite(doubl
 #define DECLARE_PREDICTABLE()
 
 #include <collisionproperty.h>
+#include <ServerNetworkProperty.h>
 
 void SetEdictStateChanged(CBaseEntity *pEntity, int offset);
 
 class CBasePlayer;
+
+enum InvalidatePhysicsBits_t
+{
+	POSITION_CHANGED	= 0x1,
+	ANGLES_CHANGED		= 0x2,
+	VELOCITY_CHANGED	= 0x4,
+	ANIMATION_CHANGED	= 0x8,
+};
 
 class CBaseEntity : public IServerEntity
 {
@@ -371,6 +391,11 @@ public:
 		return call_vfunc<CBaseCombatCharacter *>(this, CBaseEntityMyCombatCharacterPointer);
 	}
 	
+	Vector EyePosition()
+	{
+		return call_vfunc<Vector>(this, CBaseEntityEyePosition);
+	}
+
 	CBasePlayer *IsPlayer()
 	{
 		int idx = gamehelpers->EntityToBCompatRef(this);
@@ -444,7 +469,113 @@ public:
 	{
 		call_mfunc<void, CBaseEntity, const Vector &>(this, CBaseEntitySetAbsOrigin, origin);
 	}
+
+	void SetSimulationTime(float time)
+	{
+		if(m_flSimulationTimeOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_flSimulationTime", &info);
+			m_flSimulationTimeOffset = info.actual_offset;
+		}
+
+		*(float *)((unsigned char *)this + m_flSimulationTimeOffset) = time;
+	}
+
+	const QAngle& GetAbsAngles( void )
+	{
+		if(m_angAbsRotationOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_angAbsRotation", &info);
+			m_angAbsRotationOffset = info.actual_offset;
+		}
+
+		if (GetIEFlags() & EFL_DIRTY_ABSTRANSFORM)
+		{
+			CalcAbsolutePosition();
+		}
+
+		return *(QAngle *)((unsigned char *)this + m_angAbsRotationOffset);
+	}
 	
+	void SetAbsAngles( const QAngle& absAngles )
+	{
+		if(m_angAbsRotationOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_angAbsRotation", &info);
+			m_angAbsRotationOffset = info.actual_offset;
+		}
+
+		if(m_angRotationOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_angRotation", &info);
+			m_angRotationOffset = info.actual_offset;
+		}
+
+		if(m_rgflCoordinateFrameOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_rgflCoordinateFrame", &info);
+			m_rgflCoordinateFrameOffset = info.actual_offset;
+		}
+
+		if(m_vecAbsOriginOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_vecAbsOrigin", &info);
+			m_vecAbsOriginOffset = info.actual_offset;
+		}
+
+		// This is necessary to get the other fields of m_rgflCoordinateFrame ok
+		CalcAbsolutePosition();
+
+		// FIXME: The normalize caused problems in server code like momentary_rot_button that isn't
+		//        handling things like +/-180 degrees properly. This should be revisited.
+		//QAngle angleNormalize( AngleNormalize( absAngles.x ), AngleNormalize( absAngles.y ), AngleNormalize( absAngles.z ) );
+
+		if ( *(QAngle *)((unsigned char *)this + m_angAbsRotationOffset) == absAngles )
+			return;
+
+		// All children are invalid, but we are not
+		InvalidatePhysicsRecursive( ANGLES_CHANGED );
+		SetIEFlags( GetIEFlags() & ~EFL_DIRTY_ABSTRANSFORM );
+
+		*(QAngle *)((unsigned char *)this + m_angAbsRotationOffset) = absAngles;
+		AngleMatrix( absAngles, *(matrix3x4_t *)((unsigned char *)this + m_rgflCoordinateFrameOffset) );
+		MatrixSetColumn( *(Vector *)((unsigned char *)this + m_vecAbsOriginOffset), 3, *(matrix3x4_t *)((unsigned char *)this + m_rgflCoordinateFrameOffset) ); 
+
+		QAngle angNewRotation;
+		CBaseEntity *pMoveParent = GetMoveParent();
+		if (!pMoveParent)
+		{
+			angNewRotation = absAngles;
+		}
+		else
+		{
+			if ( *(QAngle *)((unsigned char *)this + m_angAbsRotationOffset) == pMoveParent->GetAbsAngles() )
+			{
+				angNewRotation.Init( );
+			}
+			else
+			{
+				// Moveparent case: transform the abs transform into local space
+				matrix3x4_t worldToParent, localMatrix;
+				MatrixInvert( pMoveParent->EntityToWorldTransform(), worldToParent );
+				ConcatTransforms( worldToParent, *(matrix3x4_t *)((unsigned char *)this + m_rgflCoordinateFrameOffset), localMatrix );
+				MatrixAngles( localMatrix, angNewRotation );
+			}
+		}
+
+		if (*(QAngle *)((unsigned char *)this + m_angRotationOffset) != angNewRotation)
+		{
+			*(QAngle *)((unsigned char *)this + m_angRotationOffset) = angNewRotation;
+			SetSimulationTime( gpGlobals->curtime );
+		}
+	}
+
 	int GetIEFlags()
 	{
 		if(m_iEFlagsOffset == -1) {
@@ -456,7 +587,59 @@ public:
 		
 		return *(int *)((unsigned char *)this + m_iEFlagsOffset);
 	}
-	
+
+	void DispatchUpdateTransmitState()
+	{
+
+	}
+
+	bool ClassMatches( const char *pszClassOrWildcard )
+	{
+		if(m_iClassnameOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_iClassname", &info);
+			m_iClassnameOffset = info.actual_offset;
+		}
+
+		if ( IDENT_STRINGS( *(string_t *)((unsigned char *)this + m_iClassnameOffset), pszClassOrWildcard ) )
+			return true;
+
+		return false;
+	}
+
+	bool ClassMatches( string_t nameStr )
+	{
+		if(m_iClassnameOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_iClassname", &info);
+			m_iClassnameOffset = info.actual_offset;
+		}
+
+		if ( IDENT_STRINGS( *(string_t *)((unsigned char *)this + m_iClassnameOffset), nameStr ) )
+			return true;
+
+		return false;
+	}
+
+	void SetIEFlags(int flags)
+	{
+		if(m_iEFlagsOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_iEFlags", &info);
+			m_iEFlagsOffset = info.actual_offset;
+		}
+
+		*(int *)((unsigned char *)this + m_iEFlagsOffset) = flags;
+
+		if ( flags & ( EFL_FORCE_CHECK_TRANSMIT | EFL_IN_SKYBOX ) )
+		{
+			DispatchUpdateTransmitState();
+		}
+	}
+
 	void SetMoveType(MoveType_t val)
 	{
 		if(m_MoveTypeOffset == -1) {
@@ -502,6 +685,217 @@ public:
 		
 		return *(Vector *)(((unsigned char *)this) + m_vecAbsVelocityOffset);
 	}
+
+	CBaseEntity *FirstMoveChild()
+	{
+		if(m_hMoveChildOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_hMoveChild", &info);
+			m_hMoveChildOffset = info.actual_offset;
+		}
+
+		return (*(EHANDLE *)(((unsigned char *)this) + m_hMoveChildOffset)).Get();
+	}
+
+	CBaseEntity *GetMoveParent()
+	{
+		if(m_hMoveParentOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_hMoveParent", &info);
+			m_hMoveParentOffset = info.actual_offset;
+		}
+
+		return (*(EHANDLE *)(((unsigned char *)this) + m_hMoveParentOffset)).Get();
+	}
+
+	CBaseEntity *NextMovePeer()
+	{
+		if(m_hMovePeerOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_hMovePeer", &info);
+			m_hMovePeerOffset = info.actual_offset;
+		}
+
+		return (*(EHANDLE *)(((unsigned char *)this) + m_hMovePeerOffset)).Get();
+	}
+
+	int GetParentAttachment()
+	{
+		if(m_iParentAttachmentOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_iParentAttachment", &info);
+			m_iParentAttachmentOffset = info.actual_offset;
+		}
+
+		return *(unsigned char *)(((unsigned char *)this) + m_vecAbsVelocityOffset);
+	}
+
+	void InvalidatePhysicsRecursive( int nChangeFlags )
+	{
+		// Main entry point for dirty flag setting for the 90% case
+		// 1) If the origin changes, then we have to update abstransform, Shadow projection, PVS, KD-tree, 
+		//    client-leaf system.
+		// 2) If the angles change, then we have to update abstransform, Shadow projection,
+		//    shadow render-to-texture, client-leaf system, and surrounding bounds. 
+		//	  Children have to additionally update absvelocity, KD-tree, and PVS.
+		//	  If the surrounding bounds actually update, when we also need to update the KD-tree and the PVS.
+		// 3) If it's due to attachment, then all children who are attached to an attachment point
+		//    are assumed to have dirty origin + angles.
+
+		// Other stuff:
+		// 1) Marking the surrounding bounds dirty will automatically mark KD tree + PVS dirty.
+		
+		int nDirtyFlags = 0;
+
+		if ( nChangeFlags & VELOCITY_CHANGED )
+		{
+			nDirtyFlags |= EFL_DIRTY_ABSVELOCITY;
+		}
+
+		if ( nChangeFlags & POSITION_CHANGED )
+		{
+			nDirtyFlags |= EFL_DIRTY_ABSTRANSFORM;
+
+	#ifndef CLIENT_DLL
+			NetworkProp()->MarkPVSInformationDirty();
+	#endif
+
+			// NOTE: This will also mark shadow projection + client leaf dirty
+			CollisionProp()->MarkPartitionHandleDirty();
+		}
+
+		// NOTE: This has to be done after velocity + position are changed
+		// because we change the nChangeFlags for the child entities
+		if ( nChangeFlags & ANGLES_CHANGED )
+		{
+			nDirtyFlags |= EFL_DIRTY_ABSTRANSFORM;
+			if ( CollisionProp()->DoesRotationInvalidateSurroundingBox() )
+			{
+				// NOTE: This will handle the KD-tree, surrounding bounds, PVS
+				// render-to-texture shadow, shadow projection, and client leaf dirty
+				CollisionProp()->MarkSurroundingBoundsDirty();
+			}
+			else
+			{
+	#ifdef CLIENT_DLL
+				MarkRenderHandleDirty();
+				g_pClientShadowMgr->AddToDirtyShadowList( this );
+				g_pClientShadowMgr->MarkRenderToTextureShadowDirty( GetShadowHandle() );
+	#endif
+			}
+
+			// This is going to be used for all children: children
+			// have position + velocity changed
+			nChangeFlags |= POSITION_CHANGED | VELOCITY_CHANGED;
+		}
+
+		SetIEFlags( GetIEFlags() | nDirtyFlags );
+
+		// Set flags for children
+		bool bOnlyDueToAttachment = false;
+		if ( nChangeFlags & ANIMATION_CHANGED )
+		{
+	#ifdef CLIENT_DLL
+			g_pClientShadowMgr->MarkRenderToTextureShadowDirty( GetShadowHandle() );
+	#endif
+
+			// Only set this flag if the only thing that changed us was the animation.
+			// If position or something else changed us, then we must tell all children.
+			if ( !( nChangeFlags & (POSITION_CHANGED | VELOCITY_CHANGED | ANGLES_CHANGED) ) )
+			{
+				bOnlyDueToAttachment = true;
+			}
+
+			nChangeFlags = POSITION_CHANGED | ANGLES_CHANGED | VELOCITY_CHANGED;
+		}
+
+		for (CBaseEntity *pChild = FirstMoveChild(); pChild; pChild = pChild->NextMovePeer())
+		{
+			// If this is due to the parent animating, only invalidate children that are parented to an attachment
+			// Entities that are following also access attachments points on parents and must be invalidated.
+			if ( bOnlyDueToAttachment )
+			{
+	#ifdef CLIENT_DLL
+				if ( (pChild->GetParentAttachment() == 0) && !pChild->IsFollowingEntity() )
+					continue;
+	#else
+				if ( pChild->GetParentAttachment() == 0 )
+					continue;
+	#endif
+			}
+			pChild->InvalidatePhysicsRecursive( nChangeFlags );
+		}
+
+		//
+		// This code should really be in here, or the bone cache should not be in world space.
+		// Since the bone transforms are in world space, if we move or rotate the entity, its
+		// bones should be marked invalid.
+		//
+		// As it is, we're near ship, and don't have time to setup a good A/B test of how much
+		// overhead this fix would add. We've also only got one known case where the lack of
+		// this fix is screwing us, and I just fixed it, so I'm leaving this commented out for now.
+		//
+		// Hopefully, we'll put the bone cache in entity space and remove the need for this fix.
+		//
+		//#ifdef CLIENT_DLL
+		//	if ( nChangeFlags & (POSITION_CHANGED | ANGLES_CHANGED | ANIMATION_CHANGED) )
+		//	{
+		//		C_BaseAnimating *pAnim = GetBaseAnimating();
+		//		if ( pAnim )
+		//			pAnim->InvalidateBoneCache();		
+		//	}
+		//#endif
+	}
+
+	void SetAbsVelocity( const Vector &vecAbsVelocity )
+	{
+		if(m_vecAbsVelocityOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_vecAbsVelocity", &info);
+			m_vecAbsVelocityOffset = info.actual_offset;
+		}
+
+		if(m_vecVelocityOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_vecVelocity", &info);
+			m_vecVelocityOffset = info.actual_offset;
+		}
+
+		if ( GetAbsVelocity() == vecAbsVelocity )
+			return;
+
+		// The abs velocity won't be dirty since we're setting it here
+		// All children are invalid, but we are not
+		InvalidatePhysicsRecursive( VELOCITY_CHANGED );
+		SetIEFlags( GetIEFlags() & ~EFL_DIRTY_ABSVELOCITY );
+
+		*(Vector *)(((unsigned char *)this) + m_vecAbsVelocityOffset) = vecAbsVelocity;
+
+		// NOTE: Do *not* do a network state change in this case.
+		// m_vecVelocity is only networked for the player, which is not manual mode
+		CBaseEntity *pMoveParent = GetMoveParent();
+		if (!pMoveParent)
+		{
+			*(Vector *)(((unsigned char *)this) + m_vecVelocityOffset) = vecAbsVelocity;
+			return;
+		}
+
+		// First subtract out the parent's abs velocity to get a relative
+		// velocity measured in world space
+		Vector relVelocity;
+		VectorSubtract( vecAbsVelocity, pMoveParent->GetAbsVelocity(), relVelocity );
+
+		// Transform relative velocity into parent space
+		Vector vNew;
+		VectorIRotate( relVelocity, pMoveParent->EntityToWorldTransform(), vNew );
+		*(Vector *)(((unsigned char *)this) + m_vecVelocityOffset) = vNew;
+	}
 	
 	bool IsWorld()
 	{
@@ -517,17 +911,61 @@ public:
 	{
 		call_mfunc<void, CBaseEntity, CBaseEntity *>(this, CBaseEntitySetGroundEntity, pEntity);
 	}
+
+	const Vector& WorldAlignMins( ) const
+	{
+		return CollisionProp()->OBBMins();
+	}
+
+	const Vector& WorldAlignMaxs( ) const
+	{
+		return CollisionProp()->OBBMaxs();
+	}
+
+	CCollisionProperty		*CollisionProp() { return (CCollisionProperty		*)GetCollideable(); }
+	const CCollisionProperty*CollisionProp() const { return (const CCollisionProperty*)const_cast<CBaseEntity *>(this)->GetCollideable(); }
+
+	CServerNetworkProperty *NetworkProp() { return (CServerNetworkProperty *)GetNetworkable(); }
+	const CServerNetworkProperty *NetworkProp() const { return (const CServerNetworkProperty *)const_cast<CBaseEntity *>(this)->GetNetworkable(); }
 	
 	int GetHealth() { return 0; }
 	int m_takedamage;
-	CCollisionProperty		*CollisionProp() { return nullptr; }
-	const CCollisionProperty*CollisionProp() const { return nullptr; }
 	void	NetworkStateChanged() { }
 	void	NetworkStateChanged( void *pVar ) {  }
 	virtual bool ShouldBlockNav() const { return true; }
 	int ObjectCaps() { return 0; }
 	bool HasSpawnFlags(int) { return 0; }
 };
+
+void CCollisionProperty::MarkSurroundingBoundsDirty()
+{
+	GetOuter()->SetIEFlags( GetOuter()->GetIEFlags() | EFL_DIRTY_SURROUNDING_COLLISION_BOUNDS );
+	MarkPartitionHandleDirty();
+
+#ifdef CLIENT_DLL
+	g_pClientShadowMgr->MarkRenderToTextureShadowDirty( GetOuter()->GetShadowHandle() );
+#else
+	GetOuter()->NetworkProp()->MarkPVSInformationDirty();
+#endif
+}
+
+void CCollisionProperty::MarkPartitionHandleDirty()
+{
+	// don't bother with the world
+	if ( m_pOuter->entindex() == 0 )
+		return;
+	
+	if ( !(m_pOuter->GetIEFlags() & EFL_DIRTY_SPATIAL_PARTITION) )
+	{
+		m_pOuter->SetIEFlags( m_pOuter->GetIEFlags() | EFL_DIRTY_SPATIAL_PARTITION );
+		//s_DirtyKDTree.AddEntity( m_pOuter );
+	}
+
+#ifdef CLIENT_DLL
+	GetOuter()->MarkRenderHandleDirty();
+	g_pClientShadowMgr->AddToDirtyShadowList( GetOuter() );
+#endif
+}
 
 void CCollisionProperty::CollisionAABBToWorldAABB( const Vector &entityMins, 
 	const Vector &entityMaxs, Vector *pWorldMins, Vector *pWorldMaxs ) const
@@ -553,7 +991,7 @@ void SetEdictStateChanged(CBaseEntity *pEntity, int offset)
 
 inline bool FClassnameIs(CBaseEntity *pEntity, const char *szClassname)
 { 
-	return false;
+	return pEntity->ClassMatches(szClassname);
 }
 
 class CBaseToggle : public CBaseEntity
@@ -5061,6 +5499,45 @@ CTraceFilterSimple::CTraceFilterSimple( const IHandleEntity *passedict, int coll
 	m_pExtraShouldHitCheckFunction = pExtraShouldHitFunc;
 }
 
+CTraceFilterSkipClassname::CTraceFilterSkipClassname( const IHandleEntity *passentity, const char *pchClassname, int collisionGroup ) :
+CTraceFilterSimple( passentity, collisionGroup ), m_pchClassname( pchClassname )
+{
+}
+
+CTraceFilterSimpleClassnameList::CTraceFilterSimpleClassnameList( const IHandleEntity *passentity, int collisionGroup ) :
+CTraceFilterSimple( passentity, collisionGroup )
+{
+}
+
+bool CTraceFilterSimpleClassnameList::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
+{
+	CBaseEntity *pEntity = EntityFromEntityHandle( pHandleEntity );
+	if ( !pEntity )
+		return false;
+
+	for ( int i = 0; i < m_PassClassnames.Count(); ++i )
+	{
+		if ( FClassnameIs( pEntity, m_PassClassnames[ i ] ) )
+			return false;
+	}
+
+	return CTraceFilterSimple::ShouldHitEntity( pHandleEntity, contentsMask );
+}
+
+void CTraceFilterSimpleClassnameList::AddClassnameToIgnore( const char *pchClassname )
+{
+	m_PassClassnames.AddToTail( pchClassname );
+}
+
+bool CTraceFilterSkipClassname::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
+{
+	CBaseEntity *pEntity = EntityFromEntityHandle( pHandleEntity );
+	if ( !pEntity || FClassnameIs( pEntity, m_pchClassname ) )
+		return false;
+
+	return CTraceFilterSimple::ShouldHitEntity( pHandleEntity, contentsMask );
+}
+
 bool CTraceFilterSimple::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
 {
 	return call_mfunc<bool, CTraceFilterSimple, IHandleEntity *, int>(this, CTraceFilterSimpleShouldHitEntity, pHandleEntity, contentsMask);
@@ -5074,6 +5551,14 @@ public:
 	{
 	}
 };
+
+SH_DECL_HOOK0_void(ILocomotion, Reset, SH_NOATTRIB, 0);
+SH_DECL_HOOK2_void(ILocomotion, Approach, SH_NOATTRIB, 0, const Vector &, float);
+SH_DECL_HOOK1_void(ILocomotion, SetDesiredSpeed, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetDesiredSpeed, SH_NOATTRIB, 0, float);
+SH_DECL_HOOK0(ILocomotion, GetGroundNormal, SH_NOATTRIB, 0, const Vector &);
+SH_DECL_HOOK0(ILocomotion, GetVelocity, SH_NOATTRIB, 0, const Vector &);
+SH_DECL_HOOK1_void(ILocomotion, FaceTowards, SH_NOATTRIB, 0, const Vector &);
 
 SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
@@ -5092,6 +5577,7 @@ SH_DECL_HOOK2_void(ILocomotion, DescendLadder, SH_NOATTRIB, 0, const CNavLadder 
 SH_DECL_HOOK3(ILocomotion, ClimbUpToLedge, SH_NOATTRIB, 0, bool, const Vector &, const Vector &, CBaseEntity * );
 
 bool g_bInCustomLocomotion = false;
+bool g_bInFlyingLocomotion = false;
 
 struct customlocomotion_base_vars_t : IPluginNextBotComponent
 {
@@ -5101,6 +5587,8 @@ public:
 	
 	virtual ~customlocomotion_base_vars_t() {}
 	
+	bool update_hooked = false;
+
 	float step = 18.0f;
 	float jump = 180.0f;
 	float death = 200.0f;
@@ -5193,7 +5681,7 @@ public:
 		
 		return true;
 	}
-	
+
 	void HookUpdate()
 	{
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
@@ -5206,8 +5694,10 @@ public:
 	virtual void remove_hooks(ILocomotion *bytes)
 	{
 		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
-		SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
-	
+		if(update_hooked) {
+			SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
+		}
+
 		SH_REMOVE_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
 		SH_REMOVE_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false);
 		SH_REMOVE_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetDeathDropHeight), false);
@@ -5257,11 +5747,14 @@ public:
 	float HookGetTraversableSlopeLimit()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, slope); }
 	
-	virtual void add_hooks(ILocomotion *bytes)
+	virtual void add_hooks(ILocomotion *bytes, bool hook_update = true)
 	{
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
-		SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
-	
+		if(hook_update) {
+			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
+			update_hooked = true;
+		}
+
 		SH_ADD_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
 		SH_ADD_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false);
 		SH_ADD_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetDeathDropHeight), false);
@@ -5460,7 +5953,7 @@ public:
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
-	void HookReset()
+	void DetourReset()
 	{
 		m_bRecomputePostureOnCollision = false;
 		m_ignorePhysicsPropTimer.Invalidate();
@@ -5495,7 +5988,7 @@ public:
 		m_accumApproachWeights = 0.0f;
 	}
 	
-	const Vector &HookGetFeet()
+	const Vector &DetourGetFeet()
 	{
 		return m_bot->GetPosition();
 	}
@@ -5505,7 +5998,7 @@ public:
 		return IsClimbingOrJumping() && (((CBaseEntity *)m_nextBot)->GetAbsVelocity().z > 0.0f);
 	}
 	
-	void HookApplyAccumulatedApproach( void )
+	void DetourApplyAccumulatedApproach( void )
 	{
 		Vector rawPos = GetFeet();
 
@@ -5614,7 +6107,7 @@ public:
 		return call_mfunc<Vector, NextBotGroundLocomotion, const Vector &, const Vector &, int>(this, NextBotGroundLocomotionResolveCollision, from, to, recursionLimit);
 	}
 	
-	void HookUpdatePosition( const Vector &newPos )
+	void DetourUpdatePosition( const Vector &newPos )
 	{
 		if ( NextBotStop->GetBool() || (((CBaseEntity *)m_nextBot)->GetFlags() & FL_FROZEN) != 0 || newPos == m_bot->GetPosition() )
 		{
@@ -5636,7 +6129,7 @@ public:
 		}
 	}
 	
-	void HookUpdateGroundConstraint( void )
+	void DetourUpdateGroundConstraint( void )
 	{
 		// if we're up on the upward arc of our jump, don't interfere by snapping to ground
 		// don't do ground constraint if we're climbing a ladder
@@ -5779,8 +6272,8 @@ public:
 		
 			SourceHook::SetMemAccess(vtable, sizeof(void **), SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 			
-			vtable[vfunc_index(&NextBotGroundLocomotion::Reset)] = func_to_void(&NextBotGroundLocomotionCustom::HookReset);
-			vtable[vfunc_index(&NextBotGroundLocomotion::GetFeet)] = func_to_void(&NextBotGroundLocomotionCustom::HookGetFeet);
+			vtable[vfunc_index(&NextBotGroundLocomotion::Reset)] = func_to_void(&NextBotGroundLocomotionCustom::DetourReset);
+			vtable[vfunc_index(&NextBotGroundLocomotion::GetFeet)] = func_to_void(&NextBotGroundLocomotionCustom::DetourGetFeet);
 			
 			vtable_assigned = true;
 		}
@@ -5798,18 +6291,323 @@ bool NextBotGroundLocomotionCustom::vtable_assigned = false;
 
 DETOUR_DECL_MEMBER0(ApplyAccumulatedApproach, void)
 {
-	((NextBotGroundLocomotionCustom *)this)->HookApplyAccumulatedApproach();
+	((NextBotGroundLocomotionCustom *)this)->DetourApplyAccumulatedApproach();
 }
 
 DETOUR_DECL_MEMBER1(UpdatePosition, void, const Vector &, pos)
 {
-	((NextBotGroundLocomotionCustom *)this)->HookUpdatePosition(pos);
+	((NextBotGroundLocomotionCustom *)this)->DetourUpdatePosition(pos);
 }
 
 DETOUR_DECL_MEMBER0(UpdateGroundConstraint, void)
 {
-	((NextBotGroundLocomotionCustom *)this)->HookUpdateGroundConstraint();
+	((NextBotGroundLocomotionCustom *)this)->DetourUpdateGroundConstraint();
 }
+
+ConVar tf_bot_npc_minion_acceleration( "tf_bot_npc_minion_acceleration", "500" );
+ConVar tf_bot_npc_minion_horiz_damping( "tf_bot_npc_minion_horiz_damping", "2" );
+ConVar tf_bot_npc_minion_vert_damping( "tf_bot_npc_minion_vert_damping", "1" );
+
+ConVar tf_bot_npc_minion_avoid_range( "tf_bot_npc_minion_avoid_range", "100" );
+ConVar tf_bot_npc_minion_avoid_force( "tf_bot_npc_minion_avoid_force", "100" );
+
+ConVar tf_bot_npc_minion_deflect_range( "tf_bot_npc_minion_deflect_range", "300" );
+ConVar tf_bot_npc_minion_deflect_force( "tf_bot_npc_minion_deflect_force", "2000" );
+
+class CNextBotFlyingLocomotion : public ILocomotion
+{
+public:
+	struct vars_t : customlocomotion_base_vars_t
+	{
+		vars_t(IdentityToken_t *id)
+			: customlocomotion_base_vars_t{id} {}
+		
+		float m_desiredSpeed = 0.0f;
+		float m_currentSpeed = 0.0f;
+		Vector m_forward = vec3_origin;
+		float m_desiredAltitude = 50.0f;
+		Vector m_velocity = vec3_origin;
+		Vector m_acceleration = vec3_origin;
+	};
+
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + sizeof(ILocomotion)); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+
+	void HookApproach(const Vector &goalPos, float goalWeight)
+	{
+		Vector flyGoal = goalPos;
+		flyGoal.z += getvars().m_desiredAltitude;
+
+		Vector toGoal = flyGoal - GetBot()->GetEntity()->GetAbsOrigin();
+		// altitude is handled in Update()
+		toGoal.z = 0.0f;
+		toGoal.NormalizeInPlace();
+
+		getvars().m_acceleration += tf_bot_npc_minion_acceleration.GetFloat() * toGoal;
+
+		RETURN_META(MRES_SUPERCEDE);
+	}
+
+	void HookReset()
+	{
+		getvars().m_velocity = vec3_origin;
+		getvars().m_acceleration = vec3_origin;
+		getvars().m_desiredSpeed = 0.0f;
+		getvars().m_currentSpeed = 0.0f;
+		getvars().m_forward = vec3_origin;
+		getvars().m_desiredAltitude = 50.0f;
+
+		RETURN_META(MRES_SUPERCEDE);
+	}
+
+	void MaintainAltitude( void )
+	{
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+
+		trace_t result;
+		//CTraceFilterSimple filter( me, COLLISION_GROUP_NONE );
+		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
+		filter.AddClassnameToIgnore( "bot_npc_minion" );
+
+		// find ceiling
+		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, 1000.0f ), 
+				   me->WorldAlignMins(), me->WorldAlignMaxs(), 
+				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
+
+		float ceiling = result.endpos.z - me->GetAbsOrigin().z;
+
+		// trace wider hull to account for nearby ledges we want to float over
+		TraceHull( me->GetAbsOrigin() + Vector( 0, 0, ceiling ),
+				   me->GetAbsOrigin() + Vector( 0, 0, -1000.0f ), 
+				   Vector( 2.0f * me->WorldAlignMins().x, 2.0f * me->WorldAlignMins().y, me->WorldAlignMins().z ), 
+				   Vector( 2.0f * me->WorldAlignMaxs().x, 2.0f * me->WorldAlignMaxs().y, me->WorldAlignMaxs().z ), 
+				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
+
+		float groundZ = result.endpos.z;
+
+		float currentAltitude = me->GetAbsOrigin().z - groundZ;
+		float error = getvars().m_desiredAltitude - currentAltitude;
+		float accelZ = clamp( error, -tf_bot_npc_minion_acceleration.GetFloat(), tf_bot_npc_minion_acceleration.GetFloat() );
+
+		getvars().m_acceleration.z += accelZ;
+	}
+
+	void HookUpdate()
+	{
+		g_bInFlyingLocomotion = true;
+
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+		const float deltaT = GetUpdateInterval();
+
+		Vector pos = me->GetAbsOrigin();
+
+		// always maintain altitude, even if not trying to move (ie: no Approach call)
+		MaintainAltitude();
+
+		getvars().m_forward = getvars().m_velocity;
+		getvars().m_currentSpeed = getvars().m_forward.NormalizeInPlace();
+
+		Vector damping( tf_bot_npc_minion_horiz_damping.GetFloat(), tf_bot_npc_minion_horiz_damping.GetFloat(), tf_bot_npc_minion_vert_damping.GetFloat() );
+		Vector totalAccel = getvars().m_acceleration - getvars().m_velocity * damping;
+
+		// avoid other minions
+	#if 0
+		CBaseEntity *minion = NULL;
+		while( ( minion = gEntList.FindEntityByClassname( minion, "bot_npc_minion" ) ) != NULL )
+		{
+			if ( me == minion )
+				continue;
+
+			Vector toPeer = minion->GetAbsOrigin() - me->GetAbsOrigin();
+			toPeer.z = 0.0f;
+			float range = toPeer.NormalizeInPlace();
+
+			if ( range < tf_bot_npc_minion_avoid_range.GetFloat() )
+			{
+				totalAccel += -tf_bot_npc_minion_avoid_force.GetFloat() * toPeer;
+			}
+		}
+	#endif
+
+		getvars().m_velocity += totalAccel * deltaT;
+		me->SetAbsVelocity( getvars().m_velocity );
+
+		pos += getvars().m_velocity * deltaT;
+
+		// check for collisions along move	
+		trace_t result;
+		CTraceFilterSkipClassname filter( me, "bot_npc_minion", COLLISION_GROUP_NONE );
+		Vector from = me->GetAbsOrigin();
+		Vector to = pos;
+		Vector desiredGoal = to;
+		Vector resolvedGoal;
+		int recursionLimit = 3;
+
+		int hitCount = 0;
+		Vector surfaceNormal = vec3_origin;
+
+		bool didHitWorld = false;
+
+		while( true )
+		{
+			TraceHull( from, desiredGoal, me->WorldAlignMins(), me->WorldAlignMaxs(), GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
+
+			if ( !result.DidHit() )
+			{
+				resolvedGoal = pos;
+				break;
+			}
+
+			if ( result.DidHitWorld() )
+			{
+				didHitWorld = true;
+			}
+
+			++hitCount;
+			surfaceNormal += result.plane.normal;
+
+			// If we hit really close to our target, then stop
+			if ( !result.startsolid && desiredGoal.DistToSqr( result.endpos ) < 1.0f )
+			{
+				resolvedGoal = result.endpos;
+				break;
+			}
+
+			if ( result.startsolid )
+			{
+				// stuck inside solid; don't move
+				resolvedGoal = me->GetAbsOrigin();
+				break;
+			}
+
+			if ( --recursionLimit <= 0 )
+			{
+				// reached recursion limit, no more adjusting allowed
+				resolvedGoal = result.endpos;
+				break;
+			}
+
+			// slide off of surface we hit
+			Vector fullMove = desiredGoal - from;
+			Vector leftToMove = fullMove * ( 1.0f - result.fraction );
+
+			float blocked = DotProduct( result.plane.normal, leftToMove );
+
+			Vector unconstrained = fullMove - blocked * result.plane.normal;
+
+			// check for collisions along remainder of move
+			// But don't bother if we're not going to deflect much
+			Vector remainingMove = from + unconstrained;
+			if ( remainingMove.DistToSqr( result.endpos ) < 1.0f )
+			{
+				resolvedGoal = result.endpos;
+				break;
+			}
+
+			desiredGoal = remainingMove;
+		}
+
+		if ( hitCount > 0 )
+		{
+			surfaceNormal.NormalizeInPlace();
+
+			// bounce
+			getvars().m_velocity = getvars().m_velocity - 2.0f * DotProduct( getvars().m_velocity, surfaceNormal ) * surfaceNormal;
+
+			if ( didHitWorld )
+			{
+				//me->EmitSound( "Minion.Bounce" );
+			}
+		}
+
+		GetBot()->GetEntity()->SetAbsOrigin( result.endpos );
+
+		getvars().m_acceleration = vec3_origin;
+
+		g_bInFlyingLocomotion = false;
+		RETURN_META(MRES_SUPERCEDE);
+	}
+
+	void HookSetDesiredSpeed(float speed)
+	{
+		getvars().m_desiredSpeed = speed;
+		RETURN_META(MRES_SUPERCEDE);
+	}
+
+	float HookGetDesiredSpeed( void )
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, getvars().m_desiredSpeed);
+	}
+
+	void HookFaceTowards( const Vector &target )
+	{
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+
+		Vector toTarget = target - me->WorldSpaceCenter();
+		toTarget.z = 0.0f;
+
+		QAngle angles;
+		VectorAngles( toTarget, angles );
+
+		me->SetAbsAngles( angles );
+
+		RETURN_META(MRES_SUPERCEDE);
+	}
+
+	const Vector &HookGetGroundNormal( void )
+	{
+		static Vector up( 0, 0, 1.0f );
+
+		RETURN_META_VALUE(MRES_SUPERCEDE, up);
+	}
+
+	const Vector &HookGetVelocity( void )
+	{
+		RETURN_META_VALUE(MRES_SUPERCEDE, getvars().m_velocity);
+	}
+
+	void Deflect( CBaseEntity *deflector )
+	{
+		if ( deflector )
+		{
+			Vector fromDeflector = GetBot()->GetEntity()->WorldSpaceCenter() - deflector->EyePosition();
+			float range = fromDeflector.NormalizeInPlace();
+
+			if ( range < tf_bot_npc_minion_deflect_range.GetFloat() )
+			{
+				getvars().m_velocity += ( 1.0f - ( range / tf_bot_npc_minion_deflect_range.GetFloat() ) ) * tf_bot_npc_minion_deflect_force.GetFloat() * fromDeflector;
+			}
+		}
+	}
+
+	static CNextBotFlyingLocomotion *create(INextBot *bot, bool reg, IdentityToken_t *id)
+	{
+		CNextBotFlyingLocomotion *bytes = (CNextBotFlyingLocomotion *)calloc(1, sizeof(ILocomotion) + sizeof(vars_t));
+		call_mfunc<void, ILocomotion, INextBot *>(bytes, ILocomotionCTOR, bot);
+		
+		new (bytes->vars_ptr()) vars_t(id);
+		
+		bytes->getvars().add_hooks(bytes, false);
+
+		SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookReset), false);
+		SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookUpdate), false);
+		SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookApproach), false);
+		SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookFaceTowards), false);
+		SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookSetDesiredSpeed), false);
+		SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetDesiredSpeed), false);
+		SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetGroundNormal), false);
+		SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetVelocity), false);
+		
+		if(!reg) {
+			bot->m_componentList = bytes->m_nextComponent;
+			bytes->m_nextComponent = nullptr;
+		}
+		
+		return bytes;
+	}
+};
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 class ZombieBotLocomotionCustom : public ZombieBotLocomotion
 {
@@ -5846,13 +6644,19 @@ public:
 
 DETOUR_DECL_MEMBER0(TraverseLadder, bool)
 {
-	if(!g_bInCustomLocomotion) {
+	if(!g_bInCustomLocomotion && !g_bInFlyingLocomotion) {
 		return DETOUR_MEMBER_CALL(TraverseLadder)();
 	}
-	
-	GameLocomotionCustom *gameloc = (GameLocomotionCustom *)this;
-	
-	bool val = gameloc->getvars().TraverseLadder(gameloc);
+
+	bool val = false;
+
+	if(g_bInCustomLocomotion) {
+		GameLocomotionCustom *gameloc = (GameLocomotionCustom *)this;
+		val = gameloc->getvars().TraverseLadder(gameloc);
+	} else if(g_bInFlyingLocomotion) {
+		
+	}
+
 	return val;
 }
 
@@ -5922,7 +6726,14 @@ public:
 		hullMaxs.y = hullMaxs.x;
 		hullMaxs.z = HullHeight;
 	}
+
+	bool StartActivity( Activity act, unsigned int flags = 0 ) override { return true; }
 	
+	bool set_function(const std::string &name, IPluginFunction *func) override
+	{
+		return IPluginNextBotComponent::set_function(name, func);
+	}
+
 	virtual const char *GetDebugString() const { return "IBodyCustom"; }
 	
 	void SetHullWidth(float height)
@@ -9094,6 +9905,11 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 #endif
 }
 
+cell_t INextBotAllocateFlyingLocomotion(IPluginContext *pContext, const cell_t *params)
+{
+	return INextBotAllocateCustomComponent<CNextBotFlyingLocomotion>(pContext, params, &INextBot::GetLocomotionInterface, &INextBot::m_baseLocomotion);
+}
+
 cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params)
 {
 #if SOURCE_ENGINE == SE_TF2
@@ -10138,6 +10954,17 @@ cell_t CustomComponentget_data_array(IPluginContext *pContext, const cell_t *par
 	return handle_get_data_array(pContext, params, vars.data);
 }
 
+cell_t NextBotFlyingLocomotionset_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_function<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionset_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_data<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionget_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_data<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionset_data_array(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentset_data_array<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionget_data_array(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_data_array<CNextBotFlyingLocomotion>(pContext, params); }
+
 cell_t GameLocomotionCustomset_function(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_function<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomset_data(IPluginContext *pContext, const cell_t *params)
@@ -10201,6 +11028,19 @@ cell_t NextBotGroundLocomotionCustomFrictionSidewaysset(IPluginContext *pContext
 }
 #endif
 
+cell_t NextBotFlyingLocomotionDesiredAltitudeset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().m_desiredAltitude = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionDesiredAltitudeget(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	return sp_ftoc(locomotion->getvars().m_desiredAltitude);
+}
+
 cell_t GameLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *params)
 {
 	GameLocomotion *area = (GameLocomotion *)params[1];
@@ -10257,6 +11097,71 @@ cell_t GameLocomotionCustomMaxYawRateset(IPluginContext *pContext, const cell_t 
 {
 	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
 	locomotion->getvars().yaw = sp_ctof(params[2]);
+	return 0;
+}
+
+#if SOURCE_ENGINE == SE_TF2
+cell_t NextBotFlyingLocomotionMaxAccelerationset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().accel = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionMaxDecelerationset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().deaccel = sp_ctof(params[2]);
+	return 0;
+}
+#endif
+
+cell_t NextBotFlyingLocomotionSpeedLimitset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().limit = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionTraversableSlopeLimitset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().slope = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionRunSpeedset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().run = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionWalkSpeedset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().walk = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionMaxJumpHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().jump = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionDeathDropHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().death = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionStepHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().step = sp_ctof(params[2]);
 	return 0;
 }
 
@@ -11589,6 +12494,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
 	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
+	{"INextBot.AllocateFlyingLocomotion", INextBotAllocateFlyingLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
 	{"INextBot.AllocateCustomVision", INextBotAllocateCustomVision},
 	{"INextBot.AllocateCustomIntention", INextBotAllocateCustomIntention},
@@ -11636,6 +12542,27 @@ sp_nativeinfo_t natives[] =
 	{"NextBotGoundLocomotionCustom.FrictionForward.set", NextBotGroundLocomotionCustomFrictionForwardset},
 	{"NextBotGoundLocomotionCustom.FrictionSideways.set", NextBotGroundLocomotionCustomFrictionSidewaysset},
 #endif
+
+	{"NextBotFlyingLocomotion.DesiredAltitude.get", NextBotFlyingLocomotionDesiredAltitudeget},
+	{"NextBotFlyingLocomotion.DesiredAltitude.set", NextBotFlyingLocomotionDesiredAltitudeset},
+
+#if SOURCE_ENGINE == SE_TF2
+	{"NextBotFlyingLocomotion.MaxAcceleration.set", NextBotGoundLocomotionCustomMaxAccelerationset},
+	{"NextBotFlyingLocomotion.MaxDeceleration.set", NextBotGoundLocomotionCustomMaxDecelerationset},
+#endif
+	{"NextBotFlyingLocomotion.StepHeight.set", NextBotFlyingLocomotionStepHeightset},
+	{"NextBotFlyingLocomotion.MaxJumpHeight.set", NextBotFlyingLocomotionMaxJumpHeightset},
+	{"NextBotFlyingLocomotion.DeathDropHeight.set", NextBotFlyingLocomotionDeathDropHeightset},
+	{"NextBotFlyingLocomotion.RunSpeed.set", NextBotFlyingLocomotionRunSpeedset},
+	{"NextBotFlyingLocomotion.WalkSpeed.set", NextBotFlyingLocomotionWalkSpeedset},
+	{"NextBotFlyingLocomotion.SpeedLimit.set", NextBotFlyingLocomotionSpeedLimitset},
+	{"NextBotFlyingLocomotion.TraversableSlopeLimit.set", NextBotFlyingLocomotionTraversableSlopeLimitset},
+
+	{"NextBotFlyingLocomotion.set_function", NextBotFlyingLocomotionset_function},
+	{"NextBotFlyingLocomotion.set_data", NextBotFlyingLocomotionset_data},
+	{"NextBotFlyingLocomotion.get_data", NextBotFlyingLocomotionget_data},
+	{"NextBotFlyingLocomotion.set_data_array", NextBotFlyingLocomotionset_data_array},
+	{"NextBotFlyingLocomotion.get_data_array", NextBotFlyingLocomotionget_data_array},
 
 #define MACRO_STRINGIFY(x) #x
 #define MACRO_FUNC(x, y, f) \
@@ -12000,6 +12927,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsoluteVelocity", &CBaseEntityCalcAbsoluteVelocity);
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetMemSig("NextBotGroundLocomotion::NextBotGroundLocomotion", &NextBotGroundLocomotionCTOR);
+	g_pGameConf->GetMemSig("ILocomotion::ILocomotion", &ILocomotionCTOR);
 	g_pGameConf->GetMemSig("NextBotGroundLocomotion::ResolveCollision", &NextBotGroundLocomotionResolveCollision);
 	g_pGameConf->GetMemSig("IVision::IVision", &IVisionCTOR);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
@@ -12027,7 +12955,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("NDebugOverlay::Triangle", &NDebugOverlayTriangle);
 	g_pGameConf->GetMemSig("NDebugOverlay::Circle", &NDebugOverlayCircle);
 	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
-	g_pGameConf->GetMemSig("CBaseAnimating::CalcAbsolutePosition", &CBaseEntityCalcAbsolutePosition);
+	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsolutePosition", &CBaseEntityCalcAbsolutePosition);
 	
 	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
 	SH_MANUALHOOK_RECONFIGURE(MyNextBotPointer, CBaseEntityMyNextBotPointer, 0, 0);
@@ -12042,6 +12970,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::Spawn", &offset);
 	SH_MANUALHOOK_RECONFIGURE(Spawn, offset, 0, 0);
 	
+	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
+
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
