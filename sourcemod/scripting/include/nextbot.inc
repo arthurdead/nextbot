@@ -76,6 +76,9 @@ typeset nextbot_functions
 	//GameLocomotionCustom.ClimbUpToLedge
 	//NextBotFlyingLocomotion.ClimbUpToLedge
 	function bool (ILocomotion locomotion, float goal[3], float fwd[3], int obstacle);
+	//GameLocomotionCustom.ShouldCollideWith
+	//NextBotFlyingLocomotion.ShouldCollideWith
+	function bool (ILocomotion locomotion, int other);
 	
 	//INextBotCustom.IsAbleToBlockMovementOf
 	function bool (INextBotCustom custom, INextBot bot, INextBot other);
@@ -196,6 +199,11 @@ methodmap CNavArea
 	}
 	
 	property float SizeY
+	{
+		public native get();
+	}
+
+	property bool Damaging
 	{
 		public native get();
 	}
@@ -556,6 +564,24 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 	{
 		public native get();
 		public native set(float altitude);
+	}
+
+	property float Acceleration
+	{
+		public native get();
+		public native set(float accel);
+	}
+
+	property float HorizontalDamp
+	{
+		public native get();
+		public native set(float damp);
+	}
+
+	property float VerticalDamp
+	{
+		public native get();
+		public native set(float damp);
 	}
 
 	//public native void Deflect(int deflector);
@@ -1527,6 +1553,8 @@ enum baseline_cost_flags
 	cost_flags_noladders = (1 << 4),
 	cost_flags_nocrouch = (1 << 5),
 	cost_flags_nospawn = (1 << 6),
+	cost_flags_nowater = (1 << 7),
+	cost_flags_fastest = (1 << 8)
 };
 
 #define cost_flags_onlywalk (cost_flags_nojumping| \
@@ -1576,6 +1604,9 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 		}
 
 		dist = ladder.Length;
+
+		static const float ladderPenalty = 1.0;
+		dist *= ladderPenalty;
 	} else if(length > 0.0) {
 		dist = length;
 	} else {
@@ -1591,36 +1622,35 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 		dist = GetVectorLength(sub);
 	}
 
-	float cost = dist + fromArea.CostSoFar;
-	
-#if defined GAME_TF2
-	if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
-		cost *= area.ComputeFuncNavCost(entity);
-	}
-#endif
-	
-	if(ladder != CNavLadder_Null) {
-		static const float ladderPenalty = 2.0;
-		cost += dist * ladderPenalty;
-	}
+	float cost = (dist + fromArea.CostSoFar);
 
 	float deltaZ = fromArea.ComputeAdjacentConnectionHeightChange(area);
-	if(deltaZ < -locomotion.DeathDropHeight ||
-		deltaZ >= locomotion.MaxJumpHeight) {
-		return -1.0;
-	} else if(deltaZ >= locomotion.StepHeight ||
-				area.HasAttributes(NAV_MESH_JUMP)) {
+	if(deltaZ >= locomotion.StepHeight ||
+		area.HasAttributes(NAV_MESH_JUMP)) {
 		if(flags & cost_flags_nojumping) {
+			return -1.0;
+		} else if(deltaZ >= locomotion.MaxJumpHeight) {
 			return -1.0;
 		}
 
-		static const float jumpPenalty = 5.0;
-		cost += dist * jumpPenalty;
+		if(flags & cost_flags_fastest) {
+			static const float jumpPenalty = 2.0;
+			cost += (jumpPenalty * dist);
+		} else {
+			static const float jumpPenalty = 2.0;
+			cost += (jumpPenalty * dist);
+		}
+	} else if(deltaZ < -locomotion.DeathDropHeight) {
+		return -1.0;
 	}
 
 	if(area.Underwater) {
+		if(flags & cost_flags_nowater) {
+			return -1.0;
+		}
+
 		static const float underwaterPenalty = 20.0;
-		cost += dist * underwaterPenalty;
+		cost += (underwaterPenalty * dist);
 	}
 
 	if(area.HasAttributes(NAV_MESH_CROUCH)) {
@@ -1628,19 +1658,36 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 			return -1.0;
 		}
 
-		static const float crouchPenalty = 5.0;
-		cost += dist * crouchPenalty;
+		if(flags & cost_flags_fastest) {
+			static const float crouchPenalty = 20.0;
+			cost += (crouchPenalty * dist);
+		} else {
+			static const float crouchPenalty = 5.0;
+			cost += (crouchPenalty * dist);
+		}
+	}
+
+	if(area.HasAttributes(NAV_MESH_WALK)) {
+		if(flags & cost_flags_fastest) {
+			static const float walkPenalty = 20.0;
+			cost += (walkPenalty * dist);
+		} else {
+			static const float walkPenalty = 5.0;
+			cost += (walkPenalty * dist);
+		}
 	}
 
 	if(area.HasAttributes(NAV_MESH_AVOID)) {
-		static const float avoidPenalty = 10.0;
-		cost += dist * avoidPenalty;
+		static const float avoidPenalty = 20.0;
+		cost += (avoidPenalty * dist);
 	}
-	
-	bool safe = !!(flags & cost_flags_safest);
-	bool discrete = !!(flags & cost_flags_discrete);
 
-	if(safe || discrete) {
+	if(area.Damaging) {
+		static const float damagingPenalty = 100.0;
+		cost += (damagingPenalty * dist);
+	}
+
+	if(flags & cost_flags_safest) {
 		int enemy_team = 0;
 		switch(team) {
 			case 2: { enemy_team = 3; }
@@ -1648,9 +1695,29 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 		}
 
 		static const float dangerCost = 100.0;
-		cost += dist * (area.GetDanger(team) * dangerCost);
+		cost += (dist + (dist * (dangerCost * area.GetDanger(team))));
 
 	#if defined GAME_TF2
+		CTFNavArea tfarea = view_as<CTFNavArea>(area);
+		if(tfarea.InCombat) {
+			static const float combatDangerCost = 4.0;
+			cost += ((combatDangerCost * tfarea.CombatIntensity) * dist);
+		}
+
+		static const float enemySentryDangerCost = 5.0;
+		switch(team) {
+			case 2: {
+				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+					cost += (enemySentryDangerCost * dist);
+				}
+			}
+			case 3: {
+				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+					cost += (enemySentryDangerCost * dist);
+				}
+			}
+		}
+
 		int obj = -1;
 		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
 			int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
@@ -1659,36 +1726,37 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 
 				if(GetEntityLastKnownArea(obj) == area) {
 					static const float enemyBuildingCost = 10.0;
-					cost += dist * enemyBuildingCost;
-				}
-			}
-		}
-
-		CTFNavArea tfarea = view_as<CTFNavArea>(area);
-
-		if(tfarea.InCombat) {
-			static const float combatDangerCost = 4.0;
-			cost += dist * (tfarea.CombatIntensity * combatDangerCost);
-		}
-
-		static const float enemySentryDangerCost = 5.0;
-		switch(team) {
-			case 2: {
-				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-					cost += dist * enemySentryDangerCost;
-				}
-			}
-			case 3: {
-				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-					cost += dist * enemySentryDangerCost;
+					cost += (enemyBuildingCost * dist);
 				}
 			}
 		}
 	#endif
 	}
 
-	if(discrete) {
+	if(flags & cost_flags_discrete) {
+		float size = ((area.SizeX + area.SizeY) / 2.0);
+		if(size >= 1.0) {
+			static const float costPerFriendPerUnit = 50000.0;
+			cost += ((costPerFriendPerUnit * float(area.GetPlayerCount(team))) / size);
+		}
+
 	#if defined GAME_TF2
+		CTFNavArea tfarea = view_as<CTFNavArea>(area);
+
+		static const float friendlySentryDangerCost = 2.5;
+		switch(team) {
+			case 3: {
+				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+					cost += (friendlySentryDangerCost * dist);
+				}
+			}
+			case 2: {
+				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+					cost += (friendlySentryDangerCost * dist);
+				}
+			}
+		}
+
 		int obj = -1;
 		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
 			int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
@@ -1697,40 +1765,25 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 
 				if(GetEntityLastKnownArea(obj) == area) {
 					static const float friendlyBuildingCost = 5.0;
-					cost += dist * friendlyBuildingCost;
-				}
-			}
-		}
-
-		CTFNavArea tfarea = view_as<CTFNavArea>(area);
-
-		static const float friendlySentryDangerCost = 2.5;
-		switch(team) {
-			case 3: {
-				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-					cost += dist * friendlySentryDangerCost;
-				}
-			}
-			case 2: {
-				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-					cost += dist * friendlySentryDangerCost;
+					cost += (friendlyBuildingCost * dist);
 				}
 			}
 		}
 	#endif
-
-		static const float teammateCost = 10.0;
-		cost += dist * (area.GetPlayerCount(team) * teammateCost);
 	}
-
-	float preference = 1.0;
 
 	if(flags & cost_flags_mod) {
-		int timeMod = RoundToFloor( GetGameTime() / 10.0 ) + 1;
-		preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+		int timeMod = (RoundToFloor(GetGameTime() / 10.0) + 1);
+		int uniqueID = (view_as<int>(area) >> 7);
+		int nRandomCost = ((entity * uniqueID * timeMod) % 293);
+		cost += (1.0 + float(nRandomCost));
 	}
 
-	cost += dist * preference;
+#if defined GAME_TF2
+	if(area.HasAttributes(NAV_MESH_FUNC_COST)) {
+		cost *= area.ComputeFuncNavCost(entity);
+	}
+#endif
 
 	return cost;
 }

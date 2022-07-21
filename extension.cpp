@@ -2474,7 +2474,7 @@ public:
 	 * Should we collide with this entity?
 	 */
 #if SOURCE_ENGINE == SE_TF2
-	virtual bool ShouldCollideWith( const CBaseEntity *object ) = 0;
+	virtual bool ShouldCollideWith( CBaseEntity *object ) = 0;
 #endif
 	
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
@@ -5559,6 +5559,7 @@ SH_DECL_HOOK0(ILocomotion, GetDesiredSpeed, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetGroundNormal, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, GetVelocity, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK1_void(ILocomotion, FaceTowards, SH_NOATTRIB, 0, const Vector &);
+SH_DECL_HOOK0(ILocomotion, GetFeet, SH_NOATTRIB, 0, const Vector &);
 
 SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
@@ -5575,6 +5576,7 @@ SH_DECL_HOOK0_void(ILocomotion, Update, SH_NOATTRIB, 0);
 SH_DECL_HOOK2_void(ILocomotion, ClimbLadder, SH_NOATTRIB, 0, const CNavLadder *, const CNavArea *);
 SH_DECL_HOOK2_void(ILocomotion, DescendLadder, SH_NOATTRIB, 0, const CNavLadder *, const CNavArea *);
 SH_DECL_HOOK3(ILocomotion, ClimbUpToLedge, SH_NOATTRIB, 0, bool, const Vector &, const Vector &, CBaseEntity * );
+SH_DECL_HOOK1(ILocomotion, ShouldCollideWith, SH_NOATTRIB, 0, bool, CBaseEntity * );
 
 bool g_bInCustomLocomotion = false;
 bool g_bInFlyingLocomotion = false;
@@ -5605,6 +5607,7 @@ public:
 	IPluginFunction *climbladdr = nullptr;
 	IPluginFunction *desceladdr = nullptr;
 	IPluginFunction *climbledge = nullptr;
+	IPluginFunction *collidewith = nullptr;
 	
 	virtual void plugin_unloaded()
 	{
@@ -5613,6 +5616,7 @@ public:
 		climbladdr = nullptr;
 		desceladdr = nullptr;
 		climbledge = nullptr;
+		collidewith = nullptr;
 	}
 	
 	void HookClimbLadder(const CNavLadder *ladder, const CNavArea *area)
@@ -5666,6 +5670,22 @@ public:
 		
 		RETURN_META_VALUE(MRES_SUPERCEDE, res);
 	}
+
+	bool HookShouldCollideWith( CBaseEntity *object )
+	{
+		if(!collidewith) {
+			RETURN_META_VALUE(MRES_SUPERCEDE, true);
+		}
+
+		ILocomotion *loc = META_IFACEPTR(ILocomotion);
+		
+		collidewith->PushCell((cell_t)loc);
+		collidewith->PushCell(gamehelpers->EntityToBCompatRef(object));
+		cell_t res = 0;
+		collidewith->Execute(&res);
+		
+		RETURN_META_VALUE(MRES_SUPERCEDE, res);
+	}
 	
 	virtual bool set_function(const std::string &name, IPluginFunction *func)
 	{
@@ -5675,6 +5695,8 @@ public:
 			desceladdr = func;
 		} else if(name == "ClimbUpToLedge") {
 			climbledge = func;
+		} else if(name == "ShouldCollideWith") {
+			collidewith = func;
 		} else {
 			return false;
 		}
@@ -5713,6 +5735,7 @@ public:
 		SH_REMOVE_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false);
 		SH_REMOVE_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false);
 		SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
+		SH_REMOVE_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false);
 	}
 	
 	void dtor()
@@ -5770,6 +5793,7 @@ public:
 		SH_ADD_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false);
 		SH_ADD_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false);
 		SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
+		SH_ADD_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false);
 	}
 };
 
@@ -6304,10 +6328,6 @@ DETOUR_DECL_MEMBER0(UpdateGroundConstraint, void)
 	((NextBotGroundLocomotionCustom *)this)->DetourUpdateGroundConstraint();
 }
 
-ConVar tf_bot_npc_minion_acceleration( "tf_bot_npc_minion_acceleration", "500" );
-ConVar tf_bot_npc_minion_horiz_damping( "tf_bot_npc_minion_horiz_damping", "2" );
-ConVar tf_bot_npc_minion_vert_damping( "tf_bot_npc_minion_vert_damping", "1" );
-
 ConVar tf_bot_npc_minion_avoid_range( "tf_bot_npc_minion_avoid_range", "100" );
 ConVar tf_bot_npc_minion_avoid_force( "tf_bot_npc_minion_avoid_force", "100" );
 
@@ -6328,6 +6348,10 @@ public:
 		float m_desiredAltitude = 50.0f;
 		Vector m_velocity = vec3_origin;
 		Vector m_acceleration = vec3_origin;
+
+		float accel = 500.0f;
+		float hdamp = 2.0f;
+		float vdamp = 1.0f;
 	};
 
 	unsigned char *vars_ptr()
@@ -6337,6 +6361,8 @@ public:
 
 	void HookApproach(const Vector &goalPos, float goalWeight)
 	{
+		SH_CALL(this, &ILocomotion::Approach)(goalPos, goalWeight);
+
 		Vector flyGoal = goalPos;
 		flyGoal.z += getvars().m_desiredAltitude;
 
@@ -6345,13 +6371,15 @@ public:
 		toGoal.z = 0.0f;
 		toGoal.NormalizeInPlace();
 
-		getvars().m_acceleration += tf_bot_npc_minion_acceleration.GetFloat() * toGoal;
+		getvars().m_acceleration += getvars().accel * toGoal;
 
 		RETURN_META(MRES_SUPERCEDE);
 	}
 
 	void HookReset()
 	{
+		SH_CALL(this, &ILocomotion::Reset)();
+
 		getvars().m_velocity = vec3_origin;
 		getvars().m_acceleration = vec3_origin;
 		getvars().m_desiredSpeed = 0.0f;
@@ -6389,7 +6417,7 @@ public:
 
 		float currentAltitude = me->GetAbsOrigin().z - groundZ;
 		float error = getvars().m_desiredAltitude - currentAltitude;
-		float accelZ = clamp( error, -tf_bot_npc_minion_acceleration.GetFloat(), tf_bot_npc_minion_acceleration.GetFloat() );
+		float accelZ = clamp( error, -getvars().accel, getvars().accel );
 
 		getvars().m_acceleration.z += accelZ;
 	}
@@ -6397,6 +6425,8 @@ public:
 	void HookUpdate()
 	{
 		g_bInFlyingLocomotion = true;
+
+		SH_CALL(this, &ILocomotion::Update)();
 
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 		const float deltaT = GetUpdateInterval();
@@ -6409,7 +6439,7 @@ public:
 		getvars().m_forward = getvars().m_velocity;
 		getvars().m_currentSpeed = getvars().m_forward.NormalizeInPlace();
 
-		Vector damping( tf_bot_npc_minion_horiz_damping.GetFloat(), tf_bot_npc_minion_horiz_damping.GetFloat(), tf_bot_npc_minion_vert_damping.GetFloat() );
+		Vector damping( getvars().hdamp, getvars().hdamp, getvars().vdamp );
 		Vector totalAccel = getvars().m_acceleration - getvars().m_velocity * damping;
 
 		// avoid other minions
@@ -6556,6 +6586,24 @@ public:
 		RETURN_META(MRES_SUPERCEDE);
 	}
 
+	const Vector &HookGetFeet( void )
+	{
+		static Vector feet;
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+
+		trace_t result;
+		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
+		filter.AddClassnameToIgnore( "bot_npc_minion" );
+
+		feet = me->GetAbsOrigin();
+
+		UTIL_TraceLine( feet, feet + Vector( 0, 0, -2000.0f ), MASK_PLAYERSOLID_BRUSHONLY, &filter, &result );
+
+		feet.z = result.endpos.z;
+
+		RETURN_META_VALUE(MRES_SUPERCEDE, feet);
+	}
+
 	const Vector &HookGetGroundNormal( void )
 	{
 		static Vector up( 0, 0, 1.0f );
@@ -6599,6 +6647,7 @@ public:
 		SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetDesiredSpeed), false);
 		SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetGroundNormal), false);
 		SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetVelocity), false);
+		SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetFeet), false);
 		
 		if(!reg) {
 			bot->m_componentList = bytes->m_nextComponent;
@@ -9346,6 +9395,12 @@ cell_t CNavAreaSizeYget(IPluginContext *pContext, const cell_t *params)
 	return sp_ftoc(area->GetSizeY());
 }
 
+cell_t CNavAreaDamagingget(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsDamaging();
+}
+
 cell_t CNavAreaPlaceget(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
@@ -11041,6 +11096,45 @@ cell_t NextBotFlyingLocomotionDesiredAltitudeget(IPluginContext *pContext, const
 	return sp_ftoc(locomotion->getvars().m_desiredAltitude);
 }
 
+cell_t NextBotFlyingLocomotionAccelerationset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().accel = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionAccelerationget(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	return sp_ftoc(locomotion->getvars().accel);
+}
+
+cell_t NextBotFlyingLocomotionHorizontalDampset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().hdamp = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionHorizontalDampget(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	return sp_ftoc(locomotion->getvars().hdamp);
+}
+
+cell_t NextBotFlyingLocomotionVerticalDampset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().vdamp = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionVerticalDampget(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	return sp_ftoc(locomotion->getvars().vdamp);
+}
+
 cell_t GameLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *params)
 {
 	GameLocomotion *area = (GameLocomotion *)params[1];
@@ -12447,6 +12541,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.AvoidanceObstacleHeight.get", CNavAreaAvoidanceObstacleHeightget},
 	{"CNavArea.SizeX.get", CNavAreaSizeXget},
 	{"CNavArea.SizeY.get", CNavAreaSizeYget},
+	{"CNavArea.Damaging.get", CNavAreaDamagingget},
 	{"CNavArea.Place.get", CNavAreaPlaceget},
 	{"CNavArea.HasAvoidanceObstacle", CNavAreaHasAvoidanceObstacle},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
@@ -12545,6 +12640,12 @@ sp_nativeinfo_t natives[] =
 
 	{"NextBotFlyingLocomotion.DesiredAltitude.get", NextBotFlyingLocomotionDesiredAltitudeget},
 	{"NextBotFlyingLocomotion.DesiredAltitude.set", NextBotFlyingLocomotionDesiredAltitudeset},
+	{"NextBotFlyingLocomotion.Acceleration.get", NextBotFlyingLocomotionAccelerationget},
+	{"NextBotFlyingLocomotion.Acceleration.set", NextBotFlyingLocomotionAccelerationset},
+	{"NextBotFlyingLocomotion.HorizontalDamp.get", NextBotFlyingLocomotionHorizontalDampget},
+	{"NextBotFlyingLocomotion.HorizontalDamp.set", NextBotFlyingLocomotionHorizontalDampset},
+	{"NextBotFlyingLocomotion.VerticalDamp.get", NextBotFlyingLocomotionVerticalDampget},
+	{"NextBotFlyingLocomotion.VerticalDamp.set", NextBotFlyingLocomotionVerticalDampset},
 
 #if SOURCE_ENGINE == SE_TF2
 	{"NextBotFlyingLocomotion.MaxAcceleration.set", NextBotGoundLocomotionCustomMaxAccelerationset},
