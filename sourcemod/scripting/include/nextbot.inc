@@ -372,6 +372,12 @@ methodmap INextBotComponent < INextBotEventResponder
 	public native void Reset();
 };
 
+enum TraverseWhenType
+{
+	IMMEDIATELY,
+	EVENTUALLY
+};
+
 methodmap ILocomotion < INextBotComponent
 {
 	property float StepHeight
@@ -482,11 +488,34 @@ methodmap ILocomotion < INextBotComponent
 		public native get();
 	}
 
-	public native void GetGroundMotionVector(float ang[3]);
+	property float StuckDuration
+	{
+		public native get();
+	}
 
+	property float Speed
+	{
+		public native get();
+	}
+
+	property int Ground
+	{
+		public native get();
+	}
+
+	public native void GetGroundMotionVector(float ang[3]);
+	public native void GetMotionVector(float ang[3]);
 	public native void GetVelocity(float ang[3]);
+	public native void GetFeet(float ang[3]);
+	public native void GetGroundNormal(float ang[3]);
 
 	public native bool IsAreaTraversable(CNavArea area);
+	public native bool IsPotentiallyTraversable(const float from[3], const float to[3], TraverseWhenType when = EVENTUALLY, float &fraction = 0.0);
+	public native bool HasPotentialGap(const float from[3], const float to[3], float &fraction = 0.0);
+	public native bool IsGap(const float pos[3], const float fwd[3]);
+	public native bool IsEntityTraversable(int entity, TraverseWhenType when = EVENTUALLY);
+
+	public native void ClearStuckStatus(const char[] reason = "");
 
 	public native void SetDesiredLean(float ang[3]);
 	public native void GetDesiredLean(float ang[3]);
@@ -587,6 +616,12 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 	//public native void Deflect(int deflector);
 
 	//public native void SetVelocity(float accel[3]);
+
+	property float MaxYawRate
+	{
+		public native get();
+		public native set(float height);
+	}
 };
 
 #if defined GAME_TF2

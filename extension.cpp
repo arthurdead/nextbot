@@ -369,6 +369,32 @@ enum InvalidatePhysicsBits_t
 	ANIMATION_CHANGED	= 0x8,
 };
 
+float k_flMaxEntityEulerAngle = 360.0 * 1000.0f;
+
+inline bool IsEntityQAngleReasonable( const QAngle &q )
+{
+	float r = k_flMaxEntityEulerAngle;
+	return
+		q.x > -r && q.x < r &&
+		q.y > -r && q.y < r &&
+		q.z > -r && q.z < r;
+}
+
+float UTIL_VecToYaw( const Vector &vec )
+{
+	if (vec.y == 0 && vec.x == 0)
+		return 0;
+	
+	float yaw = atan2( vec.y, vec.x );
+
+	yaw = RAD2DEG(yaw);
+
+	if (yaw < 0)
+		yaw += 360;
+
+	return yaw;
+}
+
 class CBaseEntity : public IServerEntity
 {
 public:
@@ -480,6 +506,7 @@ public:
 		}
 
 		*(float *)((unsigned char *)this + m_flSimulationTimeOffset) = time;
+		SetEdictStateChanged(this, m_flSimulationTimeOffset);
 	}
 
 	const QAngle& GetAbsAngles( void )
@@ -499,6 +526,50 @@ public:
 		return *(QAngle *)((unsigned char *)this + m_angAbsRotationOffset);
 	}
 	
+	const QAngle& GetLocalAngles( void )
+	{
+		if(m_angRotationOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_angRotation", &info);
+			m_angRotationOffset = info.actual_offset;
+		}
+
+		return *(QAngle *)((unsigned char *)this + m_angRotationOffset);
+	}
+
+	void SetLocalAngles( const QAngle& angles )
+	{
+		if(m_angRotationOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_angRotation", &info);
+			m_angRotationOffset = info.actual_offset;
+		}
+
+		// NOTE: The angle normalize is a little expensive, but we can save
+		// a bunch of time in interpolation if we don't have to invalidate everything
+		// and sometimes it's off by a normalization amount
+
+		// FIXME: The normalize caused problems in server code like momentary_rot_button that isn't
+		//        handling things like +/-180 degrees properly. This should be revisited.
+		//QAngle angleNormalize( AngleNormalize( angles.x ), AngleNormalize( angles.y ), AngleNormalize( angles.z ) );
+
+		// Safety check against NaN's or really huge numbers
+		if ( !IsEntityQAngleReasonable( angles ) )
+		{
+			return;
+		}
+
+		if (*(QAngle *)((unsigned char *)this + m_angRotationOffset) != angles)
+		{
+			InvalidatePhysicsRecursive( ANGLES_CHANGED );
+			*(QAngle *)((unsigned char *)this + m_angRotationOffset) = angles;
+			SetEdictStateChanged(this, m_angRotationOffset);
+			SetSimulationTime( gpGlobals->curtime );
+		}
+	}
+
 	void SetAbsAngles( const QAngle& absAngles )
 	{
 		if(m_angAbsRotationOffset == -1) {
@@ -544,6 +615,7 @@ public:
 		SetIEFlags( GetIEFlags() & ~EFL_DIRTY_ABSTRANSFORM );
 
 		*(QAngle *)((unsigned char *)this + m_angAbsRotationOffset) = absAngles;
+		SetEdictStateChanged(this, m_angAbsRotationOffset);
 		AngleMatrix( absAngles, *(matrix3x4_t *)((unsigned char *)this + m_rgflCoordinateFrameOffset) );
 		MatrixSetColumn( *(Vector *)((unsigned char *)this + m_vecAbsOriginOffset), 3, *(matrix3x4_t *)((unsigned char *)this + m_rgflCoordinateFrameOffset) ); 
 
@@ -572,6 +644,7 @@ public:
 		if (*(QAngle *)((unsigned char *)this + m_angRotationOffset) != angNewRotation)
 		{
 			*(QAngle *)((unsigned char *)this + m_angRotationOffset) = angNewRotation;
+			SetEdictStateChanged(this, m_angRotationOffset);
 			SetSimulationTime( gpGlobals->curtime );
 		}
 	}
@@ -2344,6 +2417,12 @@ public:
 	INextBotComponent *m_nextComponent;									// simple linked list of components in the bot
 };
 
+enum TraverseWhenType 
+{ 
+	IMMEDIATELY,		// the entity will not block our motion - we'll carry right through
+	EVENTUALLY			// the entity will block us until we spend effort to open/destroy it
+};
+
 class ILocomotion : public INextBotComponent
 {
 public:
@@ -2437,11 +2516,7 @@ public:
 	virtual float GetTraversableSlopeLimit( void ) = 0;	// return Z component of unit normal of steepest traversable slope
 
 	// return true if the given entity can be ignored during locomotion
-	enum TraverseWhenType 
-	{ 
-		IMMEDIATELY,		// the entity will not block our motion - we'll carry right through
-		EVENTUALLY			// the entity will block us until we spend effort to open/destroy it
-	};
+	using TraverseWhenType = ::TraverseWhenType;
 
 	/**
 	 * Return true if this locomotor could potentially move along the line given.
@@ -6352,6 +6427,8 @@ public:
 		float accel = 500.0f;
 		float hdamp = 2.0f;
 		float vdamp = 1.0f;
+
+		float yaw = 250.0f;
 	};
 
 	unsigned char *vars_ptr()
@@ -6575,6 +6652,7 @@ public:
 	{
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 
+	#if 0
 		Vector toTarget = target - me->WorldSpaceCenter();
 		toTarget.z = 0.0f;
 
@@ -6582,6 +6660,32 @@ public:
 		VectorAngles( toTarget, angles );
 
 		me->SetAbsAngles( angles );
+	#else
+		const float deltaT = GetUpdateInterval();
+	
+		QAngle angles = me->GetLocalAngles();
+		
+		float desiredYaw = UTIL_VecToYaw( target - GetFeet() );
+
+		float angleDiff = UTIL_AngleDiff( desiredYaw, angles.y );
+		
+		float deltaYaw = GetMaxYawRate() * deltaT;
+		
+		if (angleDiff < -deltaYaw)
+		{
+			angles.y -= deltaYaw;
+		}
+		else if (angleDiff > deltaYaw)
+		{
+			angles.y += deltaYaw;
+		}
+		else
+		{
+			angles.y += angleDiff;
+		}
+		
+		me->SetLocalAngles( angles );
+	#endif
 
 		RETURN_META(MRES_SUPERCEDE);
 	}
@@ -6614,6 +6718,11 @@ public:
 	const Vector &HookGetVelocity( void )
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, getvars().m_velocity);
+	}
+
+	float GetMaxYawRate( void )
+	{
+		return getvars().yaw;
 	}
 
 	void Deflect( CBaseEntity *deflector )
@@ -7878,7 +7987,7 @@ public:
 		if ( lead.LengthSqr() > 36.0f )
 		{
 			float fraction;
-			if ( !mover->IsPotentiallyTraversable( subjectPos, pathTarget, ILocomotion::IMMEDIATELY, &fraction ) )
+			if ( !mover->IsPotentiallyTraversable( subjectPos, pathTarget, ILocomotion::TraverseWhenType::IMMEDIATELY, &fraction ) )
 			{
 				// tried to lead through an unwalkable area - clip to walkable space
 				pathTarget = subjectPos + fraction * ( pathTarget - subjectPos );
@@ -9420,6 +9529,91 @@ cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *para
 	return area->IsAreaTraversable(other);
 }
 
+cell_t ILocomotionIsPotentiallyTraversable(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector from(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	pContext->LocalToPhysAddr(params[3], &addr);
+	Vector to(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+
+	pContext->LocalToPhysAddr(params[5], &addr);
+
+	float fraction = 0.0f;
+	bool ret = area->IsPotentiallyTraversable(from, to, (TraverseWhenType)params[4], &fraction);
+
+	*addr = sp_ftoc(fraction);
+
+	return ret;
+}
+
+cell_t ILocomotionHasPotentialGap(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector from(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	pContext->LocalToPhysAddr(params[3], &addr);
+	Vector to(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+
+	pContext->LocalToPhysAddr(params[4], &addr);
+
+	float fraction = 0.0f;
+	bool ret = area->HasPotentialGap(from, to, &fraction);
+
+	*addr = sp_ftoc(fraction);
+
+	return ret;
+}
+
+cell_t ILocomotionIsGap(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector from(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+	
+	pContext->LocalToPhysAddr(params[3], &addr);
+	Vector to(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+
+	bool ret = area->IsGap(from, to);
+
+	return ret;
+}
+
+cell_t ILocomotionIsEntityTraversable(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	bool ret = area->IsEntityTraversable(pEntity, (TraverseWhenType)params[3]);
+
+	return ret;
+}
+
+cell_t ILocomotionClearStuckStatus(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	
+	char *reason = nullptr;
+	pContext->LocalToString(params[2], &reason);
+
+	area->ClearStuckStatus(reason);
+
+	return 0;
+}
+
 cell_t ILocomotionStepHeightget(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -10599,6 +10793,12 @@ cell_t ILocomotionGroundSpeedget(IPluginContext *pContext, const cell_t *params)
 	return sp_ftoc(area->GetGroundSpeed());
 }
 
+cell_t ILocomotionSpeedget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return sp_ftoc(area->GetSpeed());
+}
+
 cell_t ILocomotionDesiredSpeedset(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -10666,6 +10866,21 @@ cell_t ILocomotionAscendingOrDescendingLadderget(IPluginContext *pContext, const
 	return area->IsAscendingOrDescendingLadder();
 }
 
+cell_t ILocomotionStuckDurationget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+	return sp_ftoc(area->GetStuckDuration());
+}
+
+cell_t ILocomotionGroundget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	CBaseEntity *pEntity = area->GetGround();
+
+	return pEntity ? gamehelpers->EntityToBCompatRef(pEntity) : -1;
+}
+
 cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -10725,6 +10940,51 @@ cell_t ILocomotionGetGroundMotionVector(IPluginContext *pContext, const cell_t *
 	ILocomotion *area = (ILocomotion *)params[1];
 
 	const Vector &ang = area->GetGroundMotionVector();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t ILocomotionGetMotionVector(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	const Vector &ang = area->GetMotionVector();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t ILocomotionGetFeet(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	const Vector &ang = area->GetFeet();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t ILocomotionGetGroundNormal(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	const Vector &ang = area->GetGroundNormal();
 	
 	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[2], &addr);
@@ -11141,6 +11401,12 @@ cell_t GameLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *param
 	return sp_ftoc(area->GetMaxYawRate());
 }
 
+cell_t NextBotFlyingLocomotionMaxYawRateget(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *area = (CNextBotFlyingLocomotion *)params[1];
+	return sp_ftoc(area->GetMaxYawRate());
+}
+
 cell_t GameLocomotionLadderget(IPluginContext *pContext, const cell_t *params)
 {
 	GameLocomotion *area = (GameLocomotion *)params[1];
@@ -11190,6 +11456,13 @@ cell_t GameLocomotionClimbingUpToLedgeset(IPluginContext *pContext, const cell_t
 cell_t GameLocomotionCustomMaxYawRateset(IPluginContext *pContext, const cell_t *params)
 {
 	GameLocomotionCustom *locomotion = (GameLocomotionCustom *)params[1];
+	locomotion->getvars().yaw = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t NextBotFlyingLocomotionMaxYawRateset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
 	locomotion->getvars().yaw = sp_ctof(params[2]);
 	return 0;
 }
@@ -11260,14 +11533,14 @@ cell_t NextBotFlyingLocomotionStepHeightset(IPluginContext *pContext, const cell
 }
 
 #if SOURCE_ENGINE == SE_TF2
-cell_t NextBotGoundLocomotionCustomMaxAccelerationset(IPluginContext *pContext, const cell_t *params)
+cell_t NextBotGroundLocomotionCustomMaxAccelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
 	locomotion->getvars().accel = sp_ctof(params[2]);
 	return 0;
 }
 
-cell_t NextBotGoundLocomotionCustomMaxDecelerationset(IPluginContext *pContext, const cell_t *params)
+cell_t NextBotGroundLocomotionCustomMaxDecelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
 	locomotion->getvars().deaccel = sp_ctof(params[2]);
@@ -12559,6 +12832,10 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.DesiredSpeed.get", ILocomotionDesiredSpeedget},
 	{"ILocomotion.DesiredSpeed.set", ILocomotionDesiredSpeedset},
 	{"ILocomotion.IsAreaTraversable", ILocomotionIsAreaTraversable},
+	{"ILocomotion.IsPotentiallyTraversable", ILocomotionIsPotentiallyTraversable},
+	{"ILocomotion.HasPotentialGap", ILocomotionHasPotentialGap},
+	{"ILocomotion.IsGap", ILocomotionIsGap},
+	{"ILocomotion.IsEntityTraversable", ILocomotionIsEntityTraversable},
 	{"ILocomotion.ClimbingOrJumping.get", ILocomotionIsClimbingOrJumping},
 	{"ILocomotion.ClimbingUpToLedge.get", ILocomotionIsClimbingUpToLedge},
 	{"ILocomotion.JumpingAcrossGap.get", ILocomotionIsJumpingAcrossGap},
@@ -12583,7 +12860,14 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.GetDesiredLean", ILocomotionGetDesiredLean},
 	{"ILocomotion.GroundSpeed.get", ILocomotionGroundSpeedget},
 	{"ILocomotion.GetGroundMotionVector", ILocomotionGetGroundMotionVector},
+	{"ILocomotion.GetMotionVector", ILocomotionGetMotionVector},
+	{"ILocomotion.GetFeet", ILocomotionGetFeet},
+	{"ILocomotion.GetGroundNormal", ILocomotionGetGroundNormal},
 	{"ILocomotion.GetVelocity", ILocomotionGetVelocity},
+	{"ILocomotion.StuckDuration.get", ILocomotionStuckDurationget},
+	{"ILocomotion.ClearStuckStatus", ILocomotionClearStuckStatus},
+	{"ILocomotion.Ground.get", ILocomotionGroundget},
+	{"ILocomotion.Speed.get", ILocomotionSpeedget},
 	{"INextBot.INextBot", INextBotget},
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
@@ -12628,14 +12912,14 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"RetreatPath.RetreatPath", RetreatPathCTORNative},
 #if SOURCE_ENGINE == SE_TF2
-	{"NextBotGoundLocomotionCustom.MaxAcceleration.set", NextBotGoundLocomotionCustomMaxAccelerationset},
-	{"NextBotGoundLocomotionCustom.MaxDeceleration.set", NextBotGoundLocomotionCustomMaxDecelerationset},
+	{"NextBotGroundLocomotionCustom.MaxAcceleration.set", NextBotGroundLocomotionCustomMaxAccelerationset},
+	{"NextBotGroundLocomotionCustom.MaxDeceleration.set", NextBotGroundLocomotionCustomMaxDecelerationset},
 	{"NextBotGroundLocomotion.Gravity.get", NextBotGroundLocomotionGravityget},
 	{"NextBotGroundLocomotion.FrictionForward.get", NextBotGroundLocomotionFrictionForwardget},
 	{"NextBotGroundLocomotion.FrictionSideways.get", NextBotGroundLocomotionFrictionSidewaysget},
-	{"NextBotGoundLocomotionCustom.Gravity.set", NextBotGroundLocomotionCustomGravityset},
-	{"NextBotGoundLocomotionCustom.FrictionForward.set", NextBotGroundLocomotionCustomFrictionForwardset},
-	{"NextBotGoundLocomotionCustom.FrictionSideways.set", NextBotGroundLocomotionCustomFrictionSidewaysset},
+	{"NextBotGroundLocomotionCustom.Gravity.set", NextBotGroundLocomotionCustomGravityset},
+	{"NextBotGroundLocomotionCustom.FrictionForward.set", NextBotGroundLocomotionCustomFrictionForwardset},
+	{"NextBotGroundLocomotionCustom.FrictionSideways.set", NextBotGroundLocomotionCustomFrictionSidewaysset},
 #endif
 
 	{"NextBotFlyingLocomotion.DesiredAltitude.get", NextBotFlyingLocomotionDesiredAltitudeget},
@@ -12646,10 +12930,12 @@ sp_nativeinfo_t natives[] =
 	{"NextBotFlyingLocomotion.HorizontalDamp.set", NextBotFlyingLocomotionHorizontalDampset},
 	{"NextBotFlyingLocomotion.VerticalDamp.get", NextBotFlyingLocomotionVerticalDampget},
 	{"NextBotFlyingLocomotion.VerticalDamp.set", NextBotFlyingLocomotionVerticalDampset},
+	{"NextBotFlyingLocomotion.MaxYawRate.get", NextBotFlyingLocomotionMaxYawRateget},
+	{"NextBotFlyingLocomotion.MaxYawRate.set", NextBotFlyingLocomotionMaxYawRateset},
 
 #if SOURCE_ENGINE == SE_TF2
-	{"NextBotFlyingLocomotion.MaxAcceleration.set", NextBotGoundLocomotionCustomMaxAccelerationset},
-	{"NextBotFlyingLocomotion.MaxDeceleration.set", NextBotGoundLocomotionCustomMaxDecelerationset},
+	{"NextBotFlyingLocomotion.MaxAcceleration.set", NextBotFlyingLocomotionMaxAccelerationset},
+	{"NextBotFlyingLocomotion.MaxDeceleration.set", NextBotFlyingLocomotionMaxDecelerationset},
 #endif
 	{"NextBotFlyingLocomotion.StepHeight.set", NextBotFlyingLocomotionStepHeightset},
 	{"NextBotFlyingLocomotion.MaxJumpHeight.set", NextBotFlyingLocomotionMaxJumpHeightset},
