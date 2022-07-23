@@ -1189,6 +1189,81 @@ methodmap INextBot < INextBotEventResponder
 	public native float GetRangeSquaredToEntity(int entity);
 	public native float GetRangeSquaredToVector(float vec[3]);
 
+	public float GetDistanceBetweenEntity(int other)
+	{
+		float this_pos[3];
+		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+
+		float other_pos[3];
+		GetEntPropVector(other, Prop_Data, "m_vecAbsOrigin", other_pos);
+
+		float sub[3];
+		SubtractVectors(this_pos, other_pos, sub);
+
+		return GetVectorLength(sub, false);
+	}
+
+	public float GetDistanceBetweenVector(const float other_pos[3])
+	{
+		float this_pos[3];
+		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+
+		float sub[3];
+		SubtractVectors(this_pos, other_pos, sub);
+
+		return GetVectorLength(sub, false);
+	}
+
+	public bool IsDistanceBetweenLessThanEntity(int other, float range)
+	{
+		float this_pos[3];
+		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+
+		float other_pos[3];
+		GetEntPropVector(other, Prop_Data, "m_vecAbsOrigin", other_pos);
+
+		float sub[3];
+		SubtractVectors(this_pos, other_pos, sub);
+
+		return (GetVectorLength(sub, true) < (range * range));
+	}
+
+	public bool IsDistanceBetweenLessThanVector(const float other_pos[3], float range)
+	{
+		float this_pos[3];
+		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+
+		float sub[3];
+		SubtractVectors(this_pos, other_pos, sub);
+
+		return (GetVectorLength(sub, true) < (range * range));
+	}
+
+	public bool IsDistanceBetweenGreaterThanEntity(int other, float range)
+	{
+		float this_pos[3];
+		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+
+		float other_pos[3];
+		GetEntPropVector(other, Prop_Data, "m_vecAbsOrigin", other_pos);
+
+		float sub[3];
+		SubtractVectors(this_pos, other_pos, sub);
+
+		return (GetVectorLength(sub, true) > (range * range));
+	}
+
+	public bool IsDistanceBetweenGreaterThanVector(const float other_pos[3], float range)
+	{
+		float this_pos[3];
+		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+
+		float sub[3];
+		SubtractVectors(this_pos, other_pos, sub);
+
+		return (GetVectorLength(sub, true) > (range * range));
+	}
+
 #if defined GAME_L4D2
 	public native float Get2DRangeToEntity(int entity);
 	public native float Get2DRangeToVector(float vec[3]);

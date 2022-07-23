@@ -696,6 +696,18 @@ public:
 		return false;
 	}
 
+	const char* GetClassname()
+	{
+		if(m_iClassnameOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_iClassname", &info);
+			m_iClassnameOffset = info.actual_offset;
+		}
+
+		return STRING( *(string_t *)((unsigned char *)this + m_iClassnameOffset) );
+	}
+
 	void SetIEFlags(int flags)
 	{
 		if(m_iEFlagsOffset == -1) {
@@ -3623,7 +3635,14 @@ public:
 	
 	const char *GetDebugIdentifier( void )
 	{
-		return "";//MyNextBotPointer()->GetDebugIdentifier();
+	#if 0
+		return MyNextBotPointer()->GetDebugIdentifier();
+	#else
+		const int nameSize = 256;
+		static char name[nameSize];
+		Q_snprintf(name, nameSize, "%s(#%d)", GetClassname(), entindex());
+		return name;
+	#endif
 	}
 	
 	bool IsDebugging( unsigned int type )
