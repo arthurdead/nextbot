@@ -3,6 +3,10 @@
 #endif
 #define nextbot_included
 
+#if !defined GAME_TF2 && !defined GAME_L4D2
+	#error please define either GAME_TF2 or GAME_L4D2
+#endif
+
 #if defined GAME_TF2
 	#define TEAM_ANY -2
 #elseif defined GAME_L4D2
@@ -10,6 +14,37 @@
 #endif
 
 #define BEHAVIOR_REASON_MAX 64
+
+enum EventResultPriorityType
+{
+	RESULT_NONE,		// no result
+	RESULT_TRY,			// use this result, or toss it out, either is ok
+	RESULT_IMPORTANT,	// try extra-hard to use this result
+	RESULT_CRITICAL		// this result must be used - emit an error if it can't be
+};
+
+methodmap BehaviorActionEntry < Handle
+{
+	public native BehaviorActionEntry(const char[] name);
+	
+	public native void set_function(const char[] name, nextbot_functions func);
+	
+	public native BehaviorAction create();
+};
+
+methodmap BehaviorAction
+{
+	property BehaviorActionEntry Entry
+	{
+		public native get();
+	}
+	
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
+};
 
 enum struct BehaviorResult
 {
@@ -1038,37 +1073,6 @@ enum BehaviorResultType
 	BEHAVIOR_SUSPEND_FOR,		// put the current action on hold for the new action
 	BEHAVIOR_DONE,				// this action has finished, resume suspended action
 	BEHAVIOR_SUSTAIN,			// for use with event handlers - a way to say "It's important to keep doing what I'm doing"
-};
-
-enum EventResultPriorityType
-{
-	RESULT_NONE,		// no result
-	RESULT_TRY,			// use this result, or toss it out, either is ok
-	RESULT_IMPORTANT,	// try extra-hard to use this result
-	RESULT_CRITICAL		// this result must be used - emit an error if it can't be
-};
-
-methodmap BehaviorActionEntry < Handle
-{
-	public native BehaviorActionEntry(const char[] name);
-	
-	public native void set_function(const char[] name, nextbot_functions func);
-	
-	public native BehaviorAction create();
-};
-
-methodmap BehaviorAction
-{
-	property BehaviorActionEntry Entry
-	{
-		public native get();
-	}
-	
-	public native void set_data(const char[] name, any data);
-	public native any get_data(const char[] name);
-	
-	public native void set_data_array(const char[] name, any[] data, int len);
-	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
 #define BehaviorAction_Null (view_as<BehaviorAction>(Address_Null))
