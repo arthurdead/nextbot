@@ -4588,7 +4588,9 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 #ifdef __HAS_DAMAGERULES
-		g_pDamageRules->PushDamageInfo(func, info);
+		if(g_pDamageRules) {
+			g_pDamageRules->PushDamageInfo(func, info);
+		}
 #endif
 		cell_t resvars[RESVARS_SIZE]{0};
 		initvars(resvars, result);
@@ -4616,7 +4618,9 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 #ifdef __HAS_DAMAGERULES
-		g_pDamageRules->PushDamageInfo(func, info);
+		if(g_pDamageRules) {
+			g_pDamageRules->PushDamageInfo(func, info);
+		}
 #endif
 		cell_t resvars[RESVARS_SIZE]{0};
 		initvars(resvars, result);
@@ -4645,7 +4649,9 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(victim));
 #ifdef __HAS_DAMAGERULES
-		g_pDamageRules->PushDamageInfo(func, info);
+		if(g_pDamageRules) {
+			g_pDamageRules->PushDamageInfo(func, info);
+		}
 #endif
 		cell_t resvars[RESVARS_SIZE]{0};
 		initvars(resvars, result);
@@ -12708,7 +12714,9 @@ cell_t CombatCharacterEventKilled(IPluginContext *pContext, const cell_t *params
 	
 #ifdef __HAS_DAMAGERULES
 	CTakeDamageInfo info{};
-	g_pDamageRules->ParamToDamageInfo(pContext, params[2], info);
+	if(g_pDamageRules) {
+		g_pDamageRules->ParamToDamageInfo(pContext, params[2], info);
+	}
 	pCombat->Event_Killed(info);
 #else
 	return pContext->ThrowNativeError("Ext was compiled without damagerules");
@@ -13511,7 +13519,7 @@ void Sample::SDK_OnAllLoaded()
 bool Sample::QueryRunning(char *error, size_t maxlength)
 {
 #ifdef __HAS_DAMAGERULES
-	SM_CHECK_IFACE(DAMAGERULES, g_pDamageRules);
+	//SM_CHECK_IFACE(DAMAGERULES, g_pDamageRules);
 #endif
 	return true;
 }
