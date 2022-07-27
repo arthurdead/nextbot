@@ -7,6 +7,8 @@
 	#error please define either GAME_TF2 or GAME_L4D2
 #endif
 
+#include <sdktools>
+
 #if defined GAME_TF2
 	#define TEAM_ANY -2
 #elseif defined GAME_L4D2
