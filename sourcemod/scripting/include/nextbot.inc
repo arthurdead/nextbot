@@ -1056,9 +1056,6 @@ methodmap IBodyCustom < IBody
 	}
 #endif
 
-	public native void SetHullMins(float vec[3]);
-	public native void SetHullMaxs(float vec[3]);
-	
 	public native void set_function(const char[] name, nextbot_functions func);
 
 	public native void set_data(const char[] name, any data);
@@ -1614,47 +1611,63 @@ native Address AllocateInfectedNextBotCombatCharacter(int size_modifier, int cls
 native int GetInfectedSize();
 #endif
 
-stock Address datamaps_allocatenextbot(int size_modifier, any data)
+#if defined datamaps_included
+static Address datamaps_allocatenextbot(int size_modifier, any data)
 { return AllocateNextBotCombatCharacter(size_modifier); }
 
 #if defined GAME_L4D2
-stock Address datamaps_allocateinfectednextbot(int size_modifier, int data)
+static Address datamaps_allocateinfectednextbot(int size_modifier, int data)
 { return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
 #endif
 
-#if defined datamaps_included
-stock CustomSendtable sendtable_from_nextbot_factory(CustomEntityFactory factory)
-{ return CustomSendtable.from_factory(factory, "NextBotCombatCharacter"); }
-
-#if defined GAME_L4D2
-stock CustomSendtable sendtable_from_infected_factory(CustomEntityFactory factory)
-{ return CustomSendtable.from_factory(factory, "Infected"); }
-#endif
-
-stock CustomEntityFactory register_nextbot_factory(const char[] classname, CustomSendtable &table = null)
+stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name)
 {
+	char netname[64];
+	netname[0] = 'C';
+	strcopy(netname[1], sizeof(netname)-1, name);
+
 	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
-	table = sendtable_from_nextbot_factory(factory);
-	return factory;
+	CustomSendtable table = CustomSendtable.from_factory(factory, "NextBotCombatCharacter");
+	table.set_network_name(netname);
+	CustomDatamap datamap = CustomDatamap.from_factory(factory);
+	datamap.set_name(netname);
+
+	return datamap;
 }
 
 #if defined GAME_L4D2
 #if defined _moreinfected_inc_
-stock CustomEntityFactory register_infected_nextbot_factory(const char[] classname, CustomSendtable &table = null, ZombieClassType cls = ZombieClass_Common)
+stock CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, ZombieClassType cls = ZombieClass_Common)
 #else
-stock CustomEntityFactory register_infected_nextbot_factory(const char[] classname, CustomSendtable &table = null, int cls = 0)
+stock CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, int cls = 0)
 #endif
 {
+	char netname[64];
+	netname[0] = 'C';
+	strcopy(netname[1], sizeof(netname)-1, name);
+
 	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocateinfectednextbot, GetInfectedSize(), cls);
-	table = sendtable_from_nextbot_factory(factory);
-	return factory;
+	CustomSendtable table = CustomSendtable.from_factory(factory, "NextBotCombatCharacter");
+	table.set_network_name(netname);
+	CustomDatamap datamap = CustomDatamap.from_factory(factory);
+	datamap.set_name(netname);
+
+	return datamap;
 }
 
-stock CustomEntityFactory register_infected_factory(const char[] classname, CustomSendtable &table = null)
+stock CustomDatamap register_infected_factory(const char[] classname, cosnt char[] name)
 {
-	CustomEntityFactory factory = EntityFactoryDictionary.register_based_name(classname, "infected");
-	table = sendtable_from_infected_factory(factory);
-	return factory;
+	char netname[64];
+	netname[0] = 'C';
+	strcopy(netname[1], sizeof(netname)-1, name);
+
+	CustomDatamap factory = EntityFactoryDictionary.register_based_name(classname, "infected");
+	CustomSendtable table = CustomSendtable.from_factory(factory, "Infected");
+	table.set_network_name(netname);
+	CustomDatamap datamap = CustomDatamap.from_factory(factory);
+	datamap.set_name(netname);
+
+	return datamap;
 }
 #endif
 #endif

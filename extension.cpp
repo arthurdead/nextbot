@@ -5722,7 +5722,7 @@ public:
 	void HookClimbLadder(const CNavLadder *ladder, const CNavArea *area)
 	{
 		if(!climbladdr) {
-			RETURN_META(MRES_SUPERCEDE);
+			RETURN_META(MRES_IGNORED);
 		}
 		
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
@@ -5738,7 +5738,7 @@ public:
 	void HookDescendLadder(const CNavLadder *ladder, const CNavArea *area)
 	{
 		if(!desceladdr) {
-			RETURN_META(MRES_SUPERCEDE);
+			RETURN_META(MRES_IGNORED);
 		}
 		
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
@@ -5754,7 +5754,7 @@ public:
 	bool HookClimbUpToLedge( const Vector &landingGoal, const Vector &landingForward, CBaseEntity *obstacle )
 	{
 		if(!climbledge) {
-			RETURN_META_VALUE(MRES_SUPERCEDE, false);
+			RETURN_META_VALUE(MRES_IGNORED, false);
 		}
 		
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
@@ -5774,7 +5774,7 @@ public:
 	bool HookShouldCollideWith( CBaseEntity *object )
 	{
 		if(!collidewith) {
-			RETURN_META_VALUE(MRES_SUPERCEDE, true);
+			RETURN_META_VALUE(MRES_IGNORED, true);
 		}
 
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
@@ -6375,6 +6375,49 @@ public:
 			}		
 		}
 	}
+
+	bool DetourClimbUpToLedge( const Vector &landingGoal, const Vector &landingForward, const CBaseEntity *obstacle )
+	{
+		Vector vecMyPos = GetBot()->GetPosition();
+		vecMyPos.z += GetStepHeight();
+
+		float flActualHeight = landingGoal.z - vecMyPos.z;
+		float height = flActualHeight;
+		if (height < 16.0)
+		{
+			height = 16.0;
+		}
+
+		float additionalHeight = 20.0;
+		if (height < 32)
+		{
+			additionalHeight += 8.0;
+		}
+
+		height += additionalHeight;
+
+		float speed = sqrt(2.0 * GetGravity() * height);
+		float time = speed / GetGravity();
+
+		time += sqrt((2.0 * additionalHeight) / GetGravity());
+
+		Vector vecJumpVel = landingGoal - vecMyPos;
+		vecJumpVel /= time;
+		vecJumpVel.z = speed;
+
+		float flJumpSpeed = vecJumpVel.Length();
+		float flMaxSpeed = 650.0;
+		if (flJumpSpeed > flMaxSpeed)
+		{
+			vecJumpVel[0] *= flMaxSpeed / flJumpSpeed;
+			vecJumpVel[1] *= flMaxSpeed / flJumpSpeed;
+			vecJumpVel[2] *= flMaxSpeed / flJumpSpeed;
+		}
+
+		GetBot()->SetPosition(vecMyPos);
+		SetVelocity(vecJumpVel);
+		return true;
+	}
 	
 	static bool vtable_assigned;
 	
@@ -6398,6 +6441,7 @@ public:
 			
 			vtable[vfunc_index(&NextBotGroundLocomotion::Reset)] = func_to_void(&NextBotGroundLocomotionCustom::DetourReset);
 			vtable[vfunc_index(&NextBotGroundLocomotion::GetFeet)] = func_to_void(&NextBotGroundLocomotionCustom::DetourGetFeet);
+			vtable[vfunc_index(&NextBotGroundLocomotion::ClimbUpToLedge)] = func_to_void(&NextBotGroundLocomotionCustom::DetourClimbUpToLedge);
 			
 			vtable_assigned = true;
 		}
@@ -6897,17 +6941,8 @@ public:
 	IBodyCustom( INextBot *bot, bool reg, IdentityToken_t *id )
 		: IBody( bot, reg ), IPluginNextBotComponent(id)
 	{
-		
 		HullWidth = 26.0f;
 		HullHeight = 68.0f;
-		
-		hullMins.x = -HullWidth/2.0f;
-		hullMins.y = hullMins.x;
-		hullMins.z = 0.0f;
-		
-		hullMaxs.x = HullWidth/2.0f;
-		hullMaxs.y = hullMaxs.x;
-		hullMaxs.z = HullHeight;
 	}
 
 	bool StartActivity( Activity act, unsigned int flags = 0 ) override { return true; }
@@ -6929,16 +6964,6 @@ public:
 		HullHeight = height;
 	}
 	
-	void SetHullMins(Vector &&height)
-	{
-		hullMins = std::move(height);
-	}
-	
-	void SetHullMaxs(Vector &&height)
-	{
-		hullMaxs = std::move(height);
-	}
-	
 	float HullWidth;
 	float HullHeight;
 	float StandHullHeight = 68.0f;
@@ -6947,15 +6972,11 @@ public:
 #if SOURCE_ENGINE == SE_TF2
 	int CollisionGroup = COLLISION_GROUP_NPC;
 #endif
-	Vector hullMaxs;
-	Vector hullMins;
 	
 	float GetHullWidth( void ) override { return HullWidth; }							// width of bot's collision hull in XY plane
 	float GetHullHeight( void ) override { return HullHeight; }							// height of bot's current collision hull based on posture
 	float GetStandHullHeight( void ) override { return StandHullHeight; }						// height of bot's collision hull when standing
 	float GetCrouchHullHeight( void ) override { return CrouchHullHeight; }					// height of bot's collision hull when crouched
-	const Vector &GetHullMins( void ) override { return hullMins; }					// return current collision hull minimums based on actual body posture
-	const Vector &GetHullMaxs( void ) override { return hullMaxs; }					// return current collision hull maximums based on actual body posture
 
 	unsigned int GetSolidMask( void ) override { return SolidMask; }					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
 #if SOURCE_ENGINE == SE_TF2
@@ -10919,32 +10940,6 @@ cell_t ILocomotionSetDesiredLean(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
-cell_t IBodyCustomSetHullMins(IPluginContext *pContext, const cell_t *params)
-{
-	IBodyCustom *area = (IBodyCustom *)params[1];
-
-	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
-	Vector ang(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
-	
-	area->SetHullMins(std::move(ang));
-	
-	return 0;
-}
-
-cell_t IBodyCustomSetHullMaxs(IPluginContext *pContext, const cell_t *params)
-{
-	IBodyCustom *area = (IBodyCustom *)params[1];
-
-	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
-	Vector ang(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
-	
-	area->SetHullMaxs(std::move(ang));
-	
-	return 0;
-}
-
 cell_t ILocomotionGetDesiredLean(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -12377,7 +12372,7 @@ public:
 	bool HookIsAbleToBlockMovementOf(INextBot *bot)
 	{
 		if(!ableblock) {
-			RETURN_META_VALUE(MRES_SUPERCEDE, true);
+			RETURN_META_VALUE(MRES_IGNORED, true);
 		}
 		
 		INextBot *pThis = META_IFACEPTR(INextBot);
@@ -12394,7 +12389,7 @@ public:
 	bool HookShouldTouch(CBaseEntity *bot)
 	{
 		if(!shouldtouch) {
-			RETURN_META_VALUE(MRES_SUPERCEDE, true);
+			RETURN_META_VALUE(MRES_IGNORED, true);
 		}
 		
 		INextBot *pThis = META_IFACEPTR(INextBot);
@@ -13103,8 +13098,6 @@ sp_nativeinfo_t natives[] =
 #if SOURCE_ENGINE == SE_TF2
 	{"IBodyCustom.CollisionGroup.set", IBodyCustomCollisionGroupset},
 #endif
-	{"IBodyCustom.SetHullMins", IBodyCustomSetHullMins},
-	{"IBodyCustom.SetHullMaxs", IBodyCustomSetHullMaxs},
 #if SOURCE_ENGINE == SE_TF2
 	{"CKnownEntity.Entity.get", CKnownEntityEntityget},
 	{"CKnownEntity.LastKnownPositionBeenSeen.get", CKnownEntityLastKnownPositionBeenSeenget},
@@ -13503,8 +13496,14 @@ void Sample::OnPluginUnloaded(IPlugin *plugin)
 		std::vector<IPluginNextBotComponent *> &vec = it->second;
 		
 		for(IPluginNextBotComponent *inte : vec) {
+			if(!inte) {
+				continue;
+			}
+
 			inte->plugin_unloaded();
 		}
+
+		spnbcomponents.erase(it);
 	}
 }
 
