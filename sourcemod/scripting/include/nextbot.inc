@@ -1620,20 +1620,54 @@ static Address datamaps_allocateinfectednextbot(int size_modifier, int data)
 { return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
 #endif
 
-stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name)
+stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] realnet, const char[] clientnet, datamaps_functions alloc, int size, any data, CustomSendtable &table = null)
 {
 	char netname[64];
 	netname[0] = 'C';
 	strcopy(netname[1], sizeof(netname)-1, name);
 
-	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocatenextbot, GetNextBotCombatCharacterSize());
-	CustomSendtable table = CustomSendtable.from_factory(factory, "NextBotCombatCharacter");
+	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, alloc, size, data);
+	table = CustomSendtable.from_factory(factory, realnet);
+	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
+		table.override_with(clientnet);
+	}
 	table.set_network_name(netname);
 	CustomDatamap datamap = CustomDatamap.from_factory(factory);
 	datamap.set_name(netname);
 
 	return datamap;
 }
+
+stock CustomDatamap __register_nb_factory_based(const char[] classname, const char[] name, const char[] realnet, const char[] clientnet, const char[] based, CustomSendtable &table = null)
+{
+	char netname[64];
+	netname[0] = 'C';
+	strcopy(netname[1], sizeof(netname)-1, name);
+
+	CustomEntityFactory factory = EntityFactoryDictionary.register_based_name(classname, based);
+	table = CustomSendtable.from_factory(factory, realnet);
+	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
+		table.override_with(clientnet);
+	}
+	table.set_network_name(netname);
+	CustomDatamap datamap = CustomDatamap.from_factory(factory);
+	datamap.set_name(netname);
+
+	return datamap;
+}
+
+stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name)
+{ return __register_nb_factory_func(classname, name, "NextBotCombatCharacter", NULL_STRING, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0); }
+
+#if defined GAME_TF2
+stock CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name)
+{
+	CustomSendtable table;
+	CustomDatamap datamap = __register_nb_factory_func(classname, name, "NextBotCombatCharacter", "CTFTankBoss", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table);
+	table.add_prop_float("m_lastHealthPercentage", 0.0, 1.0, 11, SPROP_NOSCALE);
+	return datamap;
+}
+#endif
 
 #if defined GAME_L4D2
 #if defined _moreinfected_inc_
@@ -1641,34 +1675,10 @@ stock CustomDatamap register_infected_nextbot_factory(const char[] classname, co
 #else
 stock CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, int cls = 0)
 #endif
-{
-	char netname[64];
-	netname[0] = 'C';
-	strcopy(netname[1], sizeof(netname)-1, name);
-
-	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, datamaps_allocateinfectednextbot, GetInfectedSize(), cls);
-	CustomSendtable table = CustomSendtable.from_factory(factory, "NextBotCombatCharacter");
-	table.set_network_name(netname);
-	CustomDatamap datamap = CustomDatamap.from_factory(factory);
-	datamap.set_name(netname);
-
-	return datamap;
-}
+{ return __register_nb_factory_func(classname, name, "NextBotCombatCharacter", NULL_STRING, datamaps_allocateinfectednextbot, GetInfectedSize(), cls); }
 
 stock CustomDatamap register_infected_factory(const char[] classname, cosnt char[] name)
-{
-	char netname[64];
-	netname[0] = 'C';
-	strcopy(netname[1], sizeof(netname)-1, name);
-
-	CustomDatamap factory = EntityFactoryDictionary.register_based_name(classname, "infected");
-	CustomSendtable table = CustomSendtable.from_factory(factory, "Infected");
-	table.set_network_name(netname);
-	CustomDatamap datamap = CustomDatamap.from_factory(factory);
-	datamap.set_name(netname);
-
-	return datamap;
-}
+{ return __register_nb_factory_based(classname, name, "Infected", NULL_STRING, "infected"); }
 #endif
 #endif
 
