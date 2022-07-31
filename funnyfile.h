@@ -4,7 +4,18 @@
 class HandleSystemHack : public HandleSystem
 {
 public:
-	HandleType_t __CreateType(const char *name, 
+	HandleType_t CreateTypeAllowChild(const char *name, 
+										IHandleTypeDispatch *dispatch, 
+										HandleType_t parent, 
+										const TypeAccess *typeAccess, 
+										const HandleAccess *hndlAccess, 
+										IdentityToken_t *ident,
+										HandleError *err)
+	{
+		return CreateType__(name, dispatch, parent, typeAccess, hndlAccess, ident, err);
+	}
+
+	HandleType_t CreateType__(const char *name, 
 										IHandleTypeDispatch *dispatch, 
 										HandleType_t parent, 
 										const TypeAccess *typeAccess, 
@@ -44,6 +55,16 @@ public:
 		if (parent != 0)
 		{
 			isChild = true;
+		#if 0
+			if (parent & HANDLESYS_SUBTYPE_MASK)
+			{
+				if (err)
+				{
+					*err = HandleError_NoInherit;
+				}
+				return 0;
+			}
+		#endif
 			if (parent >= HANDLESYS_TYPEARRAY_SIZE
 				|| m_Types[parent].dispatch == NULL)
 			{
@@ -131,11 +152,11 @@ public:
 		pType->dispatch = dispatch;
 		if (name && name[0] != '\0')
 		{
-#ifdef __OLDSM
+		#ifdef __OLDSM
 			pType->name = new ke::AString(name);
-#else
+		#else
 			pType->name = std::make_unique<std::string>(name);
-#endif
+		#endif
 			m_TypeLookup.insert(name, pType);
 		}
 

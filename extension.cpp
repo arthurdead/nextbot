@@ -13462,13 +13462,13 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
 #if SOURCE_ENGINE == SE_TF2
-	CTFPathFollowerHandleType = ((HandleSystemHack *)handlesys)->__CreateType("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	CTFPathFollowerHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 #endif
-	ChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("ChasePath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
-	RetreatPathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("RetreatPath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
-	DirectChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("DirectChasePath", this, ChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	ChasePathHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("ChasePath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	RetreatPathHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("RetreatPath", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	DirectChasePathHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("DirectChasePath", this, ChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	InfectedChasePathHandleType = ((HandleSystemHack *)handlesys)->__CreateType("InfectedChasePath", this, DirectChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
+	InfectedChasePathHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("InfectedChasePath", this, DirectChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 #endif
 	
 	BehaviorEntryHandleType = handlesys->CreateType("BehaviorActionEntry", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
