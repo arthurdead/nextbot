@@ -138,7 +138,7 @@
 			"ILocomotion::ILocomotion"
 			{
 				"library"	"server"
-				"linux"		"@_ZN11ILocomotionC2EP8INextBot"
+				"linux"		"@_ZN11ILocomotionC1EP8INextBot"
 			}
 		}
 	}
@@ -374,7 +374,7 @@
 			"IVision::IVision"
 			{
 				"library"	"server"
-				"linux"		"@_ZN7IVisionC2EP8INextBot"
+				"linux"		"@_ZN7IVisionC1EP8INextBot"
 			}
 			"NextBotGroundLocomotion::TraverseLadder"
 			{
