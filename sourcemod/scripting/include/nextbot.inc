@@ -1620,14 +1620,14 @@ static Address datamaps_allocateinfectednextbot(int size_modifier, int data)
 { return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
 #endif
 
-stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] realnet, const char[] clientnet, datamaps_functions alloc, int size, any data, CustomSendtable &table = null)
+stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] clientnet, datamaps_functions alloc, int size, any data, CustomSendtable &table = null)
 {
 	char netname[64];
 	netname[0] = 'C';
 	strcopy(netname[1], sizeof(netname)-1, name);
 
 	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, alloc, size, data);
-	table = CustomSendtable.from_factory(factory, realnet);
+	table = CustomSendtable.from_factory(factory);
 	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
 		table.override_with(clientnet);
 	}
@@ -1638,14 +1638,14 @@ stock CustomDatamap __register_nb_factory_func(const char[] classname, const cha
 	return datamap;
 }
 
-stock CustomDatamap __register_nb_factory_based(const char[] classname, const char[] name, const char[] realnet, const char[] clientnet, const char[] based, CustomSendtable &table = null)
+stock CustomDatamap __register_nb_factory_based(const char[] classname, const char[] name, const char[] clientnet, const char[] based, CustomSendtable &table = null)
 {
 	char netname[64];
 	netname[0] = 'C';
 	strcopy(netname[1], sizeof(netname)-1, name);
 
 	CustomEntityFactory factory = EntityFactoryDictionary.register_based_name(classname, based);
-	table = CustomSendtable.from_factory(factory, realnet);
+	table = CustomSendtable.from_factory(factory);
 	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
 		table.override_with(clientnet);
 	}
@@ -1657,13 +1657,13 @@ stock CustomDatamap __register_nb_factory_based(const char[] classname, const ch
 }
 
 stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name)
-{ return __register_nb_factory_func(classname, name, "NextBotCombatCharacter", NULL_STRING, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0); }
+{ return __register_nb_factory_func(classname, name, NULL_STRING, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0); }
 
 #if defined GAME_TF2
 stock CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name)
 {
 	CustomSendtable table;
-	CustomDatamap datamap = __register_nb_factory_func(classname, name, "NextBotCombatCharacter", "CTFTankBoss", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table);
+	CustomDatamap datamap = __register_nb_factory_func(classname, name, "CTFTankBoss", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table);
 	table.add_prop_float("m_lastHealthPercentage", 0.0, 1.0, 11, SPROP_NOSCALE);
 	return datamap;
 }
@@ -1675,10 +1675,10 @@ stock CustomDatamap register_infected_nextbot_factory(const char[] classname, co
 #else
 stock CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, int cls = 0)
 #endif
-{ return __register_nb_factory_func(classname, name, "NextBotCombatCharacter", NULL_STRING, datamaps_allocateinfectednextbot, GetInfectedSize(), cls); }
+{ return __register_nb_factory_func(classname, name, NULL_STRING, datamaps_allocateinfectednextbot, GetInfectedSize(), cls); }
 
 stock CustomDatamap register_infected_factory(const char[] classname, cosnt char[] name)
-{ return __register_nb_factory_based(classname, name, "Infected", NULL_STRING, "infected"); }
+{ return __register_nb_factory_based(classname, name, NULL_STRING, "infected"); }
 #endif
 #endif
 
