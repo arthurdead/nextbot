@@ -1656,17 +1656,20 @@ stock CustomDatamap __register_nb_factory_based(const char[] classname, const ch
 	return datamap;
 }
 
-stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name)
-{ return __register_nb_factory_func(classname, name, NULL_STRING, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0); }
+stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name, const char[] clientnet = NULL_STRING, CustomSendtable &table = null)
+{ return __register_nb_factory_func(classname, name, clientnet, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table); }
 
 #if defined GAME_TF2
 stock CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name)
 {
 	CustomSendtable table;
-	CustomDatamap datamap = __register_nb_factory_func(classname, name, "CTFTankBoss", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table);
+	CustomDatamap datamap = register_nextbot_factory(classname, name, "CTFTankBoss", table);
 	table.add_prop_float("m_lastHealthPercentage", 0.0, 1.0, 11, SPROP_NOSCALE);
 	return datamap;
 }
+
+stock CustomDatamap register_robot_nextbot_factory(const char[] classname, const char[] name)
+{ return register_nextbot_factory(classname, name, "CTFRobotDestruction_Robot"); }
 #endif
 
 #if defined GAME_L4D2
