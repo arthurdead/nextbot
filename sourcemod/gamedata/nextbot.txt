@@ -140,6 +140,21 @@
 				"library"	"server"
 				"linux"		"@_ZN11ILocomotionC1EP8INextBot"
 			}
+			"CNavArea::m_masterMarker"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8CNavArea14m_masterMarkerE"
+			}
+			"CNavArea::m_openList"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8CNavArea10m_openListE"
+			}
+			"CNavArea::m_openListTail"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8CNavArea14m_openListTailE"
+			}
 		}
 	}
 	"left4dead2"

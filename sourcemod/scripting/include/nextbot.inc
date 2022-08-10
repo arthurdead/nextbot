@@ -15,6 +15,8 @@
 	#define TEAM_ANY -1
 #endif
 
+#define STEP_HEIGHT 18.0
+
 #define BEHAVIOR_REASON_MAX 64
 
 enum EventResultPriorityType
@@ -72,19 +74,6 @@ enum struct BehaviorResult
 
 typeset nextbot_functions
 {
-#if defined GAME_TF2
-	//IVision.ForEachKnownEntity
-	function bool (CKnownEntity known, any data);
-#endif
-
-	//IVision.GetClosestKnownFilter
-	//IVision.GetClosestRecognizedFilter
-	function bool (int entity, any data);
-
-	//Path.ComputeVector
-	//Path.ComputeEntity
-	function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
-	
 	//BehaviorActionEntry.OnStart
 	//BehaviorActionEntry.OnSuspend
 	//BehaviorActionEntry.OnResume
@@ -96,7 +85,6 @@ typeset nextbot_functions
 	//BehaviorActionEntry.InitialContainedAction
 	function BehaviorAction (BehaviorAction action, int entity);
 	
-	//INextBot.AllocateCustomIntention
 	//IIntentionCustom.InitialContainedAction
 	function BehaviorAction (int entity);
 	
@@ -112,7 +100,7 @@ typeset nextbot_functions
 	function void (ILocomotion locomotion, CNavLadder ladder, CNavArea goal);
 	//GameLocomotionCustom.ClimbUpToLedge
 	//NextBotFlyingLocomotion.ClimbUpToLedge
-	function bool (ILocomotion locomotion, float goal[3], float fwd[3], int obstacle);
+	function bool (ILocomotion locomotion, const float goal[3], const float fwd[3], int obstacle);
 	//GameLocomotionCustom.ShouldCollideWith
 	//NextBotFlyingLocomotion.ShouldCollideWith
 	function bool (ILocomotion locomotion, int other);
@@ -154,7 +142,7 @@ typeset nextbot_functions
 	function BehaviorResultType (BehaviorAction action, int entity, MoveToFailureType type, BehaviorResult result);
 	
 	//BehaviorActionEntry.OnSound
-	function BehaviorResultType (BehaviorAction action, int entity, int source, float pos[3], BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, int entity, int source, const float pos[3], BehaviorResult result);
 	
 	//BehaviorActionEntry.OnWeaponFired
 	//BehaviorActionEntry.OnActorEmoted
@@ -254,7 +242,9 @@ methodmap CNavArea
 	public native float ComputeAdjacentConnectionHeightChange(CNavArea area);
 	public native int GetPlayerCount(int team = 0);
 	public native float GetDanger(int team);
-	public native bool HasAvoidanceObstacle(float maxObstructionHeight = 18.0)
+	public native bool HasAvoidanceObstacle(float maxObstructionHeight = STEP_HEIGHT);
+
+	public native bool IsPotentiallyVisibleToTeam(int team);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
@@ -294,12 +284,12 @@ enum TFNavAttributeType
 	TF_NAV_UNBLOCKABLE					= 0x40000000,			// this area cannot be blocked
 };
 
-#define TF_NAV_PERSISTENT_ATTRIBUTES TF_NAV_SNIPER_SPOT|TF_NAV_SENTRY_SPOT|TF_NAV_NO_SPAWNING| \
+#define TF_NAV_PERSISTENT_ATTRIBUTES (TF_NAV_SNIPER_SPOT|TF_NAV_SENTRY_SPOT|TF_NAV_NO_SPAWNING| \
 											TF_NAV_BLUE_SETUP_GATE|TF_NAV_RED_SETUP_GATE|TF_NAV_BLOCKED_AFTER_POINT_CAPTURE| \
 											TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE|TF_NAV_BLUE_ONE_WAY_DOOR \
 											|TF_NAV_RED_ONE_WAY_DOOR|TF_NAV_DOOR_NEVER_BLOCKS|TF_NAV_DOOR_ALWAYS_BLOCKS \
 											|TF_NAV_UNBLOCKABLE|TF_NAV_WITH_SECOND_POINT|TF_NAV_WITH_THIRD_POINT \
-											|TF_NAV_WITH_FOURTH_POINT|TF_NAV_WITH_FIFTH_POINT|TF_NAV_RESCUE_CLOSET
+											|TF_NAV_WITH_FOURTH_POINT|TF_NAV_WITH_FIFTH_POINT|TF_NAV_RESCUE_CLOSET)
 
 methodmap CTFNavArea < CNavArea
 {
@@ -314,6 +304,12 @@ methodmap CTFNavArea < CNavArea
 	}
 
 	public native bool HasAttributeTF(TFNavAttributeType bits);
+
+	property bool ValidForWanderingPopulation
+	{
+		public get()
+		{ return !this.HasAttributeTF(TF_NAV_BLOCKED|TF_NAV_SPAWN_ROOM_RED|TF_NAV_SPAWN_ROOM_BLUE|TF_NAV_NO_SPAWNING|TF_NAV_RESCUE_CLOSET); }
+	}
 };
 #elseif defined GAME_L4D2
 enum
@@ -355,21 +351,21 @@ methodmap TerrorNavArea < CNavArea
 methodmap CNavMesh
 {
 #if defined GAME_TF2
-	public static native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
+	public static native CNavArea GetNearestNavAreaVector(const float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, int team = TEAM_ANY);
 #elseif defined GAME_L4D2
-	public static native CNavArea GetNearestNavAreaVector(float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, bool unknown = false);
+	public static native CNavArea GetNearestNavAreaVector(const float pos[3], bool anyZ = false, float maxDist = 10000.0, bool checkLOS = false, bool checkGround = true, bool unknown = false);
 #endif
 	public static native CNavArea GetNearestNavAreaEntity(int entity, int nGetNavAreaFlags = GETNAVAREA_CHECK_GROUND, float maxDist = 10000.0);
 
 	public static native CNavArea GetNavAreaEntity(int entity, int nGetNavAreaFlags, float flBeneathLimit = 120.0);
-	public static native CNavArea GetNavAreaVector(float vec[3], float beneathLimt = 120.0);
+	public static native CNavArea GetNavAreaVector(const float vec[3], float beneathLimt = 120.0);
 	
 	public static native CNavArea GetNavAreaByID(int id);
 	
 	public static native int GetNavAreaCount();
 	
-	public static native bool GetGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
-	public static native bool GetSimpleGroundHeight(float pos[3], float &height, float normal[3] = NULL_VECTOR);
+	public static native bool GetGroundHeight(const float pos[3], float &height, float normal[3] = NULL_VECTOR);
+	public static native bool GetSimpleGroundHeight(const float pos[3], float &height, float normal[3] = NULL_VECTOR);
 	
 	public static native int GetPlace(float vec[3]);
 	public static native void PlaceToName(int id, char[] name, int len);
@@ -378,6 +374,8 @@ methodmap CNavMesh
 
 native int GetNavAreaVectorCount();
 native CNavArea GetNavAreaFromVector(int idx);
+
+native void CollectSurroundingAreas(ArrayList nearbyAreaVector, CNavArea startArea, float travelDistanceLimit = 1500.0, float maxStepUpLimit = STEP_HEIGHT, float maxDropDownLimit = 100.0);
 
 methodmap CNavLadder
 {
@@ -554,19 +552,19 @@ methodmap ILocomotion < INextBotComponent
 
 	public native void ClearStuckStatus(const char[] reason = "");
 
-	public native void SetDesiredLean(float ang[3]);
+	public native void SetDesiredLean(const float ang[3]);
 	public native void GetDesiredLean(float ang[3]);
 
 	public native void Run();
 	public native void Walk();
 	public native void Stop();
 	public native void Jump();
-	public native void JumpAcrossGap(float goal[3], float forwrd[3]);
-	public native bool ClimbUpToLedge(float goal[3], float forwrd[3], int obstacle);
+	public native void JumpAcrossGap(const float goal[3], const float forwrd[3]);
+	public native bool ClimbUpToLedge(const float goal[3], const float forwrd[3], int obstacle);
 
-	public native void FaceTowards(float pos[3]);
-	public native void Approach(float pos[3], float weight = 1.0);
-	public native void DriveTo(float pos[3]);
+	public native void FaceTowards(const float pos[3]);
+	public native void Approach(const float pos[3], float weight = 1.0);
+	public native void DriveTo(const float pos[3]);
 };
 
 methodmap NextBotFlyingLocomotion < ILocomotion
@@ -623,7 +621,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 
 	property float DesiredAltitude
@@ -652,7 +650,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 
 	//public native void Deflect(int deflector);
 
-	//public native void SetVelocity(float accel[3]);
+	//public native void SetVelocity(const float accel[3]);
 
 	property float MaxYawRate
 	{
@@ -769,7 +767,7 @@ methodmap GameLocomotionCustom < GameLocomotion
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 
 #if defined GAME_TF2
@@ -796,8 +794,8 @@ methodmap GameLocomotionCustom < GameLocomotion
 
 #if defined GAME_L4D2
 	/*
-	public native void SetAcceleration(float accel[3]);
-	public native void SetVelocity(float accel[3]);
+	public native void SetAcceleration(const float accel[3]);
+	public native void SetVelocity(const float accel[3]);
 
 	public native void GetMoveVector(float vec[3]);
 	public native void GetGroundAcceleration(float vec[3]);
@@ -886,39 +884,42 @@ enum FieldOfViewCheckType
 	DISREGARD_FOV
 };
 
+typedef foreachknow_func_t = function bool (CKnownEntity known, any data);
+typedef closestknowfilter_func_t = function bool (int entity, any data);
+
 methodmap IVision < INextBotComponent
 {
 #if defined GAME_TF2
-	public native bool ForEachKnownEntity(nextbot_functions func, any data = 0);
-	public native void CollectKnownEntities(ArrayList list);
+	public native bool ForEachKnownEntity(foreachknow_func_t func, any data = 0);
+	//public native void CollectKnownEntities(ArrayList list);
 	public native CKnownEntity GetPrimaryKnownThreat(bool onlyVisibleThreats = false);
 	public native CKnownEntity GetClosestKnownTeam(int team);
-	public native CKnownEntity GetClosestKnownFilter(nextbot_functions func, any data = 0);
+	public native CKnownEntity GetClosestKnownFilter(closestknowfilter_func_t func, any data = 0);
 	public native int GetKnownCount(int team, bool onlyVisible = false, float rangeLimit = -1.0);
 	public native CKnownEntity GetKnown(int entity);
 	public native void AddKnownEntity(int entity);
 	public native void ForgetEntity(int entity);
 	public native void ForgetAllKnownEntities();
-	public native void CollectPotentiallyVisibleEntities(ArrayList list);
+	//public native void CollectPotentiallyVisibleEntities(ArrayList list);
 #elseif defined GAME_L4D2
 	public native int GetPrimaryRecognizedThreat();
 	public native int GetClosestRecognizedTeam(int team);
-	public native int GetClosestRecognizedFilter(nextbot_functions func, any data = 0);
+	public native int GetClosestRecognizedFilter(closestknowfilter_func_t func, any data = 0);
 #endif
 	public native float GetTimeSinceVisible(int team);
 	public native bool IsAbleToSeeEntity(int entity, FieldOfViewCheckType checkFOV, float visibleSpot[3] = NULL_VECTOR);
-	public native bool IsAbleToSeeVector(float pos[3], FieldOfViewCheckType checkFOV);
+	public native bool IsAbleToSeeVector(const float pos[3], FieldOfViewCheckType checkFOV);
 	public native bool IsIgnored(int entity);
 #if defined GAME_L4D2
 	public native bool IsNoticed(int entity);
 #elseif defined GAME_TF2
 	public native bool IsVisibleEntityNoticed(int entity);
 #endif
-	public native bool IsInFieldOfViewVector(float pos[3]);
+	public native bool IsInFieldOfViewVector(const float pos[3]);
 	public native bool IsInFieldOfViewEntity(int entity);
-	public native bool IsLineOfSightClear(float pos[3]);
+	public native bool IsLineOfSightClear(const float pos[3]);
 	public native bool IsLineOfSightClearToEntity(int entity, float visibleSpot[3] = NULL_VECTOR);
-	public native bool IsLookingAtVector(float pos[3], float cosTolerance = 0.95);
+	public native bool IsLookingAtVector(const float pos[3], float cosTolerance = 0.95);
 	public native bool IsLookingAtEntity(int entity, float cosTolerance = 0.95);
 
 	property float DefaultFieldOfView
@@ -978,7 +979,7 @@ methodmap GameVisionCustom < GameVision
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
@@ -1061,7 +1062,7 @@ methodmap IBodyCustom < IBody
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
@@ -1103,7 +1104,7 @@ methodmap IIntentionCustom < IIntention
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
@@ -1126,6 +1127,8 @@ enum NextBotDebugType
 
 	NEXTBOT_DEBUG_ALL	= 0xFFFF
 };
+
+typedef allocintent_func_t = function BehaviorAction (int entity);
 
 methodmap INextBot < INextBotEventResponder
 {
@@ -1181,16 +1184,16 @@ methodmap INextBot < INextBotEventResponder
 	}
 
 	public native float IsRangeLessThanEntity(int entity, float range);
-	public native float IsRangeLessThanVector(float vec[3], float range);
+	public native float IsRangeLessThanVector(const float vec[3], float range);
 
 	public native float IsRangeGreaterThanEntity(int entity, float range);
-	public native float IsRangeGreaterThanVector(float vec[3], float range);
+	public native float IsRangeGreaterThanVector(const float vec[3], float range);
 
 	public native float GetRangeToEntity(int entity);
-	public native float GetRangeToVector(float vec[3]);
+	public native float GetRangeToVector(const float vec[3]);
 
 	public native float GetRangeSquaredToEntity(int entity);
-	public native float GetRangeSquaredToVector(float vec[3]);
+	public native float GetRangeSquaredToVector(const float vec[3]);
 
 	public float GetDistanceBetweenEntity(int other)
 	{
@@ -1280,7 +1283,7 @@ methodmap INextBot < INextBotEventResponder
 	public native NextBotFlyingLocomotion AllocateFlyingLocomotion();
 	public native GameVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
-	public native IIntentionCustom AllocateCustomIntention(nextbot_functions func, const char[] name = "");
+	public native IIntentionCustom AllocateCustomIntention(allocintent_func_t func, const char[] name = "");
 	public native void StubIntention();
 	
 	public native bool IsDebugging(NextBotDebugType type);
@@ -1324,7 +1327,7 @@ methodmap INextBotCustom
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 };
 
@@ -1398,7 +1401,7 @@ enum NavRelativeDirType
 	NUM_RELATIVE_DIRECTIONS
 };
 
-native NavRelativeDirType DirectionBetweenEntityVector(int ent1, float vec[3]);
+native NavRelativeDirType DirectionBetweenEntityVector(int ent1, const float vec[3]);
 
 stock NavRelativeDirType DirectionBetweenEntities(int ent1, int ent2)
 {
@@ -1464,6 +1467,8 @@ enum MoveToFailureType
 	FAIL_FELL_OFF,
 };
 
+typedef pathcompute_func_t = function float (INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, any data);
+
 methodmap Path < Handle
 {
 	public native Path();
@@ -1499,7 +1504,7 @@ methodmap Path < Handle
 	public native Segment PriorSegment(Segment seg);
 
 	public native void GetPosition(float ret[3], float distanceFromStart, Segment start = Segment_Null);
-	public native void GetClosestPosition(float ret[3], float pos[3], Segment start = Segment_Null, float alongLimit = 0.0);
+	public native void GetClosestPosition(float ret[3], const float pos[3], Segment start = Segment_Null, float alongLimit = 0.0);
 
 	public native void GetStartPosition(float pos[3]);
 	public native void GetEndPosition(float pos[3]);
@@ -1519,8 +1524,8 @@ methodmap Path < Handle
 
 	public native void Invalidate();
 
-	public native bool ComputeVector(INextBot bot, float goal[3], nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
-	public native bool ComputeEntity(INextBot bot, int subject, nextbot_functions functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+	public native bool ComputeVector(INextBot bot, const float goal[3], pathcompute_func_t functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
+	public native bool ComputeEntity(INextBot bot, int subject, pathcompute_func_t functor, any data = 0, float maxPathLength = 0.0, bool includeGoalIfPathFails = true);
 };
 
 methodmap PathFollower < Path
@@ -1582,7 +1587,7 @@ methodmap ChasePath < PathFollower
 {
 	public native ChasePath(SubjectChaseType chaseHow);
 
-	public native void Update(INextBot bot, int entity, nextbot_functions functor, any data = 0, float predictedpos[3] = NULL_VECTOR);
+	public native void Update(INextBot bot, int entity, pathcompute_func_t functor, any data = 0, float predictedpos[3] = NULL_VECTOR);
 };
 
 methodmap DirectChasePath < ChasePath
@@ -1620,7 +1625,7 @@ static Address datamaps_allocateinfectednextbot(int size_modifier, int data)
 { return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
 #endif
 
-stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] clientnet, datamaps_functions alloc, int size, any data, CustomSendtable &table = null)
+stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] clientnet, entityalloc_func_t alloc, int size, any data, CustomSendtable &table = null)
 {
 	char netname[64];
 	netname[0] = 'C';

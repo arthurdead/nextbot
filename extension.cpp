@@ -1128,12 +1128,17 @@ public:
 #define private public
 #define protected public
 
+#include <tier0/vprof.h>
+
+#undef VPROF_BUDGET
 #define VPROF_BUDGET(...) 
 
 #include <nav.h>
 #include <nav_ladder.h>
 #include <nav_area.h>
 #include <nav_mesh.h>
+#define Max MAX
+#include <nav_pathfind.h>
 
 NavAreaVector *TheNavAreas = nullptr;
 
@@ -1627,8 +1632,8 @@ void CNavArea::ClearSearchLists( void )
 	// effectively clears all open list pointers and closed flags
 	CNavArea::MakeNewMarker();
 
-	m_openList = NULL;
-	m_openListTail = NULL;
+	*m_openList = NULL;
+	*m_openListTail = NULL;
 }
 
 void CNavArea::AddToOpenList( void )
@@ -1640,13 +1645,13 @@ void CNavArea::AddToOpenList( void )
 	}
 
 	// mark as being on open list for quick check
-	m_openMarker = m_masterMarker;
+	m_openMarker = *m_masterMarker;
 
 	// if list is empty, add and return
-	if ( m_openList == NULL )
+	if ( *m_openList == NULL )
 	{
-		m_openList = this;
-		m_openListTail = this;
+		*m_openList = this;
+		*m_openListTail = this;
 		this->m_prevOpen = NULL;
 		this->m_nextOpen = NULL;
 		return;
@@ -1654,7 +1659,7 @@ void CNavArea::AddToOpenList( void )
 
 	// insert self in ascending cost order
 	CNavArea *area, *last = NULL;
-	for( area = m_openList; area; area = area->m_nextOpen )
+	for( area = *m_openList; area; area = area->m_nextOpen )
 	{
 		if ( GetTotalCost() < area->GetTotalCost() )
 		{
@@ -1674,7 +1679,7 @@ void CNavArea::AddToOpenList( void )
 		}
 		else
 		{
-			m_openList = this;
+			*m_openList = this;
 		}
 
 		this->m_nextOpen = area;
@@ -1688,7 +1693,7 @@ void CNavArea::AddToOpenList( void )
 	
 		this->m_nextOpen = NULL;
 
-		m_openListTail = this;
+		*m_openListTail = this;
 	}
 }
 
@@ -1714,7 +1719,7 @@ void CNavArea::UpdateOnOpenList( void )
 		}
 		else
 		{
-			m_openList = this;
+			*m_openList = this;
 		}
 
 		if ( after )
@@ -1723,7 +1728,7 @@ void CNavArea::UpdateOnOpenList( void )
 		}
 		else
 		{
-			m_openListTail = this;
+			*m_openListTail = this;
 		}
 	}
 }
@@ -1742,7 +1747,7 @@ void CNavArea::RemoveFromOpenList( void )
 	}
 	else
 	{
-		m_openList = m_nextOpen;
+		*m_openList = m_nextOpen;
 	}
 	
 	if ( m_nextOpen )
@@ -1751,16 +1756,16 @@ void CNavArea::RemoveFromOpenList( void )
 	}
 	else
 	{
-		m_openListTail = m_prevOpen;
+		*m_openListTail = m_prevOpen;
 	}
 	
 	// zero is an invalid marker
 	m_openMarker = 0;
 }
 
-unsigned int CNavArea::m_masterMarker = 1;
-CNavArea *CNavArea::m_openList = NULL;
-CNavArea *CNavArea::m_openListTail = NULL;
+unsigned int *CNavArea::m_masterMarker = NULL;
+CNavArea **CNavArea::m_openList = NULL;
+CNavArea **CNavArea::m_openListTail = NULL;
 
 #if SOURCE_ENGINE == SE_TF2
 CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround, int team ) const
@@ -1838,7 +1843,7 @@ CNavArea *CNavMesh::GetNavArea( CBaseEntity *pEntity, int nFlags, float flBeneat
 	}
 
 	// Check LOS if necessary
-	if ( use && ( nFlags && GETNAVAREA_CHECK_LOS ) && ( useZ < testPos.z - flStepHeight ) )
+	if ( use && ( nFlags & GETNAVAREA_CHECK_LOS ) && ( useZ < testPos.z - flStepHeight ) )
 	{
 		// trace directly down to see if it's below us and unobstructed
 		trace_t result;
@@ -1991,13 +1996,13 @@ bool CNavMesh::GetGroundHeight( const Vector &pos, float *height, Vector *normal
 
 #if SOURCE_ENGINE == SE_TF2
 template< typename CostFunctor >
-bool NavAreaBuildPath( CNavArea *startArea, CNavArea *goalArea, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea = NULL, float maxPathLength = 0.0f, int teamID = TEAM_ANY, bool ignoreNavBlockers = false )
+bool NavAreaBuildPath_real( CNavArea *startArea, CNavArea *goalArea, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea, float maxPathLength, int teamID, bool ignoreNavBlockers )
 {
 	return (void_to_func<bool(*)(CNavArea *, CNavArea *, const Vector *, CostFunctor &, CNavArea **, float, int, bool)>(NavAreaBuildPathPtr))(startArea, goalArea, goalPos, costFunc, closestArea, maxPathLength, teamID, ignoreNavBlockers);
 }
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 template< typename CostFunctor >
-bool NavAreaBuildPath( CNavArea *startArea, CNavArea *goalArea, const Vector *startPos, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea = NULL, float maxPathLength = 0.0f, int teamID = TEAM_ANY, bool ignoreNavBlockers = false )
+bool NavAreaBuildPath_real( CNavArea *startArea, CNavArea *goalArea, const Vector *startPos, const Vector *goalPos, CostFunctor &costFunc, CNavArea **closestArea, float maxPathLength, int teamID, bool ignoreNavBlockers )
 {
 	return (void_to_func<bool(*)(CNavArea *, CNavArea *, const Vector *, const Vector *, CostFunctor &, CNavArea **, float, int, bool)>(NavAreaBuildPathPtr))(startArea, goalArea, startPos, goalPos, costFunc, closestArea, maxPathLength, teamID, ignoreNavBlockers);
 }
@@ -3635,14 +3640,7 @@ public:
 	
 	const char *GetDebugIdentifier( void )
 	{
-	#if 0
 		return MyNextBotPointer()->GetDebugIdentifier();
-	#else
-		const int nameSize = 256;
-		static char name[nameSize];
-		Q_snprintf(name, nameSize, "%s(#%d)", GetClassname(), entindex());
-		return name;
-	#endif
 	}
 	
 	bool IsDebugging( unsigned int type )
@@ -7314,9 +7312,9 @@ public:
 		//
 		CNavArea *closestArea = NULL;
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-		bool pathResult = NavAreaBuildPath( startArea, subjectArea, &start, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+		bool pathResult = NavAreaBuildPath_real( startArea, subjectArea, &start, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber(), false );
 #elif SOURCE_ENGINE == SE_TF2
-		bool pathResult = NavAreaBuildPath( startArea, subjectArea, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+		bool pathResult = NavAreaBuildPath_real( startArea, subjectArea, &subjectPos, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber(), false );
 #endif
 		if(path_compute_debug.GetBool()) {
 			DevMsg("%f: Path->Compute #%i built: %i\n", gpGlobals->curtime, subject->entindex(), pathResult);
@@ -7447,9 +7445,9 @@ public:
 		//
 		CNavArea *closestArea = NULL;
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-		bool pathResult = NavAreaBuildPath( startArea, goalArea, &start, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+		bool pathResult = NavAreaBuildPath_real( startArea, goalArea, &start, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber(), false );
 #elif SOURCE_ENGINE == SE_TF2
-		bool pathResult = NavAreaBuildPath( startArea, goalArea, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber() );
+		bool pathResult = NavAreaBuildPath_real( startArea, goalArea, &goal, costFunc, &closestArea, maxPathLength, bot->GetEntity()->GetTeamNumber(), false );
 #endif
 		if(path_compute_debug.GetBool()) {
 			DevMsg("%f: Path->Compute [%f, %f, %f] built: %i\n", gpGlobals->curtime, goal.x, goal.y, goal.z, pathResult);
@@ -9171,10 +9169,6 @@ cell_t ChasePathUpdateNative(IPluginContext *pContext, const cell_t *params)
 	}
 	
 	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
-	if(!pSubject)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
-	}
 	
 	INextBot *bot = (INextBot *)params[2];
 	
@@ -9566,6 +9560,12 @@ cell_t CNavAreaHasAvoidanceObstacle(IPluginContext *pContext, const cell_t *para
 {
 	CNavArea *area = (CNavArea *)params[1];
 	return area->HasAvoidanceObstacle(sp_ctof(params[2]));
+}
+
+cell_t CNavAreaIsPotentiallyVisibleToTeam(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsPotentiallyVisibleToTeam(params[2]);
 }
 
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
@@ -12693,6 +12693,8 @@ cell_t GetNavAreaFromVector(IPluginContext *pContext, const cell_t *params)
 	return (cell_t)(*TheNavAreas)[idx];
 }
 
+cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params);
+
 cell_t CombatCharacterEventKilled(IPluginContext *pContext, const cell_t *params)
 {
 	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
@@ -12839,6 +12841,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.Damaging.get", CNavAreaDamagingget},
 	{"CNavArea.Place.get", CNavAreaPlaceget},
 	{"CNavArea.HasAvoidanceObstacle", CNavAreaHasAvoidanceObstacle},
+	{"CNavArea.IsPotentiallyVisibleToTeam", CNavAreaIsPotentiallyVisibleToTeam},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
@@ -13143,6 +13146,7 @@ sp_nativeinfo_t natives[] =
 	{"GetNavAreaFromVector", GetNavAreaFromVector},
 	{"CombatCharacterEventKilled", CombatCharacterEventKilled},
 	{"DirectionBetweenEntityVector", DirectionBetweenEntityVector},
+	{"CollectSurroundingAreas", CollectSurroundingAreasNative},
 	{NULL, NULL}
 };
 
@@ -13308,6 +13312,30 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 
 #include "funnyfile.h"
 
+cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	CUtlVector<CNavArea *> nearbyAreaVector{};
+	CollectSurroundingAreas(&nearbyAreaVector, (CNavArea *)params[2], sp_ftoc(params[3]), sp_ftoc(params[4]), sp_ftoc(params[5]));
+
+	size_t len = nearbyAreaVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)nearbyAreaVector[i];
+	}
+
+	return 0;
+}
+
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
@@ -13407,6 +13435,10 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMesh);
 	g_pGameConf->GetMemSig("TheNavAreas", (void **)&TheNavAreas);
+
+	g_pGameConf->GetMemSig("CNavArea::m_masterMarker", (void **)&CNavArea::m_masterMarker);
+	g_pGameConf->GetMemSig("CNavArea::m_openList", (void **)&CNavArea::m_openList);
+	g_pGameConf->GetMemSig("CNavArea::m_openListTail", (void **)&CNavArea::m_openListTail);
 	
 #if SOURCE_ENGINE == SE_TF2
 	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_STATIC(HookIsAuthoritative), false);
@@ -13457,7 +13489,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #endif
 	
 	g_pEntityList = reinterpret_cast<CBaseEntityList *>(gamehelpers->GetGlobalEntityList());
-	
+
+	HandleSystemHack::init();
+
 	PathHandleType = handlesys->CreateType("Path", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	
