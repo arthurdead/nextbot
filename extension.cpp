@@ -3553,6 +3553,9 @@ using NextBotDebugLineType = INextBot::NextBotDebugLineType;
 ConVar *developer = nullptr;
 ConVar *r_visualizetraces = nullptr;
 
+SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0);
+SH_DECL_MANUALHOOK0_void(UpdateOnRemove, 0, 0, 0);
+
 class NextBotCombatCharacter : public CBaseCombatCharacter
 {
 public:
@@ -3638,9 +3641,9 @@ public:
 		m_debugHistory.AddToTail( line );
 	}
 	
-	const char *GetDebugIdentifier( void )
+	const char *GetDebugIdentifier( void ) const
 	{
-		return MyNextBotPointer()->GetDebugIdentifier();
+		return const_cast<NextBotCombatCharacter *>(this)->MyNextBotPointer()->GetDebugIdentifier();
 	}
 	
 	bool IsDebugging( unsigned int type )
@@ -3652,7 +3655,7 @@ public:
 	{
 		MyNextBotPointer()->DisplayDebugText(text);
 	}
-	
+
 	static NextBotCombatCharacter *create(size_t size_modifier)
 	{
 		NextBotCombatCharacter *bytes = (NextBotCombatCharacter *)engine->PvAllocEntPrivateData(sizeofNextBotCombatCharacter + size_modifier);
@@ -3660,8 +3663,6 @@ public:
 		return bytes;
 	}
 };
-
-SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0)
 
 #include <sourcehook/sh_memory.h>
 
@@ -5227,16 +5228,41 @@ public:
 		initact = initact_;
 		name = std::move(name_);
 		m_behavior = new SPBehavior( initialaction(bot), name.c_str() );
+
+		CBaseCombatCharacter *pEntity = bot->GetEntity();
+
+		SH_ADD_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &IIntentionCustom::HookUpdateOnRemove), false);
+		hooked_remove = true;
 	}
-	
+
 	template <typename... Args>
 	static IIntentionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id, Args &&... args)
 	{
 		return new IIntentionCustom(bot, reg, id, std::forward<Args>(args)...);
 	}
 	
+	void HookUpdateOnRemove()
+	{
+		CBaseCombatCharacter *pEntity = META_IFACEPTR(CBaseCombatCharacter);
+
+		SH_REMOVE_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &IIntentionCustom::HookUpdateOnRemove), false);
+		hooked_remove = false;
+
+		delete m_behavior;
+		m_behavior = nullptr;
+
+		RETURN_META(MRES_IGNORED);
+	}
+	
 	virtual ~IIntentionCustom()
 	{
+		if(hooked_remove) {
+			INextBot *bot = GetBot();
+			CBaseCombatCharacter *pEntity = bot->GetEntity();
+
+			SH_REMOVE_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &IIntentionCustom::HookUpdateOnRemove), false);
+		}
+
 		delete m_behavior;
 	}
 	
@@ -5285,7 +5311,7 @@ public:
 		return act;
 	}
 	
-	virtual QueryResultType	 IsHindrance( const INextBot *me, CBaseEntity *blocker ) const
+	virtual QueryResultType IsHindrance( const INextBot *me, CBaseEntity *blocker ) const
 	{
 		QueryResultType result = IIntention::IsHindrance(me, blocker);
 		if(result != ANSWER_UNDEFINED) {
@@ -5333,6 +5359,8 @@ public:
 	
 	IPluginFunction *initact = nullptr;
 	IPluginFunction *ishinder = nullptr;
+
+	bool hooked_remove{false};
 };
 
 SPActionEntry::~SPActionEntry()
@@ -13406,6 +13434,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	SH_MANUALHOOK_RECONFIGURE(Spawn, offset, 0, 0);
 	
 	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
+
+	g_pGameConf->GetOffset("CBaseEntity::UpdateOnRemove", &offset);
+	SH_MANUALHOOK_RECONFIGURE(UpdateOnRemove, offset, 0, 0);
 
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
 

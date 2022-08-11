@@ -343,6 +343,10 @@
 			{
 				"linux" "134"
 			}
+			"CBaseEntity::UpdateOnRemove"
+			{
+				"linux" "109"
+			}
 		}
 		"Signatures"
 		{
