@@ -155,6 +155,26 @@
 				"library"	"server"
 				"linux"		"@_ZN8CNavArea14m_openListTailE"
 			}
+			"CBaseEntity::MyNPCPointer"
+			{
+				"library" "server"
+				"linux" "@_ZN11CBaseEntity12MyNPCPointerEv"
+			}
+			"CBaseCombatCharacter::AllocateDefaultRelationships"
+			{
+				"library" "server"
+				"linux" "@_ZN20CBaseCombatCharacter28AllocateDefaultRelationshipsEv"
+			}
+			"CBaseCombatCharacter::SetDefaultRelationship"
+			{
+				"library" "server"
+				"linux" "@_ZN20CBaseCombatCharacter22SetDefaultRelationshipE7Class_TS0_13Disposition_ti"
+			}
+			"CCleanupDefaultRelationShips::Shutdown"
+			{
+				"library" "server"
+				"linux" "@_ZN28CCleanupDefaultRelationShips8ShutdownEv"
+			}
 		}
 	}
 	"left4dead2"
@@ -346,6 +366,78 @@
 			"CBaseEntity::UpdateOnRemove"
 			{
 				"linux" "109"
+			}
+			"CBaseEntity::Classify"
+			{
+				"linux" "54"
+			}
+			"CBaseEntity::IsNPC"
+			{
+				"linux" "71"
+			}
+			"CBaseCombatCharacter::GetBossType"
+			{
+				"linux" "327"
+			}
+			"CBaseEntity::IsBaseObject"
+			{
+				"linux" "84"
+			}
+			"CBaseCombatCharacter::HasHumanGibs"
+			{
+				"linux" "292"
+			}
+			"CBaseCombatCharacter::HasAlienGibs"
+			{
+				"linux" "293"
+			}
+			"CBaseEntity::BloodColor"
+			{
+				"linux" "69"
+			}
+			"CGameRules::InitDefaultAIRelationships"
+			{
+				"linux" "102"
+			}
+			"CGameRules::AIClassText"
+			{
+				"linux" "103"
+			}
+			"CGameRules::GetSkillLevel"
+			{
+				"linux" "51"
+			}
+			"CGameRules::PlayerRelationship"
+			{
+				"linux" "109"
+			}
+			"CGameRules::RefreshSkillData"
+			{
+				"linux" "46"
+			}
+			"CGameRules::ShouldAutoAim"
+			{
+				"linux" "65"
+			}
+			"CGameRules::GetAutoAimScale"
+			{
+				"linux" "66"
+			}
+			"CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::1"
+			{
+				"linux" "28"
+			}
+			"CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::2"
+			{
+				"linux" "45"
+			}
+			"CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::3"
+			{
+				"linux" "88"
+			}
+			"CCleanupDefaultRelationShips::Shutdown::NUM_AI_CLASSES"
+			{
+				"linux" "45"
 			}
 		}
 		"Signatures"

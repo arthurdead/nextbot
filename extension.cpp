@@ -31,6 +31,10 @@
 
 #define swap V_swap
 
+#include <string>
+#include <vector>
+#include <unordered_map>
+
 #if SOURCE_ENGINE == SE_TF2
 	#define TF_DLL
 	#define USES_ECON_ITEMS
@@ -53,9 +57,7 @@
 class IGameEventManager2 *gameeventmanager = nullptr;
 
 #include "extension.h"
-#include <string>
-#include <vector>
-#include <unordered_map>
+#include <ISDKTools.h>
 #include <mathlib/vmatrix.h>
 #include <toolframework/itoolentity.h>
 #include <ehandle.h>
@@ -88,6 +90,8 @@ class IStaticPropMgrServer *staticpropmgr = nullptr;
 #include <public/damageinfo.cpp>
 #endif
 
+#include <toolframework/itoolentity.h>
+
 /**
  * @file extension.cpp
  * @brief Implement extension code here.
@@ -100,6 +104,8 @@ SMEXT_LINK(&g_Sample);
 ICvar *icvar = nullptr;
 CGlobalVars *gpGlobals = nullptr;
 CBaseEntityList *g_pEntityList = nullptr;
+IServerTools *servertools = nullptr;
+ISDKTools *g_pSDKTools = nullptr;
 
 class INextBot;
 class CNavArea;
@@ -169,11 +175,18 @@ void *EntityFactoryDictionaryPtr = nullptr;
 #endif
 void *CBaseCombatCharacterEvent_Killed = nullptr;
 void *CBaseEntityCalcAbsolutePosition = nullptr;
+void *CBaseCombatCharacterAllocateDefaultRelationships = nullptr;
+void *CBaseCombatCharacterSetDefaultRelationship = nullptr;
 
 void *NavAreaBuildPathPtr = nullptr;
 
 int CBaseEntityMyNextBotPointer = -1;
 int CBaseEntityMyCombatCharacterPointer = -1;
+int CBaseEntityClassify = -1;
+#if SOURCE_ENGINE == SE_TF2
+int CBaseEntityIsBaseObject = -1;
+#endif
+int CBaseEntityIsNPC = -1;
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 int CBaseEntityMyInfectedPointer = -1;
 #endif
@@ -210,6 +223,7 @@ int m_iClassnameOffset = -1;
 int m_flSimulationTimeOffset = -1;
 int m_angAbsRotationOffset = -1;
 int m_angRotationOffset = -1;
+int m_bloodColorOffset = -1;
 
 ConVar *NextBotStop = nullptr;
 
@@ -395,6 +409,34 @@ float UTIL_VecToYaw( const Vector &vec )
 	return yaw;
 }
 
+#if SOURCE_ENGINE == SE_TF2
+enum Class_T
+{
+	CLASS_NONE = 0,
+	CLASS_PLAYER,
+	CLASS_PLAYER_ALLY,
+
+	CLASS_TFGOAL,
+	CLASS_TFGOAL_TIMER,
+	CLASS_TFGOAL_ITEM,
+	CLASS_TFSPAWN,
+	CLASS_MACHINE,
+
+	//CUSTOM ADDED!!
+
+	//TF2
+	CLASS_ZOMBIE,
+	CLASS_HHH,
+	CLASS_WIZARD,
+	CLASS_EYEBALL,
+	CLASS_TANK,
+
+	NUM_AI_CLASSES
+};
+#else
+	#error
+#endif
+
 class CBaseEntity : public IServerEntity
 {
 public:
@@ -416,7 +458,24 @@ public:
 	{
 		return call_vfunc<CBaseCombatCharacter *>(this, CBaseEntityMyCombatCharacterPointer);
 	}
-	
+
+	Class_T Classify()
+	{
+		return call_vfunc<Class_T>(this, CBaseEntityClassify);
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	bool IsBaseObject()
+	{
+		return call_vfunc<bool>(this, CBaseEntityIsBaseObject);
+	}
+#endif
+
+	bool IsNPC()
+	{
+		return call_vfunc<bool>(this, CBaseEntityIsNPC);
+	}
+
 	Vector EyePosition()
 	{
 		return call_vfunc<Vector>(this, CBaseEntityEyePosition);
@@ -1083,6 +1142,26 @@ class CBaseToggle : public CBaseEntity
 {
 };
 
+
+enum Disposition_t 
+{
+	D_ER,		// Undefined - error
+	D_HT,		// Hate
+	D_FR,		// Fear
+	D_LI,		// Like
+	D_NU		// Neutral
+};
+
+const int DEF_RELATIONSHIP_PRIORITY = INT_MIN;
+
+struct Relationship_t
+{
+	EHANDLE			entity;			// Relationship to a particular entity
+	Class_T			classType;		// Relationship to a class  CLASS_NONE = not class based (Def. in baseentity.h)
+	Disposition_t	disposition;	// D_HT (Hate), D_FR (Fear), D_LI (Like), D_NT (Neutral)
+	int				priority;		// Relative importance of this relationship (higher numbers mean more important)
+};
+
 class CBaseCombatCharacter : public CBaseEntity
 {
 public:
@@ -1108,6 +1187,40 @@ public:
 	void Event_Killed(const CTakeDamageInfo &info)
 	{
 		call_mfunc<void, CBaseCombatCharacter, const CTakeDamageInfo &>(this, CBaseCombatCharacterEvent_Killed, info);
+	}
+
+	void SetBloodColor(int color)
+	{
+		if(m_bloodColorOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_bloodColor", &info);
+			m_bloodColorOffset = info.actual_offset;
+		}
+
+		*(int *)(((unsigned char *)this) + m_bloodColorOffset) = color;
+	}
+
+	int GetBloodColor()
+	{
+		if(m_bloodColorOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_bloodColor", &info);
+			m_bloodColorOffset = info.actual_offset;
+		}
+
+		return *(int *)(((unsigned char *)this) + m_bloodColorOffset);
+	}
+
+	static void AllocateDefaultRelationships()
+	{
+		((void(*)())(CBaseCombatCharacterAllocateDefaultRelationships))();
+	}
+
+	static void SetDefaultRelationship(Class_T nClass, Class_T nClassTarget, Disposition_t nDisposition, int nPriority)
+	{
+		((void(*)(Class_T, Class_T, Disposition_t, int))(CBaseCombatCharacterSetDefaultRelationship))(nClass, nClassTarget, nDisposition, nPriority);
 	}
 };
 
@@ -3672,10 +3785,11 @@ public:
 IDamageRules *g_pDamageRules = nullptr;
 #endif
 
+SH_DECL_MANUALHOOK0(Classify, 0, 0, 0, Class_T)
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 SH_DECL_MANUALHOOK0(MyInfectedPointer, 0, 0, 0, CBaseEntity *)
 SH_DECL_MANUALHOOK0(GetClass, 0, 0, 0, int)
-SH_DECL_MANUALHOOK0(Classify, 0, 0, 0, int)
 SH_DECL_MANUALHOOK1(CanBeA, 0, 0, 0, bool, int)
 SH_DECL_HOOK0(CBaseEntity, GetDataDescMap, SH_NOATTRIB, 0, datamap_t *);
 
@@ -3812,7 +3926,7 @@ public:
 		RETURN_META_VALUE(MRES_SUPERCEDE, GetDesiredClass());
 	}
 	
-	int HookClassify()
+	Class_T HookClassify()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, 4);
 	}
@@ -13185,6 +13299,7 @@ bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	GET_V_IFACE_ANY(GetEngineFactory, enginetrace, IEngineTrace, INTERFACEVERSION_ENGINETRACE_SERVER)
 	GET_V_IFACE_ANY(GetEngineFactory, staticpropmgr, IStaticPropMgrServer, INTERFACEVERSION_STATICPROPMGR_SERVER)
 	GET_V_IFACE_CURRENT(GetEngineFactory, icvar, ICvar, CVAR_INTERFACE_VERSION);
+	GET_V_IFACE_ANY(GetServerFactory, servertools, IServerTools, VSERVERTOOLS_INTERFACE_VERSION)
 	g_pCVar = icvar;
 	ConVar_Register(0, this);
 #if SOURCE_ENGINE == SE_TF2
@@ -13255,6 +13370,7 @@ CDetour *pPathOptimize = nullptr;
 
 CDetour *pTraverseLadder = nullptr;
 
+CDetour *pMyNPCPointer = nullptr;
 #if SOURCE_ENGINE == SE_TF2
 CDetour *pApplyAccumulatedApproach = nullptr;
 CDetour *pUpdatePosition = nullptr;
@@ -13312,9 +13428,595 @@ DETOUR_DECL_MEMBER2(IsTankImmediatelyDangerousTo, bool, CBasePlayer *, pPlayer, 
 }
 #endif
 
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-IEntityFactoryDictionary *dictionary = nullptr;
+enum npc_type : unsigned char
+{
+	npc_none =   0,
+	npc_any =    (1 << 0),
+	npc_undead = (1 << 1),
+#if SOURCE_ENGINE == SE_TF2
+	npc_zombie = (npc_any|npc_undead|(1 << 2)),
+	npc_hhh =    (npc_any|npc_undead|(1 << 3)),
+	npc_eye =    (npc_any|npc_undead|(1 << 4)),
+	npc_wizard = (npc_any|npc_undead|(1 << 5)),
+	npc_tank =   (npc_any|(1 << 6)),
+#else
+	#error
 #endif
+	npc_custom = (npc_any|(1 << 7))
+};
+
+static npc_type entity_to_npc_type(CBaseEntity *pEntity)
+{
+	const char *classname = gamehelpers->GetEntityClassname(pEntity);
+
+#if SOURCE_ENGINE == SE_TF2
+	if(strcmp(classname, "tf_zombie") == 0) {
+		return npc_zombie;
+	} else if(strcmp(classname, "headless_hatman") == 0) {
+		return npc_hhh;
+	} else if(strcmp(classname, "eyeball_boss") == 0) {
+		return npc_zombie;
+	} else if(strcmp(classname, "merasmus") == 0) {
+		return npc_wizard;
+	} else if(strcmp(classname, "tank_boss") == 0) {
+		return npc_tank;
+#else
+	#error
+#endif
+	} else if(pEntity->MyNextBotPointer()) {
+		return npc_custom;
+	}
+	return npc_none;
+}
+
+#if SOURCE_ENGINE == SE_TF2
+enum obj_type : unsigned char
+{
+	obj_none =       0,
+	obj_any =        (1 << 0),
+	obj_sentry =     (obj_any|(1 << 1)),
+	obj_dispenser =  (obj_any|(1 << 2)),
+	obj_teleporter = (obj_any|(1 << 3)),
+	obj_sapper =     (obj_any|(1 << 4)),
+	obj_custom =     (obj_any|(1 << 5))
+};
+
+static obj_type entity_to_obj_type(CBaseEntity *pEntity)
+{
+	const char *classname = gamehelpers->GetEntityClassname(pEntity);
+
+	if(strcmp(classname, "obj_sentrygun") == 0) {
+		return obj_sentry;
+	} else if(strcmp(classname, "obj_dispenser") == 0) {
+		return obj_dispenser;
+	} else if(strcmp(classname, "obj_teleporter") == 0) {
+		return obj_teleporter;
+	} else if(strcmp(classname, "obj_sapper") == 0) {
+		return obj_sapper;
+	} else if(pEntity->IsBaseObject()) {
+		return obj_custom;
+	}
+	return obj_none;
+}
+#endif
+
+int CBaseEntityBloodColor = -1;
+int CBaseCombatCharacterHasHumanGibs = -1;
+int CBaseCombatCharacterHasAlienGibs = -1;
+#if SOURCE_ENGINE == SE_TF2
+int CBaseCombatCharacterGetBossType = -1;
+#endif
+
+class EntityVTableHack
+{
+public:
+	bool IsNPC()
+	{
+		CBaseEntity *pThis = (CBaseEntity *)this;
+
+		if(pThis->MyNextBotPointer()) {
+			return true;
+		}
+
+		return false;
+	}
+
+	int BloodColor()
+	{
+		CBaseEntity *pThis = (CBaseEntity *)this;
+
+		CBaseCombatCharacter *pCC = pThis->MyCombatCharacterPointer();
+		if(pCC) {
+			return pCC->GetBloodColor();
+		}
+
+		return DONT_BLEED;
+	}
+};
+
+enum HalloweenBossType
+{
+	HALLOWEEN_BOSS_INVALID = 0,
+	HALLOWEEN_BOSS_HHH = 1,
+	HALLOWEEN_BOSS_MONOCULUS = 2,
+	HALLOWEEN_BOSS_MERASMUS = 3,
+
+	//CUSTOM ADDED
+	HALLOWEEN_BOSS_ZOMBIE,
+	HALLOWEEN_BOSS_TANK
+};
+
+class CombatCharacterVTableHack : public EntityVTableHack
+{
+public:
+	bool HasHumanGibs()
+	{
+		CBaseCombatCharacter *pThis = (CBaseCombatCharacter *)this;
+
+		Class_T myClass = pThis->Classify();
+		if(myClass == CLASS_ZOMBIE ||
+			myClass == CLASS_HHH ||
+			myClass == CLASS_WIZARD) {
+			return true;
+		}
+
+		return false;
+	}
+
+	bool HasAlienGibs()
+	{
+		CBaseCombatCharacter *pThis = (CBaseCombatCharacter *)this;
+
+		Class_T myClass = pThis->Classify();
+		if(myClass == CLASS_EYEBALL) {
+			return true;
+		}
+
+		return false;
+	}
+
+	HalloweenBossType GetBossType()
+	{
+		CBaseCombatCharacter *pThis = (CBaseCombatCharacter *)this;
+
+		Class_T myClass = pThis->Classify();
+		switch(myClass) {
+			case CLASS_ZOMBIE: return HALLOWEEN_BOSS_ZOMBIE;
+			case CLASS_HHH: return HALLOWEEN_BOSS_HHH;
+			case CLASS_WIZARD: return HALLOWEEN_BOSS_MERASMUS;
+			case CLASS_EYEBALL: return HALLOWEEN_BOSS_MONOCULUS;
+			case CLASS_TANK: return HALLOWEEN_BOSS_TANK;
+		}
+
+		return HALLOWEEN_BOSS_INVALID;
+	}
+};
+
+class ZombieVTableHack : public CombatCharacterVTableHack
+{
+public:
+	Class_T Classify()
+	{
+		return CLASS_ZOMBIE;
+	}
+};
+
+class MerasmusVTableHack : public CombatCharacterVTableHack
+{
+public:
+	Class_T Classify()
+	{
+		return CLASS_WIZARD;
+	}
+};
+
+class TankVTableHack : public CombatCharacterVTableHack
+{
+public:
+	Class_T Classify()
+	{
+		return CLASS_TANK;
+	}
+};
+
+class HHHVTableHack : public CombatCharacterVTableHack
+{
+public:
+	Class_T Classify()
+	{
+		return CLASS_HHH;
+	}
+};
+
+class EyeballVTableHack : public CombatCharacterVTableHack
+{
+public:
+	Class_T Classify()
+	{
+		return CLASS_EYEBALL;
+	}
+};
+
+void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname)
+{
+	bool is_cc = (pEntity->MyCombatCharacterPointer() != nullptr);
+
+	int patch_size = is_cc ? CBaseCombatCharacterGetBossType : CBaseEntityIsNPC;
+	patch_size *= sizeof(void *);
+	patch_size += 4;
+
+	void **vtabl = *(void ***)pEntity;
+
+	SourceHook::SetMemAccess(vtabl, patch_size, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+	vtabl[CBaseEntityBloodColor] = func_to_void(&EntityVTableHack::BloodColor);
+	vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::IsNPC);
+
+	if(is_cc) {
+		npc_type ntype{entity_to_npc_type(pEntity)};
+		switch(ntype) {
+			case npc_zombie: {
+				vtabl[CBaseEntityClassify] = func_to_void(&ZombieVTableHack::Classify);
+			} break;
+			case npc_hhh: {
+				vtabl[CBaseEntityClassify] = func_to_void(&HHHVTableHack::Classify);
+			} break;
+			case npc_eye: {
+				vtabl[CBaseEntityClassify] = func_to_void(&EyeballVTableHack::Classify);
+			} break;
+			case npc_wizard: {
+				vtabl[CBaseEntityClassify] = func_to_void(&MerasmusVTableHack::Classify);
+			} break;
+			case npc_tank: {
+				vtabl[CBaseEntityClassify] = func_to_void(&TankVTableHack::Classify);
+			} break;
+		}
+
+		vtabl[CBaseCombatCharacterHasHumanGibs] = func_to_void(&CombatCharacterVTableHack::HasHumanGibs);
+		vtabl[CBaseCombatCharacterHasAlienGibs] = func_to_void(&CombatCharacterVTableHack::HasAlienGibs);
+		vtabl[CBaseCombatCharacterGetBossType] = func_to_void(&CombatCharacterVTableHack::GetBossType);
+	}
+}
+
+class CAI_BaseNPC;
+
+DETOUR_DECL_MEMBER0(MyNPCPointer, CAI_BaseNPC *)
+{
+	CBaseEntity *pEntity = (CBaseEntity *)this;
+
+	if(pEntity->MyNextBotPointer() ||
+		pEntity->IsBaseObject()) {
+		return nullptr;
+	}
+
+	return DETOUR_MEMBER_CALL(MyNPCPointer)();
+}
+
+IEntityFactoryDictionary *dictionary = nullptr;
+
+static void RemoveEntity(CBaseEntity *pEntity)
+{
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	static int m_iEFlagsOffset = -1;
+	if(m_iEFlagsOffset == -1) {
+		datamap_t *pMap = gamehelpers->GetDataMap(pEntity);
+		sm_datatable_info_t info{};
+		gamehelpers->FindDataMapInfo(pMap, "m_iEFlags", &info);
+		m_iEFlagsOffset = info.actual_offset;
+	}
+	
+	*(int *)((unsigned char *)pEntity + m_iEFlagsOffset) |= EFL_KILLME;
+#elif SOURCE_ENGINE == SE_TF2
+	servertools->RemoveEntity(pEntity);
+#endif
+}
+
+int CGameRulesInitDefaultAIRelationships = -1;
+int CGameRulesAIClassText = -1;
+int CGameRulesShouldAutoAim = -1;
+int CGameRulesGetAutoAimScale = -1;
+
+ConVar	sk_allow_autoaim( "sk_allow_autoaim", "1", FCVAR_REPLICATED | FCVAR_ARCHIVE_XBOX );
+
+// Autoaim scale
+ConVar	sk_autoaim_scale1( "sk_autoaim_scale1", "1.0", FCVAR_REPLICATED );
+ConVar	sk_autoaim_scale2( "sk_autoaim_scale2", "1.0", FCVAR_REPLICATED );
+
+enum
+{
+	GR_NOTTEAMMATE = 0,
+	GR_TEAMMATE,
+	GR_ENEMY,
+	GR_ALLY,
+	GR_NEUTRAL,
+};
+
+int CGameRulesGetSkillLevel = -1;
+int CGameRulesPlayerRelationship = -1;
+int CGameRulesRefreshSkillDataOffset = -1;
+void *CGameRulesRefreshSkillDataPtr = nullptr;
+
+class CGameRules
+{
+public:
+	int GetSkillLevel()
+	{
+		return call_vfunc<int>(this, CGameRulesGetSkillLevel);
+	}
+
+	int PlayerRelationship( CBaseEntity *pPlayer, CBaseEntity *pTarget )
+	{
+		return call_vfunc<int, CGameRules, CBaseEntity *, CBaseEntity *>(this, CGameRulesPlayerRelationship, pPlayer, pTarget);
+	}
+
+	void RefreshSkillData(bool forceUpdate)
+	{
+		call_mfunc<bool, CGameRules, bool>(this, CGameRulesRefreshSkillDataPtr, forceUpdate);
+	}
+};
+
+class GameRulesVTableHack
+{
+public:
+	const char *AIClassText(int classType)
+	{
+		switch (classType)
+		{
+			case CLASS_NONE:			return "CLASS_NONE";
+			case CLASS_PLAYER:			return "CLASS_PLAYER";
+			case CLASS_PLAYER_ALLY:		return "CLASS_PLAYER_ALLY";
+
+			case CLASS_TFGOAL:			return "CLASS_TFGOAL";
+			case CLASS_TFGOAL_TIMER:	return "CLASS_TFGOAL_TIMER";
+			case CLASS_TFGOAL_ITEM:		return "CLASS_TFGOAL_ITEM";
+			case CLASS_TFSPAWN:			return "CLASS_TFSPAWN";
+			case CLASS_MACHINE:			return "CLASS_MACHINE";
+
+			case CLASS_ZOMBIE:			return "CLASS_ZOMBIE";
+			case CLASS_HHH:				return "CLASS_HHH";
+			case CLASS_WIZARD:			return "CLASS_WIZARD";
+			case CLASS_EYEBALL:			return "CLASS_EYEBALL";
+			case CLASS_TANK:			return "CLASS_TANK";
+
+			default:					return "MISSING CLASS in ClassifyText()";
+		}
+	}
+
+	void InitDefaultAIRelationships()
+	{
+		CBaseCombatCharacter::AllocateDefaultRelationships();
+
+		int i, j;
+		for (i=0;i<NUM_AI_CLASSES;i++)
+		{
+			for (j=0;j<NUM_AI_CLASSES;j++)
+			{
+				CBaseCombatCharacter::SetDefaultRelationship((Class_T)i, (Class_T)j, D_NU, 0);
+			}
+		}
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_PLAYER, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_HHH, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_EYEBALL, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_TANK, D_HT, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_PLAYER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_HHH, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_EYEBALL, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_PLAYER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_HHH, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_EYEBALL, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_PLAYER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_HHH, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_EYEBALL, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_PLAYER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_HHH, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_EYEBALL, D_FR, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_PLAYER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_HHH, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_EYEBALL, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_PLAYER, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_PLAYER_ALLY, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_TFGOAL, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_TFGOAL_TIMER, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_TFGOAL_ITEM, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_TFSPAWN, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_MACHINE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_ZOMBIE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_HHH, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_WIZARD, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_EYEBALL, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_PLAYER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_PLAYER_ALLY, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_TFGOAL, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_TFGOAL_TIMER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_TFGOAL_ITEM, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_MACHINE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_ZOMBIE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_HHH, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_WIZARD, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_EYEBALL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_PLAYER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_PLAYER_ALLY, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_TFGOAL, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_TFGOAL_TIMER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_TFGOAL_ITEM, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_MACHINE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_ZOMBIE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_HHH, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_WIZARD, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_EYEBALL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_PLAYER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_PLAYER_ALLY, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_TFGOAL, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_TFGOAL_TIMER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_TFGOAL_ITEM, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_MACHINE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_ZOMBIE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_HHH, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_WIZARD, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_EYEBALL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_PLAYER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_PLAYER_ALLY, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_TFGOAL, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_TFGOAL_TIMER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_TFGOAL_ITEM, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_MACHINE, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_ZOMBIE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_HHH, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_WIZARD, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_EYEBALL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_TANK, D_LI, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_PLAYER, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_PLAYER_ALLY, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_TFGOAL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_TFGOAL_TIMER, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_TFGOAL_ITEM, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_TFSPAWN, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_MACHINE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_ZOMBIE, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_HHH, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_WIZARD, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_EYEBALL, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_TANK, D_LI, 0);
+	}
+
+	bool ShouldAutoAim( CBasePlayer *pPlayer, edict_t *target )
+	{
+		CGameRules *pThis = (CGameRules *)this;
+
+		// always autoaim, unless target is a teammate
+		CBaseEntity *pTgt = target->GetIServerEntity()->GetBaseEntity();
+		if ( pTgt && pTgt->IsPlayer() )
+		{
+			if ( pThis->PlayerRelationship( pPlayer, pTgt ) == GR_TEAMMATE )
+				return false; // don't autoaim at teammates
+		}
+
+		return sk_allow_autoaim.GetBool() != 0;
+	}
+
+	float GetAutoAimScale( CBasePlayer *pPlayer )
+	{
+		CGameRules *pThis = (CGameRules *)this;
+
+		switch( pThis->GetSkillLevel() )
+		{
+		case SKILL_EASY:
+			return sk_autoaim_scale1.GetFloat();
+
+		case SKILL_MEDIUM:
+			return sk_autoaim_scale2.GetFloat();
+
+		default:
+			return 0.0f;
+		}
+	}
+
+	void RefreshSkillData(bool forceUpdate)
+	{
+		CGameRules *pThis = (CGameRules *)this;
+
+		pThis->RefreshSkillData(forceUpdate);
+
+		char	szExec[256];
+
+		Q_snprintf( szExec,sizeof(szExec), "exec skill_manifest.cfg\n" );
+
+		engine->ServerCommand( szExec );
+		engine->ServerExecute();
+
+		Q_snprintf( szExec,sizeof(szExec), "exec skill%d.cfg\n", pThis->GetSkillLevel() );
+
+		engine->ServerCommand( szExec );
+		engine->ServerExecute();
+	}
+};
+
+static bool gamerules_vtable_assigned{false};
 
 void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 {
@@ -13325,17 +14027,30 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 		
 		infectedvtable = *(void ***)pEntity;
 		
-		static int m_iEFlagsOffset = -1;
-		if(m_iEFlagsOffset == -1) {
-			datamap_t *pMap = gamehelpers->GetDataMap(pEntity);
-			sm_datatable_info_t info{};
-			gamehelpers->FindDataMapInfo(pMap, "m_iEFlags", &info);
-			m_iEFlagsOffset = info.actual_offset;
-		}
-		
-		*(int *)((unsigned char *)pEntity + m_iEFlagsOffset) |= EFL_KILLME;
+		RemoveEntity(pEntity);
 	}
 #endif
+
+	if(!gamerules_vtable_assigned) {
+		CGameRules *gamerules{(CGameRules *)g_pSDKTools->GetGameRules()};
+		if(gamerules) {
+			void **vtabl = *(void ***)gamerules;
+
+			SourceHook::SetMemAccess(vtabl, (CGameRulesPlayerRelationship * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+			vtabl[CGameRulesInitDefaultAIRelationships] = func_to_void(&GameRulesVTableHack::InitDefaultAIRelationships);
+			vtabl[CGameRulesAIClassText] = func_to_void(&GameRulesVTableHack::AIClassText);
+			vtabl[CGameRulesShouldAutoAim] = func_to_void(&GameRulesVTableHack::ShouldAutoAim);
+			vtabl[CGameRulesGetAutoAimScale] = func_to_void(&GameRulesVTableHack::GetAutoAimScale);
+			CGameRulesRefreshSkillDataPtr = vtabl[CGameRulesRefreshSkillDataOffset];
+			vtabl[CGameRulesRefreshSkillDataOffset] = func_to_void(&GameRulesVTableHack::RefreshSkillData);
+
+			call_vfunc<void, CGameRules>(gamerules, CGameRulesInitDefaultAIRelationships);
+			call_vfunc<void, CGameRules, bool>(gamerules, CGameRulesRefreshSkillDataOffset, true);
+
+			gamerules_vtable_assigned = true;
+		}
+	}
 }
 
 #include "funnyfile.h"
@@ -13367,7 +14082,36 @@ cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *par
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
-	
+
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::AllocateDefaultRelationships", &CBaseCombatCharacterAllocateDefaultRelationships);
+
+	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1 = -1;
+	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::1", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1);
+	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2 = -1;
+	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::2", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2);
+	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3 = -1;
+	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::3", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3);
+
+	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+	*(unsigned char *)((unsigned char *)CBaseCombatCharacterAllocateDefaultRelationships + CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1) = (NUM_AI_CLASSES * sizeof(Relationship_t *));
+	*(unsigned char *)((unsigned char *)CBaseCombatCharacterAllocateDefaultRelationships + CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2) = (NUM_AI_CLASSES * sizeof(Relationship_t));
+	*(unsigned char *)((unsigned char *)CBaseCombatCharacterAllocateDefaultRelationships + CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3) = (NUM_AI_CLASSES * sizeof(Relationship_t *));
+
+	void *CCleanupDefaultRelationShipsShutdown = nullptr;
+	g_pGameConf->GetMemSig("CCleanupDefaultRelationShips::Shutdown", &CCleanupDefaultRelationShipsShutdown);
+
+	int CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES = -1;
+	g_pGameConf->GetOffset("CCleanupDefaultRelationShips::Shutdown::NUM_AI_CLASSES", &CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES);
+
+	SourceHook::SetMemAccess(CCleanupDefaultRelationShipsShutdown, CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+	*(unsigned char *)((unsigned char *)CCleanupDefaultRelationShipsShutdown + CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES) = (NUM_AI_CLASSES * sizeof(Relationship_t *));
+
+	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
+
 	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
 	
 	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
@@ -13409,6 +14153,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	dictionary = (void_to_func<IEntityFactoryDictionary *(*)()>(EntityFactoryDictionaryPtr))();
 	
 	sizeofInfected = dictionary->FindFactory("infected")->GetEntitySize();
+#else
+	dictionary = servertools->GetEntityFactoryDictionary();
 #endif
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::Event_Killed", &CBaseCombatCharacterEvent_Killed);
 	
@@ -13440,6 +14186,31 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 
 	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
 
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetOffset("CBaseEntity::IsBaseObject", &CBaseEntityIsBaseObject);
+#endif
+
+	g_pGameConf->GetOffset("CGameRules::InitDefaultAIRelationships", &CGameRulesInitDefaultAIRelationships);
+	g_pGameConf->GetOffset("CGameRules::AIClassText", &CGameRulesAIClassText);
+	g_pGameConf->GetOffset("CGameRules::GetSkillLevel", &CGameRulesGetSkillLevel);
+	g_pGameConf->GetOffset("CGameRules::PlayerRelationship", &CGameRulesPlayerRelationship);
+	g_pGameConf->GetOffset("CGameRules::RefreshSkillData", &CGameRulesRefreshSkillDataOffset);
+	g_pGameConf->GetOffset("CGameRules::ShouldAutoAim", &CGameRulesShouldAutoAim);
+	g_pGameConf->GetOffset("CGameRules::GetAutoAimScale", &CGameRulesGetAutoAimScale);
+
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::SetDefaultRelationship", &CBaseCombatCharacterSetDefaultRelationship);
+
+	g_pGameConf->GetOffset("CBaseEntity::Classify", &CBaseEntityClassify);
+	g_pGameConf->GetOffset("CBaseEntity::IsNPC", &CBaseEntityIsNPC);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::HasHumanGibs", &CBaseCombatCharacterHasHumanGibs);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::HasAlienGibs", &CBaseCombatCharacterHasAlienGibs);
+	g_pGameConf->GetOffset("CBaseEntity::BloodColor", &CBaseEntityBloodColor);
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetBossType", &CBaseCombatCharacterGetBossType);
+#endif
+	pMyNPCPointer = DETOUR_CREATE_MEMBER(MyNPCPointer, "CBaseEntity::MyNPCPointer")
+	pMyNPCPointer->EnableDetour();
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	g_pGameConf->GetOffset("CBaseEntity::MyInfectedPointer", &CBaseEntityMyInfectedPointer);
 	SH_MANUALHOOK_RECONFIGURE(MyInfectedPointer, CBaseEntityMyInfectedPointer, 0, 0);
@@ -13451,9 +14222,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	g_pGameConf->GetOffset("CBaseCombatCharacter::CanBeA", &CBaseCombatCharacterCanBeA);
 	SH_MANUALHOOK_RECONFIGURE(CanBeA, CBaseCombatCharacterCanBeA, 0, 0);
-	
-	g_pGameConf->GetOffset("CBaseEntity::Classify", &offset);
-	SH_MANUALHOOK_RECONFIGURE(Classify, offset, 0, 0);
 #endif
 
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
@@ -13474,8 +14242,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #if SOURCE_ENGINE == SE_TF2
 	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_STATIC(HookIsAuthoritative), false);
 #endif
-	
-	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
 	
 	pPathOptimize = DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
 	pPathOptimize->EnableDetour();
@@ -13543,8 +14309,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #ifdef __HAS_DAMAGERULES
 	sharesys->AddDependency(myself, "damagerules.ext", false, true);
 #endif
-	
+
 	sharesys->RegisterLibrary(myself, "nextbot");
+	sharesys->AddNatives(myself, natives);
 
 	return true;
 }
@@ -13572,19 +14339,22 @@ void Sample::OnPluginUnloaded(IPlugin *plugin)
 	}
 }
 
+ISDKHooks *g_pSDKHooks = nullptr;
+
 void Sample::SDK_OnAllLoaded()
 {
 #ifdef __HAS_DAMAGERULES
 	SM_GET_LATE_IFACE(DAMAGERULES, g_pDamageRules);
 #endif
-	sharesys->AddNatives(myself, natives);
+	SM_GET_LATE_IFACE(SDKHOOKS, g_pSDKHooks);
+	SM_GET_LATE_IFACE(SDKTOOLS, g_pSDKTools);
+	g_pSDKHooks->AddEntityListener(this);
 }
 
 bool Sample::QueryRunning(char *error, size_t maxlength)
 {
-#ifdef __HAS_DAMAGERULES
-	//SM_CHECK_IFACE(DAMAGERULES, g_pDamageRules);
-#endif
+	SM_CHECK_IFACE(SDKHOOKS, g_pSDKHooks);
+	SM_CHECK_IFACE(SDKTOOLS, g_pSDKTools);
 	return true;
 }
 
@@ -13593,7 +14363,12 @@ bool Sample::QueryInterfaceDrop(SMInterface *pInterface)
 #ifdef __HAS_DAMAGERULES
 	if(pInterface == g_pDamageRules)
 		return false;
+	else
 #endif
+	if(pInterface == g_pSDKHooks)
+		return false;
+	else if(pInterface == g_pSDKTools)
+		return false;
 	return IExtensionInterface::QueryInterfaceDrop(pInterface);
 }
 
@@ -13603,13 +14378,22 @@ void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_DAMAGERULES_NAME) == 0)
 	{
 		g_pDamageRules = NULL;
-	}
+	} else 
 #endif
+	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_SDKHOOKS_NAME) == 0)
+	{
+		g_pSDKHooks = NULL;
+	}
+	else if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_SDKTOOLS_NAME) == 0)
+	{
+		g_pSDKTools = NULL;
+	}
 }
 
 void Sample::SDK_OnUnload()
 {
 	pPathOptimize->Destroy();
+	pMyNPCPointer->Destroy();
 #if SOURCE_ENGINE == SE_TF2
 	pApplyAccumulatedApproach->Destroy();
 	pUpdatePosition->Destroy();
@@ -13621,6 +14405,7 @@ void Sample::SDK_OnUnload()
 #endif
 	pTraverseLadder->Destroy();
 	plsys->RemovePluginsListener(this);
+	g_pSDKHooks->RemoveEntityListener(this);
 	handlesys->RemoveType(PathHandleType, myself->GetIdentity());
 	handlesys->RemoveType(PathFollowerHandleType, myself->GetIdentity());
 #if SOURCE_ENGINE == SE_TF2
