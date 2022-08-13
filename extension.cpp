@@ -34,6 +34,9 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <string_view>
+
+using namespace std::literals::string_view_literals;
 
 #if SOURCE_ENGINE == SE_TF2
 	#define TF_DLL
@@ -178,6 +181,35 @@ void *CBaseEntityCalcAbsolutePosition = nullptr;
 void *CBaseCombatCharacterAllocateDefaultRelationships = nullptr;
 void *CBaseCombatCharacterSetDefaultRelationship = nullptr;
 
+int CBaseCombatCharacterIsHiddenByFogVec = -1;
+int CBaseCombatCharacterIsHiddenByFogEnt = -1;
+int CBaseCombatCharacterIsHiddenByFogR = -1;
+
+int CBaseCombatCharacterGetFogObscuredRatioVec = -1;
+int CBaseCombatCharacterGetFogObscuredRatioEnt = -1;
+int CBaseCombatCharacterGetFogObscuredRatioR = -1;
+
+int CBaseCombatCharacterIsLookingTowardsEnt = -1;
+int CBaseCombatCharacterIsLookingTowardsVec = -1;
+
+int CBaseCombatCharacterIsInFieldOfViewEnt = -1;
+int CBaseCombatCharacterIsInFieldOfViewVec = -1;
+
+int CBaseCombatCharacterIsLineOfSightClearEnt = -1;
+int CBaseCombatCharacterIsLineOfSightClearVec = -1;
+
+int CBaseEntityFVisibleVec = -1;
+int CBaseEntityFVisibleEnt = -1;
+
+int CBaseCombatCharacterFInViewConeVec = -1;
+int CBaseCombatCharacterFInViewConeEnt = -1;
+
+int CBaseCombatCharacterFInAimConeVec = -1;
+int CBaseCombatCharacterFInAimConeEnt = -1;
+
+void *CBaseCombatCharacterIsAbleToSeeEnt = nullptr;
+void *CBaseCombatCharacterIsAbleToSeeCC = nullptr;
+
 void *NavAreaBuildPathPtr = nullptr;
 
 int CBaseEntityMyNextBotPointer = -1;
@@ -202,6 +234,7 @@ int NextBotCombatCharacterGetNextBotCombatCharacter = -1;
 int CBaseCombatCharacterCanBeA = -1;
 #endif
 int CBaseEntityEyePosition = -1;
+int CBaseEntitySpawn = -1;
 
 int m_vecAbsOriginOffset = -1;
 int m_iTeamNumOffset = -1;
@@ -224,6 +257,7 @@ int m_flSimulationTimeOffset = -1;
 int m_angAbsRotationOffset = -1;
 int m_angRotationOffset = -1;
 int m_bloodColorOffset = -1;
+int m_CollisionGroupOffset = -1;
 
 ConVar *NextBotStop = nullptr;
 
@@ -671,7 +705,7 @@ public:
 
 		// All children are invalid, but we are not
 		InvalidatePhysicsRecursive( ANGLES_CHANGED );
-		SetIEFlags( GetIEFlags() & ~EFL_DIRTY_ABSTRANSFORM );
+		RemoveIEFlags( EFL_DIRTY_ABSTRANSFORM );
 
 		*(QAngle *)((unsigned char *)this + m_angAbsRotationOffset) = absAngles;
 		SetEdictStateChanged(this, m_angAbsRotationOffset);
@@ -767,7 +801,7 @@ public:
 		return STRING( *(string_t *)((unsigned char *)this + m_iClassnameOffset) );
 	}
 
-	void SetIEFlags(int flags)
+	void AddIEFlags(int flags)
 	{
 		if(m_iEFlagsOffset == -1) {
 			sm_datatable_info_t info{};
@@ -776,7 +810,24 @@ public:
 			m_iEFlagsOffset = info.actual_offset;
 		}
 
-		*(int *)((unsigned char *)this + m_iEFlagsOffset) = flags;
+		*(int *)((unsigned char *)this + m_iEFlagsOffset) |= flags;
+
+		if ( flags & ( EFL_FORCE_CHECK_TRANSMIT | EFL_IN_SKYBOX ) )
+		{
+			DispatchUpdateTransmitState();
+		}
+	}
+
+	void RemoveIEFlags(int flags)
+	{
+		if(m_iEFlagsOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_iEFlags", &info);
+			m_iEFlagsOffset = info.actual_offset;
+		}
+
+		*(int *)((unsigned char *)this + m_iEFlagsOffset) &= ~flags;
 
 		if ( flags & ( EFL_FORCE_CHECK_TRANSMIT | EFL_IN_SKYBOX ) )
 		{
@@ -806,6 +857,18 @@ public:
 		}
 		
 		return *(int *)((unsigned char *)this + m_fFlagsOffset);
+	}
+
+	void AddFlag(int flag)
+	{
+		if(m_fFlagsOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_fFlags", &info);
+			m_fFlagsOffset = info.actual_offset;
+		}
+
+		*(int *)((unsigned char *)this + m_fFlagsOffset) |= flag;
 	}
 	
 	void CalcAbsoluteVelocity()
@@ -937,7 +1000,7 @@ public:
 			nChangeFlags |= POSITION_CHANGED | VELOCITY_CHANGED;
 		}
 
-		SetIEFlags( GetIEFlags() | nDirtyFlags );
+		AddIEFlags( nDirtyFlags );
 
 		// Set flags for children
 		bool bOnlyDueToAttachment = false;
@@ -1017,7 +1080,7 @@ public:
 		// The abs velocity won't be dirty since we're setting it here
 		// All children are invalid, but we are not
 		InvalidatePhysicsRecursive( VELOCITY_CHANGED );
-		SetIEFlags( GetIEFlags() & ~EFL_DIRTY_ABSVELOCITY );
+		RemoveIEFlags( EFL_DIRTY_ABSVELOCITY );
 
 		*(Vector *)(((unsigned char *)this) + m_vecAbsVelocityOffset) = vecAbsVelocity;
 
@@ -1072,6 +1135,29 @@ public:
 	CServerNetworkProperty *NetworkProp() { return (CServerNetworkProperty *)GetNetworkable(); }
 	const CServerNetworkProperty *NetworkProp() const { return (const CServerNetworkProperty *)const_cast<CBaseEntity *>(this)->GetNetworkable(); }
 	
+	int GetCollisionGroup()
+	{
+		if(m_CollisionGroupOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_CollisionGroup", &info);
+			m_CollisionGroupOffset = info.actual_offset;
+		}
+
+		return *(int *)(((unsigned char *)this) + m_CollisionGroupOffset);
+	}
+
+	bool FVisible( CBaseEntity *pEntity, int traceMask = MASK_BLOCKLOS, CBaseEntity **ppBlocker = NULL )
+	{
+		return call_vfunc<bool, CBaseEntity, CBaseEntity *, int, CBaseEntity **>(this, CBaseEntityFVisibleEnt, pEntity, traceMask, ppBlocker);
+	}
+
+	bool FVisible( const Vector &vecTarget, int traceMask = MASK_BLOCKLOS, CBaseEntity **ppBlocker = NULL )
+	{
+		return call_vfunc<bool, CBaseEntity, const Vector &, int, CBaseEntity **>(this, CBaseEntityFVisibleVec, vecTarget, traceMask, ppBlocker);
+	}
+
+	//GARBAGE
 	int GetHealth() { return 0; }
 	int m_takedamage;
 	void	NetworkStateChanged() { }
@@ -1083,7 +1169,7 @@ public:
 
 void CCollisionProperty::MarkSurroundingBoundsDirty()
 {
-	GetOuter()->SetIEFlags( GetOuter()->GetIEFlags() | EFL_DIRTY_SURROUNDING_COLLISION_BOUNDS );
+	GetOuter()->AddIEFlags( EFL_DIRTY_SURROUNDING_COLLISION_BOUNDS );
 	MarkPartitionHandleDirty();
 
 #ifdef CLIENT_DLL
@@ -1101,7 +1187,7 @@ void CCollisionProperty::MarkPartitionHandleDirty()
 	
 	if ( !(m_pOuter->GetIEFlags() & EFL_DIRTY_SPATIAL_PARTITION) )
 	{
-		m_pOuter->SetIEFlags( m_pOuter->GetIEFlags() | EFL_DIRTY_SPATIAL_PARTITION );
+		m_pOuter->AddIEFlags( EFL_DIRTY_SPATIAL_PARTITION );
 		//s_DirtyKDTree.AddEntity( m_pOuter );
 	}
 
@@ -1162,6 +1248,16 @@ struct Relationship_t
 	int				priority;		// Relative importance of this relationship (higher numbers mean more important)
 };
 
+enum LineOfSightCheckType
+{
+	IGNORE_NOTHING,
+	IGNORE_ACTORS
+};
+
+enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
+
+#define BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE 0.9f
+
 class CBaseCombatCharacter : public CBaseEntity
 {
 public:
@@ -1221,6 +1317,96 @@ public:
 	static void SetDefaultRelationship(Class_T nClass, Class_T nClassTarget, Disposition_t nDisposition, int nPriority)
 	{
 		((void(*)(Class_T, Class_T, Disposition_t, int))(CBaseCombatCharacterSetDefaultRelationship))(nClass, nClassTarget, nDisposition, nPriority);
+	}
+
+	bool IsHiddenByFog( const Vector &target )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, const Vector &>(this, CBaseCombatCharacterIsHiddenByFogVec, target);
+	}
+
+	bool IsHiddenByFog( CBaseEntity *target )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CBaseEntity *>(this, CBaseCombatCharacterIsHiddenByFogEnt, target);
+	}
+
+	bool IsHiddenByFog( float range )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, float>(this, CBaseCombatCharacterIsHiddenByFogR, range);
+	}
+
+	float GetFogObscuredRatio( const Vector &target )
+	{
+		return call_vfunc<float, CBaseCombatCharacter, const Vector &>(this, CBaseCombatCharacterGetFogObscuredRatioVec, target);
+	}
+
+	float GetFogObscuredRatio( CBaseEntity *target )
+	{
+		return call_vfunc<float, CBaseCombatCharacter, CBaseEntity *>(this, CBaseCombatCharacterGetFogObscuredRatioEnt, target);
+	}
+
+	float GetFogObscuredRatio( float range )
+	{
+		return call_vfunc<float, CBaseCombatCharacter, float>(this, CBaseCombatCharacterGetFogObscuredRatioR, range);
+	}
+
+	bool IsLookingTowards( CBaseEntity *target, float cosTolerance = BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CBaseEntity *, float>(this, CBaseCombatCharacterIsLookingTowardsEnt, target, cosTolerance);
+	}
+
+	bool IsLookingTowards( const Vector &target, float cosTolerance = BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, const Vector &, float>(this, CBaseCombatCharacterIsLookingTowardsVec, target, cosTolerance);
+	}
+
+	bool IsInFieldOfView( CBaseEntity *entity )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CBaseEntity *>(this, CBaseCombatCharacterIsInFieldOfViewEnt, entity);
+	}
+
+	bool IsInFieldOfView( const Vector &pos )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, const Vector &>(this, CBaseCombatCharacterIsInFieldOfViewVec, pos);
+	}
+
+	bool IsLineOfSightClear( CBaseEntity *entity, LineOfSightCheckType checkType = IGNORE_NOTHING )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CBaseEntity *, LineOfSightCheckType>(this, CBaseCombatCharacterIsLineOfSightClearEnt, entity, checkType);
+	}
+
+	bool IsLineOfSightClear( const Vector &pos, LineOfSightCheckType checkType = IGNORE_NOTHING, CBaseEntity *entityToIgnore = NULL )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, const Vector &, LineOfSightCheckType>(this, CBaseCombatCharacterIsLineOfSightClearVec, pos, checkType, entityToIgnore);
+	}
+
+	bool FInViewCone( CBaseEntity *pEntity )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CBaseEntity *>(this, CBaseCombatCharacterFInViewConeEnt, pEntity);
+	}
+
+	bool FInViewCone( const Vector &vecTarget )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, const Vector &>(this, CBaseCombatCharacterFInViewConeVec, vecTarget);
+	}
+
+	bool FInAimCone( CBaseEntity *pEntity )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CBaseEntity *>(this, CBaseCombatCharacterFInAimConeEnt, pEntity);
+	}
+
+	bool FInAimCone( const Vector &vecTarget )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, const Vector &>(this, CBaseCombatCharacterFInAimConeVec, vecTarget);
+	}
+
+	bool IsAbleToSee( CBaseEntity *entity, FieldOfViewCheckType checkFOV )
+	{
+		return call_mfunc<bool, CBaseCombatCharacter, CBaseEntity *, FieldOfViewCheckType>(this, CBaseCombatCharacterIsAbleToSeeEnt, entity, checkFOV);
+	}
+
+	bool IsAbleToSee( CBaseCombatCharacter *pBCC, FieldOfViewCheckType checkFOV )
+	{
+		return call_mfunc<bool, CBaseCombatCharacter, CBaseCombatCharacter *, FieldOfViewCheckType>(this, CBaseCombatCharacterIsAbleToSeeCC, pBCC, checkFOV);
 	}
 };
 
@@ -2879,8 +3065,6 @@ public:
 	// return true if the given entity passes this filter
 	virtual bool IsAllowed( CBaseEntity *entity ) = 0;
 };
-
-enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
 
 #if SOURCE_ENGINE == SE_TF2
 class CKnownEntity;
@@ -12895,6 +13079,327 @@ cell_t DirectionBetweenEntityVector(IPluginContext *pContext, const cell_t *para
 	return LEFT;
 }
 
+cell_t EntityVisibleEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	CBaseEntity *pBlocker = nullptr;
+	bool vis =  pSubject->FVisible(pTarget, params[3], &pBlocker);
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[4], &addr);
+
+	*addr = gamehelpers->EntityToBCompatRef(pBlocker);
+
+	return vis;
+}
+
+cell_t EntityVisibleVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	CBaseEntity *pBlocker = nullptr;
+	bool vis =  pSubject->FVisible(target, params[3], &pBlocker);
+
+	addr = nullptr;
+	pContext->LocalToPhysAddr(params[4], &addr);
+
+	*addr = gamehelpers->EntityToBCompatRef(pBlocker);
+
+	return vis;
+}
+
+cell_t CombatCharacterIsHiddenByFogVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	return pSubject->IsHiddenByFog(target);
+}
+
+cell_t CombatCharacterIsHiddenByFogEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->IsHiddenByFog(pTarget);
+}
+
+cell_t CombatCharacterIsHiddenByFogR(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	return pSubject->IsHiddenByFog(sp_ctof(params[2]));
+}
+
+cell_t CombatCharacterGetFogObscuredRatioVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	return sp_ftoc(pSubject->GetFogObscuredRatio(target));
+}
+
+cell_t CombatCharacterGetFogObscuredRatioEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return sp_ctof(pSubject->GetFogObscuredRatio(pTarget));
+}
+
+cell_t CombatCharacterGetFogObscuredRatioR(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	return sp_ctof(pSubject->GetFogObscuredRatio(sp_ctof(params[2])));
+}
+
+cell_t CombatCharacterIsLookingTowardsVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	return pSubject->IsLookingTowards(target, sp_ctof(params[3]));
+}
+
+cell_t CombatCharacterIsLookingTowardsEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->IsLookingTowards(pTarget, sp_ctof(params[3]));
+}
+
+cell_t CombatCharacterIsInFieldOfViewVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	return pSubject->IsInFieldOfView(target);
+}
+
+cell_t CombatCharacterIsInFieldOfViewEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->IsInFieldOfView(pTarget);
+}
+
+cell_t CombatCharacterIsLineOfSightClearVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[4]);
+
+	return pSubject->IsLineOfSightClear(target, (LineOfSightCheckType)params[3], pTarget);
+}
+
+cell_t CombatCharacterIsLineOfSightClearEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->IsLineOfSightClear(pTarget, (LineOfSightCheckType)params[3]);
+}
+
+cell_t CombatCharacterInAimConeVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	return pSubject->FInAimCone(target);
+}
+
+cell_t CombatCharacterInAimConeEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->FInAimCone(pTarget);
+}
+
+cell_t CombatCharacterInViewConeVec(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector target{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	return pSubject->FInViewCone(target);
+}
+
+cell_t CombatCharacterInViewConeEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->FInViewCone(pTarget);
+}
+
+cell_t CombatCharacterIsAbleToSeeEnt(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseEntity *pTarget = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->IsAbleToSee(pTarget, (FieldOfViewCheckType)params[3]);
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -13289,6 +13794,25 @@ sp_nativeinfo_t natives[] =
 	{"CombatCharacterEventKilled", CombatCharacterEventKilled},
 	{"DirectionBetweenEntityVector", DirectionBetweenEntityVector},
 	{"CollectSurroundingAreas", CollectSurroundingAreasNative},
+	{"EntityVisibleEnt", EntityVisibleEnt},
+	{"EntityVisibleVec", EntityVisibleVec},
+	{"CombatCharacterIsHiddenByFogVec", CombatCharacterIsHiddenByFogVec},
+	{"CombatCharacterIsHiddenByFogEnt", CombatCharacterIsHiddenByFogEnt},
+	{"CombatCharacterIsHiddenByFogR", CombatCharacterIsHiddenByFogR},
+	{"CombatCharacterGetFogObscuredRatioVec", CombatCharacterGetFogObscuredRatioVec},
+	{"CombatCharacterGetFogObscuredRatioEnt", CombatCharacterGetFogObscuredRatioEnt},
+	{"CombatCharacterGetFogObscuredRatioR", CombatCharacterGetFogObscuredRatioR},
+	{"CombatCharacterIsLookingTowardsVec", CombatCharacterIsLookingTowardsVec},
+	{"CombatCharacterIsLookingTowardsEnt", CombatCharacterIsLookingTowardsEnt},
+	{"CombatCharacterIsInFieldOfViewVec", CombatCharacterIsInFieldOfViewVec},
+	{"CombatCharacterIsInFieldOfViewEnt", CombatCharacterIsInFieldOfViewEnt},
+	{"CombatCharacterIsLineOfSightClearVec", CombatCharacterIsLineOfSightClearVec},
+	{"CombatCharacterIsLineOfSightClearEnt", CombatCharacterIsLineOfSightClearEnt},
+	{"CombatCharacterInViewConeVec", CombatCharacterInViewConeVec},
+	{"CombatCharacterInViewConeEnt", CombatCharacterInViewConeEnt},
+	{"CombatCharacterInAimConeVec", CombatCharacterInAimConeVec},
+	{"CombatCharacterInAimConeEnt", CombatCharacterInAimConeEnt},
+	{"CombatCharacterIsAbleToSeeEnt", CombatCharacterIsAbleToSeeEnt},
 	{NULL, NULL}
 };
 
@@ -13445,25 +13969,23 @@ enum npc_type : unsigned char
 	npc_custom = (npc_any|(1 << 7))
 };
 
-static npc_type entity_to_npc_type(CBaseEntity *pEntity)
+static npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname)
 {
-	const char *classname = gamehelpers->GetEntityClassname(pEntity);
-
 #if SOURCE_ENGINE == SE_TF2
-	if(strcmp(classname, "tf_zombie") == 0) {
+	if(classname == "tf_zombie"sv) {
 		return npc_zombie;
-	} else if(strcmp(classname, "headless_hatman") == 0) {
+	} else if(classname == "headless_hatman"sv) {
 		return npc_hhh;
-	} else if(strcmp(classname, "eyeball_boss") == 0) {
+	} else if(classname == "eyeball_boss"sv) {
 		return npc_zombie;
-	} else if(strcmp(classname, "merasmus") == 0) {
+	} else if(classname == "merasmus"sv) {
 		return npc_wizard;
-	} else if(strcmp(classname, "tank_boss") == 0) {
+	} else if(classname == "tank_boss"sv) {
 		return npc_tank;
 #else
 	#error
 #endif
-	} else if(pEntity->MyNextBotPointer()) {
+	} else if(!pEntity->IsPlayer() && pEntity->MyNextBotPointer()) {
 		return npc_custom;
 	}
 	return npc_none;
@@ -13481,17 +14003,15 @@ enum obj_type : unsigned char
 	obj_custom =     (obj_any|(1 << 5))
 };
 
-static obj_type entity_to_obj_type(CBaseEntity *pEntity)
+static obj_type entity_to_obj_type(CBaseEntity *pEntity, std::string_view classname)
 {
-	const char *classname = gamehelpers->GetEntityClassname(pEntity);
-
-	if(strcmp(classname, "obj_sentrygun") == 0) {
+	if(classname == "obj_sentrygun"sv) {
 		return obj_sentry;
-	} else if(strcmp(classname, "obj_dispenser") == 0) {
+	} else if(classname == "obj_dispenser"sv) {
 		return obj_dispenser;
-	} else if(strcmp(classname, "obj_teleporter") == 0) {
+	} else if(classname == "obj_teleporter"sv) {
 		return obj_teleporter;
-	} else if(strcmp(classname, "obj_sapper") == 0) {
+	} else if(classname == "obj_sapper"sv) {
 		return obj_sapper;
 	} else if(pEntity->IsBaseObject()) {
 		return obj_custom;
@@ -13501,11 +14021,16 @@ static obj_type entity_to_obj_type(CBaseEntity *pEntity)
 #endif
 
 int CBaseEntityBloodColor = -1;
+int CBaseEntityPhysicsSolidMaskForEntity = -1;
+int CBaseEntityShouldCollide = -1;
 int CBaseCombatCharacterHasHumanGibs = -1;
 int CBaseCombatCharacterHasAlienGibs = -1;
 #if SOURCE_ENGINE == SE_TF2
 int CBaseCombatCharacterGetBossType = -1;
 #endif
+
+#define CONTENTS_REDTEAM CONTENTS_TEAM1
+#define CONTENTS_BLUETEAM CONTENTS_TEAM2
 
 class EntityVTableHack
 {
@@ -13514,7 +14039,7 @@ public:
 	{
 		CBaseEntity *pThis = (CBaseEntity *)this;
 
-		if(pThis->MyNextBotPointer()) {
+		if(!pThis->IsPlayer() && pThis->MyNextBotPointer()) {
 			return true;
 		}
 
@@ -13531,6 +14056,35 @@ public:
 		}
 
 		return DONT_BLEED;
+	}
+
+	bool ShouldCollide( int collisionGroup, int contentsMask )
+	{
+		CBaseEntity *pThis = (CBaseEntity *)this;
+
+		if ( collisionGroup == COLLISION_GROUP_PLAYER_MOVEMENT )
+		{
+			switch( pThis->GetTeamNumber() )
+			{
+			case 2:
+				if ( !( contentsMask & CONTENTS_REDTEAM ) )
+					return false;
+				break;
+
+			case 3:
+				if ( !( contentsMask & CONTENTS_BLUETEAM ) )
+					return false;
+				break;
+			}
+		}
+
+		if ( pThis->GetCollisionGroup() == COLLISION_GROUP_DEBRIS )
+		{
+			if ( ! (contentsMask & CONTENTS_DEBRIS) )
+				return false;
+		}
+
+		return true;
 	}
 };
 
@@ -13554,7 +14108,9 @@ public:
 		CBaseCombatCharacter *pThis = (CBaseCombatCharacter *)this;
 
 		Class_T myClass = pThis->Classify();
-		if(myClass == CLASS_ZOMBIE ||
+		if(myClass == CLASS_PLAYER ||
+			myClass == CLASS_PLAYER_ALLY ||
+			myClass == CLASS_ZOMBIE ||
 			myClass == CLASS_HHH ||
 			myClass == CLASS_WIZARD) {
 			return true;
@@ -13589,6 +14145,21 @@ public:
 		}
 
 		return HALLOWEEN_BOSS_INVALID;
+	}
+
+	unsigned int PhysicsSolidMaskForEntity()
+	{
+		CBaseCombatCharacter *pThis = (CBaseCombatCharacter *)this;
+
+		int teamContents = 0;
+
+		int team = pThis->GetTeamNumber();
+		switch(team) {
+			case 2: teamContents |= CONTENTS_BLUETEAM; break;
+			case 3: teamContents |= CONTENTS_REDTEAM; break;
+		}
+
+		return MASK_NPCSOLID | teamContents;
 	}
 };
 
@@ -13637,45 +14208,206 @@ public:
 	}
 };
 
-void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname)
+class BodyVTableHack
 {
-	bool is_cc = (pEntity->MyCombatCharacterPointer() != nullptr);
+public:
+	int GetSolidMask()
+	{
+		IBody *pThis = (IBody *)this;
 
-	int patch_size = is_cc ? CBaseCombatCharacterGetBossType : CBaseEntityIsNPC;
+		CBaseCombatCharacter *pEntity = pThis->GetBot()->GetEntity();
+
+		int teamContents = 0;
+
+		int team = pEntity->GetTeamNumber();
+		switch(team) {
+			case 2: teamContents |= CONTENTS_BLUETEAM; break;
+			case 3: teamContents |= CONTENTS_REDTEAM; break;
+		}
+
+		return MASK_NPCSOLID | teamContents;
+	}
+
+	int GetCollisionGroup()
+	{
+		return COLLISION_GROUP_NPC;
+	}
+};
+
+class MerasmusBodyVTableHack : public BodyVTableHack
+{
+public:
+	int GetSolidMask()
+	{
+		IBody *pThis = (IBody *)this;
+
+		CBaseCombatCharacter *pEntity = pThis->GetBot()->GetEntity();
+
+		int teamContents = 0;
+
+		int team = pEntity->GetTeamNumber();
+		switch(team) {
+			case 2: teamContents |= CONTENTS_BLUETEAM; break;
+			case 3: teamContents |= CONTENTS_REDTEAM; break;
+		}
+
+		return MASK_NPCSOLID | CONTENTS_PLAYERCLIP | teamContents;
+	}
+};
+
+class HatmanBodyVTableHack : public BodyVTableHack
+{
+public:
+	int GetSolidMask()
+	{
+		IBody *pThis = (IBody *)this;
+
+		CBaseCombatCharacter *pEntity = pThis->GetBot()->GetEntity();
+
+		int teamContents = 0;
+
+		int team = pEntity->GetTeamNumber();
+		switch(team) {
+			case 2: teamContents |= CONTENTS_BLUETEAM; break;
+			case 3: teamContents |= CONTENTS_REDTEAM; break;
+		}
+
+		return MASK_NPCSOLID | CONTENTS_PLAYERCLIP | teamContents;
+	}
+};
+
+class TankBodyVTableHack : public BodyVTableHack
+{
+public:
+	int GetSolidMask()
+	{
+		IBody *pThis = (IBody *)this;
+
+		CBaseCombatCharacter *pEntity = pThis->GetBot()->GetEntity();
+
+		int teamContents = 0;
+
+		int team = pEntity->GetTeamNumber();
+		switch(team) {
+			case 2: teamContents |= CONTENTS_BLUETEAM; break;
+			case 3: teamContents |= CONTENTS_REDTEAM; break;
+		}
+
+		return MASK_NPCSOLID | teamContents;
+	}
+};
+
+static std::vector<std::string> vtables_already_set{};
+
+void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
+{
+	std::string classname{classname_ptr};
+
+	CBaseCombatCharacter *pCC = pEntity->MyCombatCharacterPointer();
+	npc_type ntype{entity_to_npc_type(pEntity, classname)};
+
+	if(pEntity->IsBaseObject()) {
+		pCC->SetBloodColor(BLOOD_COLOR_MECH);
+	}
+
+	if(ntype & npc_any) {
+		if(!pEntity->IsPlayer()) {
+			pEntity->AddFlag(FL_NPC);
+		}
+		pEntity->AddIEFlags(EFL_DONTWALKON);
+	}
+
+	if(std::find(vtables_already_set.cbegin(), vtables_already_set.cend(), classname) != vtables_already_set.cend()) {
+		return;
+	}
+
+	int patch_size = pCC ? CBaseCombatCharacterGetBossType : CBaseEntityPhysicsSolidMaskForEntity;
 	patch_size *= sizeof(void *);
 	patch_size += 4;
 
-	void **vtabl = *(void ***)pEntity;
+	void **entity_vtabl = *(void ***)pEntity;
 
-	SourceHook::SetMemAccess(vtabl, patch_size, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+	SourceHook::SetMemAccess(entity_vtabl, patch_size, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 
-	vtabl[CBaseEntityBloodColor] = func_to_void(&EntityVTableHack::BloodColor);
-	vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::IsNPC);
+	if(pEntity->IsBaseObject()) {
+		//TODO!!!!!! move this to clsobj_hack
+		entity_vtabl[CBaseEntityBloodColor] = func_to_void(&EntityVTableHack::BloodColor);
+	}
+	entity_vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::IsNPC);
 
-	if(is_cc) {
-		npc_type ntype{entity_to_npc_type(pEntity)};
+	if(pCC) {
 		switch(ntype) {
 			case npc_zombie: {
-				vtabl[CBaseEntityClassify] = func_to_void(&ZombieVTableHack::Classify);
+				entity_vtabl[CBaseEntityClassify] = func_to_void(&ZombieVTableHack::Classify);
+
+				IBody *body = pEntity->MyNextBotPointer()->GetBodyInterface();
+
+				void **body_vtabl = *(void ***)body;
+
+				int GetSolidMaskOffset = vfunc_index(&IBody::GetSolidMask);
+
+				SourceHook::SetMemAccess(body_vtabl, (GetSolidMaskOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+				body_vtabl[GetSolidMaskOffset] = func_to_void(&HatmanBodyVTableHack::GetSolidMask);
 			} break;
 			case npc_hhh: {
-				vtabl[CBaseEntityClassify] = func_to_void(&HHHVTableHack::Classify);
+				entity_vtabl[CBaseEntityClassify] = func_to_void(&HHHVTableHack::Classify);
+
+				IBody *body = pEntity->MyNextBotPointer()->GetBodyInterface();
+
+				void **body_vtabl = *(void ***)body;
+
+				int GetSolidMaskOffset = vfunc_index(&IBody::GetSolidMask);
+
+				SourceHook::SetMemAccess(body_vtabl, (GetSolidMaskOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+				body_vtabl[GetSolidMaskOffset] = func_to_void(&HatmanBodyVTableHack::GetSolidMask);
 			} break;
 			case npc_eye: {
-				vtabl[CBaseEntityClassify] = func_to_void(&EyeballVTableHack::Classify);
+				entity_vtabl[CBaseEntityClassify] = func_to_void(&EyeballVTableHack::Classify);
 			} break;
 			case npc_wizard: {
-				vtabl[CBaseEntityClassify] = func_to_void(&MerasmusVTableHack::Classify);
+				entity_vtabl[CBaseEntityClassify] = func_to_void(&MerasmusVTableHack::Classify);
+
+				IBody *body = pEntity->MyNextBotPointer()->GetBodyInterface();
+
+				void **body_vtabl = *(void ***)body;
+
+				int GetSolidMaskOffset = vfunc_index(&IBody::GetSolidMask);
+
+				SourceHook::SetMemAccess(body_vtabl, (GetSolidMaskOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+				body_vtabl[GetSolidMaskOffset] = func_to_void(&MerasmusBodyVTableHack::GetSolidMask);
 			} break;
 			case npc_tank: {
-				vtabl[CBaseEntityClassify] = func_to_void(&TankVTableHack::Classify);
+				entity_vtabl[CBaseEntityClassify] = func_to_void(&TankVTableHack::Classify);
+
+				IBody *body = pEntity->MyNextBotPointer()->GetBodyInterface();
+
+				void **body_vtabl = *(void ***)body;
+
+				int GetSolidMaskOffset = vfunc_index(&IBody::GetSolidMask);
+
+				SourceHook::SetMemAccess(body_vtabl, (GetSolidMaskOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+				body_vtabl[GetSolidMaskOffset] = func_to_void(&TankBodyVTableHack::GetSolidMask);
 			} break;
 		}
 
-		vtabl[CBaseCombatCharacterHasHumanGibs] = func_to_void(&CombatCharacterVTableHack::HasHumanGibs);
-		vtabl[CBaseCombatCharacterHasAlienGibs] = func_to_void(&CombatCharacterVTableHack::HasAlienGibs);
-		vtabl[CBaseCombatCharacterGetBossType] = func_to_void(&CombatCharacterVTableHack::GetBossType);
+		if(!pEntity->IsPlayer()) {
+			if(!pEntity->IsBaseObject()) {
+				entity_vtabl[CBaseEntityShouldCollide] = func_to_void(&EntityVTableHack::ShouldCollide);
+			}
+			if(ntype & npc_any) {
+				entity_vtabl[CBaseEntityPhysicsSolidMaskForEntity] = func_to_void(&CombatCharacterVTableHack::PhysicsSolidMaskForEntity);
+			}
+		}
+		entity_vtabl[CBaseCombatCharacterHasHumanGibs] = func_to_void(&CombatCharacterVTableHack::HasHumanGibs);
+		entity_vtabl[CBaseCombatCharacterHasAlienGibs] = func_to_void(&CombatCharacterVTableHack::HasAlienGibs);
+		entity_vtabl[CBaseCombatCharacterGetBossType] = func_to_void(&CombatCharacterVTableHack::GetBossType);
 	}
+
+	vtables_already_set.emplace_back(std::move(classname));
 }
 
 class CAI_BaseNPC;
@@ -13715,6 +14447,8 @@ int CGameRulesInitDefaultAIRelationships = -1;
 int CGameRulesAIClassText = -1;
 int CGameRulesShouldAutoAim = -1;
 int CGameRulesGetAutoAimScale = -1;
+int CGameRulesShouldCollideOffset = -1;
+void *CGameRulesShouldCollidePtr = nullptr;
 
 ConVar	sk_allow_autoaim( "sk_allow_autoaim", "1", FCVAR_REPLICATED | FCVAR_ARCHIVE_XBOX );
 
@@ -13752,6 +14486,11 @@ public:
 	void RefreshSkillData(bool forceUpdate)
 	{
 		call_mfunc<bool, CGameRules, bool>(this, CGameRulesRefreshSkillDataPtr, forceUpdate);
+	}
+
+	bool ShouldCollide( int collisionGroup0, int collisionGroup1 )
+	{
+		return call_mfunc<bool, CGameRules, int, int>(this, CGameRulesShouldCollidePtr, collisionGroup0, collisionGroup1);
 	}
 };
 
@@ -14014,23 +14753,39 @@ public:
 		engine->ServerCommand( szExec );
 		engine->ServerExecute();
 	}
+
+	bool ShouldCollide( int collisionGroup0, int collisionGroup1 )
+	{
+		CGameRules *pThis = (CGameRules *)this;
+
+		if ( collisionGroup0 > collisionGroup1 )
+		{
+			// swap so that lowest is always first
+			::V_swap( collisionGroup0, collisionGroup1 );
+		}
+
+		if ( collisionGroup1 == COLLISION_GROUP_NPC_ACTOR && collisionGroup0 != COLLISION_GROUP_PLAYER )
+		{
+			collisionGroup1 = COLLISION_GROUP_NPC;
+		}
+
+		if ( collisionGroup1 == COLLISION_GROUP_NPC_ACTOR && collisionGroup0 == COLLISION_GROUP_PLAYER )
+			return false;
+			
+		if ( collisionGroup0 == COLLISION_GROUP_NPC_SCRIPTED && collisionGroup1 == COLLISION_GROUP_NPC_SCRIPTED )
+			return false;
+
+		return pThis->ShouldCollide( collisionGroup0, collisionGroup1 );
+	}
 };
 
 static bool gamerules_vtable_assigned{false};
 
+static bool nextbot_funcs_patched{false};
+static int NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER = -1;
+
 void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 {
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	if(!infectedvtable) {
-		IServerNetworkable *network = dictionary->Create("infected");
-		CBaseEntity *pEntity = network->GetBaseEntity();
-		
-		infectedvtable = *(void ***)pEntity;
-		
-		RemoveEntity(pEntity);
-	}
-#endif
-
 	if(!gamerules_vtable_assigned) {
 		CGameRules *gamerules{(CGameRules *)g_pSDKTools->GetGameRules()};
 		if(gamerules) {
@@ -14044,12 +14799,53 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 			vtabl[CGameRulesGetAutoAimScale] = func_to_void(&GameRulesVTableHack::GetAutoAimScale);
 			CGameRulesRefreshSkillDataPtr = vtabl[CGameRulesRefreshSkillDataOffset];
 			vtabl[CGameRulesRefreshSkillDataOffset] = func_to_void(&GameRulesVTableHack::RefreshSkillData);
+			CGameRulesShouldCollidePtr = vtabl[CGameRulesShouldCollideOffset];
+			vtabl[CGameRulesShouldCollideOffset] = func_to_void(&GameRulesVTableHack::ShouldCollide);
 
 			call_vfunc<void, CGameRules>(gamerules, CGameRulesInitDefaultAIRelationships);
 			call_vfunc<void, CGameRules, bool>(gamerules, CGameRulesRefreshSkillDataOffset, true);
 
 			gamerules_vtable_assigned = true;
 		}
+	}
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	if(!infectedvtable) {
+		IServerNetworkable *network = dictionary->Create("infected");
+		CBaseEntity *pEntity = network->GetBaseEntity();
+		
+		infectedvtable = *(void ***)pEntity;
+		
+		RemoveEntity(pEntity);
+	}
+#endif
+
+	if(!nextbot_funcs_patched) {
+		NextBotCombatCharacter *pEntity = NextBotCombatCharacter::create(0);
+
+		INextBot *bot = pEntity->MyNextBotPointer();
+		IBody *body = bot->GetBodyInterface();
+
+		void **entity_vtabl = *(void ***)pEntity;
+		void **body_vtabl = *(void ***)body;
+
+		RemoveEntity(pEntity);
+
+		void *spawn = entity_vtabl[CBaseEntitySpawn];
+
+		SourceHook::SetMemAccess(spawn, NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+		*(unsigned char *)((unsigned char *)spawn + NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER) = COLLISION_GROUP_NPC;
+
+		int GetSolidMaskOffset = vfunc_index(&IBody::GetSolidMask);
+		int GetCollisionGroupOffset = vfunc_index(&IBody::GetCollisionGroup);
+
+		SourceHook::SetMemAccess(body_vtabl, (GetCollisionGroupOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
+		body_vtabl[GetSolidMaskOffset] = func_to_void(&BodyVTableHack::GetSolidMask);
+		body_vtabl[GetCollisionGroupOffset] = func_to_void(&BodyVTableHack::GetCollisionGroup);
+
+		nextbot_funcs_patched = true;
 	}
 }
 
@@ -14091,6 +14887,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::2", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2);
 	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3 = -1;
 	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::3", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3);
+
+	g_pGameConf->GetOffset("NextBotCombatCharacter::Spawn::COLLISION_GROUP_PLAYER", &NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER);
 
 	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
@@ -14176,8 +14974,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseCombatCharacter::IsAreaTraversable", &offset);
 	SH_MANUALHOOK_RECONFIGURE(IsAreaTraversable, offset, 0, 0);
 	
-	g_pGameConf->GetOffset("CBaseEntity::Spawn", &offset);
-	SH_MANUALHOOK_RECONFIGURE(Spawn, offset, 0, 0);
+	g_pGameConf->GetOffset("CBaseEntity::Spawn", &CBaseEntitySpawn);
+	SH_MANUALHOOK_RECONFIGURE(Spawn, CBaseEntitySpawn, 0, 0);
 	
 	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
 
@@ -14197,6 +14995,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CGameRules::RefreshSkillData", &CGameRulesRefreshSkillDataOffset);
 	g_pGameConf->GetOffset("CGameRules::ShouldAutoAim", &CGameRulesShouldAutoAim);
 	g_pGameConf->GetOffset("CGameRules::GetAutoAimScale", &CGameRulesGetAutoAimScale);
+	g_pGameConf->GetOffset("CGameRules::ShouldCollide", &CGameRulesShouldCollideOffset);
 
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::SetDefaultRelationship", &CBaseCombatCharacterSetDefaultRelationship);
 
@@ -14205,6 +15004,8 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseCombatCharacter::HasHumanGibs", &CBaseCombatCharacterHasHumanGibs);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::HasAlienGibs", &CBaseCombatCharacterHasAlienGibs);
 	g_pGameConf->GetOffset("CBaseEntity::BloodColor", &CBaseEntityBloodColor);
+	g_pGameConf->GetOffset("CBaseEntity::PhysicsSolidMaskForEntity", &CBaseEntityPhysicsSolidMaskForEntity);
+	g_pGameConf->GetOffset("CBaseEntity::ShouldCollide", &CBaseEntityShouldCollide);
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetBossType", &CBaseCombatCharacterGetBossType);
 #endif
@@ -14228,6 +15029,36 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::UpdateLastKnownArea", &CBaseCombatCharacterUpdateLastKnownArea);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(Vector)", &CBaseCombatCharacterIsHiddenByFogVec);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(CBaseEntity)", &CBaseCombatCharacterIsHiddenByFogEnt);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(float)", &CBaseCombatCharacterIsHiddenByFogR);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(Vector)", &CBaseCombatCharacterGetFogObscuredRatioVec);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(CBaseEntity)", &CBaseCombatCharacterGetFogObscuredRatioEnt);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(float)", &CBaseCombatCharacterGetFogObscuredRatioR);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLookingTowards(CBaseEntity)", &CBaseCombatCharacterIsLookingTowardsEnt);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLookingTowards(Vector)", &CBaseCombatCharacterIsLookingTowardsVec);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsInFieldOfView(CBaseEntity)", &CBaseCombatCharacterIsInFieldOfViewEnt);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsInFieldOfView(Vector)", &CBaseCombatCharacterIsInFieldOfViewVec);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLineOfSightClear(CBaseEntity)", &CBaseCombatCharacterIsLineOfSightClearEnt);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLineOfSightClear(Vector)", &CBaseCombatCharacterIsLineOfSightClearVec);
+
+	g_pGameConf->GetOffset("CBaseEntity::FVisible(Vector)", &CBaseEntityFVisibleVec);
+	g_pGameConf->GetOffset("CBaseEntity::FVisible(CBaseEntity)", &CBaseEntityFVisibleEnt);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInViewCone(Vector)", &CBaseCombatCharacterFInViewConeVec);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInViewCone(CBaseEntity)", &CBaseCombatCharacterFInViewConeEnt);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInAimCone(Vector)", &CBaseCombatCharacterFInAimConeVec);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInAimCone(CBaseEntity)", &CBaseCombatCharacterFInAimConeEnt);
+
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseEntity)", &CBaseCombatCharacterIsAbleToSeeEnt);
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter)", &CBaseCombatCharacterIsAbleToSeeCC);
+
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);
 #endif

@@ -9,6 +9,19 @@
 
 #include <sdktools>
 
+#define	CONTENTS_BLOCKLOS 0x40
+#define MASK_BLOCKLOS (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_BLOCKLOS)
+#define MASK_BLOCKLOS_AND_NPCS (MASK_BLOCKLOS|CONTENTS_MONSTER)
+
+enum
+{
+	DONT_BLEED = -1,
+	BLOOD_COLOR_RED = 0,
+	BLOOD_COLOR_YELLOW,
+	BLOOD_COLOR_GREEN,
+	BLOOD_COLOR_MECH,
+};
+
 #if defined GAME_TF2
 	#define TEAM_ANY -2
 #elseif defined GAME_L4D2
@@ -886,6 +899,42 @@ enum FieldOfViewCheckType
 
 typedef foreachknow_func_t = function bool (CKnownEntity known, any data);
 typedef closestknowfilter_func_t = function bool (int entity, any data);
+
+native bool EntityVisibleEnt(int entity, int target, int mask = MASK_BLOCKLOS, int &blocker = -1);
+native bool EntityVisibleVec(int entity, const float pos[3], int mask = MASK_BLOCKLOS, int &blocker = -1);
+
+native bool CombatCharacterInViewConeVec(int entity, const float pos[3]);
+native bool CombatCharacterInViewConeEnt(int entity, int target);
+
+native bool CombatCharacterInAimConeVec(int entity, const float pos[3]);
+native bool CombatCharacterInAimConeEnt(int entity, int target);
+
+native bool CombatCharacterIsHiddenByFogVec(int entity, const float pos[3]);
+native bool CombatCharacterIsHiddenByFogEnt(int entity, int target);
+native bool CombatCharacterIsHiddenByFogR(int entity, float range);
+
+native float CombatCharacterGetFogObscuredRatioVec(int entity, const float pos[3]);
+native float CombatCharacterGetFogObscuredRatioEnt(int entity, int target);
+native float CombatCharacterGetFogObscuredRatioR(int entity, float range);
+
+#define BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE 0.9
+
+native bool CombatCharacterIsLookingTowardsVec(int entity, const float pos[3], float cosTolerance = BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE);
+native bool CombatCharacterIsLookingTowardsEnt(int entity, int target, float cosTolerance = BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE);
+
+native bool CombatCharacterIsInFieldOfViewVec(int entity, const float pos[3]);
+native bool CombatCharacterIsInFieldOfViewEnt(int entity, int target);
+
+native bool CombatCharacterIsAbleToSeeEnt(int entity, int target, FieldOfViewCheckType checkFOV);
+
+enum LineOfSightCheckType
+{
+	IGNORE_NOTHING,
+	IGNORE_ACTORS
+};
+
+native bool CombatCharacterIsLineOfSightClearVec(int entity, const float pos[3], LineOfSightCheckType checkType = IGNORE_NOTHING, int entityToIgnore = -1);
+native bool CombatCharacterIsLineOfSightClearEnt(int entity, int target, LineOfSightCheckType checkType = IGNORE_NOTHING);
 
 methodmap IVision < INextBotComponent
 {

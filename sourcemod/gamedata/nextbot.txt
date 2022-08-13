@@ -175,6 +175,16 @@
 				"library" "server"
 				"linux" "@_ZN28CCleanupDefaultRelationShips8ShutdownEv"
 			}
+			"CBaseCombatCharacter::IsAbleToSee(CBaseEntity)"
+			{
+				"library" "server"
+				"linux" "@_ZN20CBaseCombatCharacter11IsAbleToSeeEPK11CBaseEntityNS_20FieldOfViewCheckTypeE"
+			}
+			"CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter)"
+			{
+				"library" "server"
+				"linux" "@_ZN20CBaseCombatCharacter11IsAbleToSeeEPS_NS_20FieldOfViewCheckTypeE"
+			}
 		}
 	}
 	"left4dead2"
@@ -438,6 +448,94 @@
 			"CCleanupDefaultRelationShips::Shutdown::NUM_AI_CLASSES"
 			{
 				"linux" "45"
+			}
+			"NextBotCombatCharacter::Spawn::COLLISION_GROUP_PLAYER"
+			{
+				"linux" "122"
+			}
+			"CBaseEntity::PhysicsSolidMaskForEntity"
+			{
+				"linux" "171"
+			}
+			"CBaseEntity::ShouldCollide"
+			{
+				"linux" "17"
+			}
+			"CGameRules::ShouldCollide"
+			{
+				"linux" "30"
+			}
+			"CBaseCombatCharacter::IsHiddenByFog(Vector)"
+			{
+				"linux" "248"
+			}
+			"CBaseCombatCharacter::IsHiddenByFog(CBaseEntity)"
+			{
+				"linux" "249"
+			}
+			"CBaseCombatCharacter::IsHiddenByFog(float)"
+			{
+				"linux" "250"
+			}
+			"CBaseCombatCharacter::GetFogObscuredRatio(Vector)"
+			{
+				"linux" "251"
+			}
+			"CBaseCombatCharacter::GetFogObscuredRatio(CBaseEntity)"
+			{
+				"linux" "252"
+			}
+			"CBaseCombatCharacter::GetFogObscuredRatio(float)"
+			{
+				"linux" "253"
+			}
+			"CBaseCombatCharacter::IsLookingTowards(CBaseEntity)"
+			{
+				"linux" "254"
+			}
+			"CBaseCombatCharacter::IsLookingTowards(Vector)"
+			{
+				"linux" "255"
+			}
+			"CBaseCombatCharacter::IsInFieldOfView(CBaseEntity)"
+			{
+				"linux" "256"
+			}
+			"CBaseCombatCharacter::IsInFieldOfView(Vector)"
+			{
+				"linux" "257"
+			}
+			"CBaseCombatCharacter::IsLineOfSightClear(CBaseEntity)"
+			{
+				"linux" "258"
+			}
+			"CBaseCombatCharacter::IsLineOfSightClear(Vector)"
+			{
+				"linux" "259"
+			}
+			"CBaseEntity::FVisible(Vector)"
+			{
+				"linux" "146"
+			}
+			"CBaseEntity::FVisible(CBaseEntity)"
+			{
+				"linux" "145"
+			}
+			"CBaseCombatCharacter::FInViewCone(Vector)"
+			{
+				"linux" "235"
+			}
+			"CBaseCombatCharacter::FInViewCone(CBaseEntity)"
+			{
+				"linux" "234"
+			}
+			"CBaseCombatCharacter::FInAimCone(Vector)"
+			{
+				"linux" "237"
+			}
+			"CBaseCombatCharacter::FInAimCone(CBaseEntity)"
+			{
+				"linux" "236"
 			}
 		}
 		"Signatures"
