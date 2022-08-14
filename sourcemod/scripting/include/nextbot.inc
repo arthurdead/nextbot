@@ -258,6 +258,8 @@ methodmap CNavArea
 	public native bool HasAvoidanceObstacle(float maxObstructionHeight = STEP_HEIGHT);
 
 	public native bool IsPotentiallyVisibleToTeam(int team);
+
+	public native float GetZ(float x, float y);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)

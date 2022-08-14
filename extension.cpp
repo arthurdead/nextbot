@@ -9894,6 +9894,12 @@ cell_t CNavAreaIsPotentiallyVisibleToTeam(IPluginContext *pContext, const cell_t
 	return area->IsPotentiallyVisibleToTeam(params[2]);
 }
 
+cell_t CNavAreaGetZ(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return sp_ftoc(area->GetZ(sp_ctof(params[2]), sp_ctof(params[3])));
+}
+
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -13489,6 +13495,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.Place.get", CNavAreaPlaceget},
 	{"CNavArea.HasAvoidanceObstacle", CNavAreaHasAvoidanceObstacle},
 	{"CNavArea.IsPotentiallyVisibleToTeam", CNavAreaIsPotentiallyVisibleToTeam},
+	{"CNavArea.GetZ", CNavAreaGetZ},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
