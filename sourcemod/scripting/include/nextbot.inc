@@ -165,10 +165,10 @@ typeset nextbot_functions
 #if defined damagerules_included
 	//BehaviorActionEntry.OnInjured
 	//BehaviorActionEntry.OnKilled
-	function BehaviorResultType (BehaviorAction action, int entity, CTakeDamageInfo info, BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, int entity, const CTakeDamageInfo info, BehaviorResult result);
 	
 	//BehaviorActionEntry.OnOtherKilled
-	function BehaviorResultType (BehaviorAction action, int entity, int victim, CTakeDamageInfo info, BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, int entity, int victim, const CTakeDamageInfo info, BehaviorResult result);
 #endif
 };
 
