@@ -8,6 +8,14 @@
 #endif
 
 #include <sdktools>
+#tryinclude <animhelpers>
+
+#if !defined animhelpers_included
+enum Activity
+{
+	ACT_INVALID = -1
+};
+#endif
 
 #define	CONTENTS_BLOCKLOS 0x40
 #define MASK_BLOCKLOS (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_BLOCKLOS)
@@ -58,6 +66,7 @@ methodmap BehaviorAction
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -170,6 +179,11 @@ typeset nextbot_functions
 	//BehaviorActionEntry.OnOtherKilled
 	function BehaviorResultType (BehaviorAction action, int entity, int victim, const CTakeDamageInfo info, BehaviorResult result);
 #endif
+
+	//IBodyCustom.SelectAnimationSequence
+	function int (IBodyCustom body, int entity, Activity act);
+	//IBodyCustom.TranslateActivity
+	function Activity (IBodyCustom body, Activity act);
 };
 
 #if defined damagerules_included
@@ -260,6 +274,8 @@ methodmap CNavArea
 	public native bool IsPotentiallyVisibleToTeam(int team);
 
 	public native float GetZ(float x, float y);
+
+	public native void GetClosestPointOnArea(const float pos[3], float close[3]);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
@@ -383,7 +399,7 @@ methodmap CNavMesh
 	public static native bool GetSimpleGroundHeight(const float pos[3], float &height, float normal[3] = NULL_VECTOR);
 	
 	public static native int GetPlace(float vec[3]);
-	public static native void PlaceToName(int id, char[] name, int len);
+	public static native int PlaceToName(int id, char[] name, int len);
 	public static native int NameToPlace(const char[] name);
 };
 
@@ -635,6 +651,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -781,6 +798,7 @@ methodmap GameLocomotionCustom < GameLocomotion
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -1029,9 +1047,36 @@ methodmap GameVisionCustom < GameVision
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
+};
+
+enum ActivityType 
+{
+	NO_ACTIVITY_FLAGS = 0,
+	MOTION_CONTROLLED_XY	= 0x0001,	// XY position and orientation of the bot is driven by the animation.
+	MOTION_CONTROLLED_Z		= 0x0002,	// Z position of the bot is driven by the animation.
+	ACTIVITY_UNINTERRUPTIBLE= 0x0004,	// activity can't be changed until animation finishes
+	ACTIVITY_TRANSITORY		= 0x0008,	// a short animation that takes over from the underlying animation momentarily, resuming it upon completion
+	ENTINDEX_PLAYBACK_RATE	= 0x0010,	// played back at different rates based on entindex
+};
+
+enum PostureType
+{
+	STAND,
+	CROUCH,
+	SIT,
+	CRAWL,
+	LIE
+};
+
+enum ArousalType
+{
+	NEUTRAL,
+	ALERT,
+	INTENSE
 };
 
 methodmap IBody < INextBotComponent
@@ -1068,10 +1113,57 @@ methodmap IBody < INextBotComponent
 	}
 #endif
 
-	public native bool IsPostureMobile();
-
 	public native void GetHullMins(float vec[3]);
 	public native void GetHullMaxs(float vec[3]);
+
+	public native bool StartActivity(Activity act, ActivityType flags = NO_ACTIVITY_FLAGS);
+	public native int SelectAnimationSequence(Activity act);
+
+	property Activity Activity
+	{
+		public native get();
+	}
+
+	public native bool IsActivity(Activity act);
+	public native bool HasActivityType(ActivityType flags);
+
+	property PostureType DesiredPosture
+	{
+		public native get();
+		public native set(PostureType posture);
+	}
+
+	property bool InDesiredPosture
+	{
+		public native get();
+	}
+
+	public native bool IsDesiredPosture(PostureType posture);
+
+	property PostureType ActualPosture
+	{
+		public native get();
+	}
+
+	public native bool IsActualPosture(PostureType posture);
+
+	property bool PostureMobile
+	{
+		public native get();
+	}
+
+	property bool PostureChanging
+	{
+		public native get();
+	}
+
+	property ArousalType Arousal
+	{
+		public native get();
+		public native set(ArousalType posture);
+	}
+
+	public native bool IsArousal(ArousalType arousal);
 };
 
 methodmap IBodyCustom < IBody
@@ -1108,10 +1200,16 @@ methodmap IBodyCustom < IBody
 	}
 #endif
 
+	property int Sequence
+	{
+		public native get();
+	}
+
 	public native void set_function(const char[] name, nextbot_functions func);
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -1154,6 +1252,7 @@ methodmap IIntentionCustom < IIntention
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -1377,6 +1476,7 @@ methodmap INextBotCustom
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);

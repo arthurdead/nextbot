@@ -36,6 +36,7 @@
 #include <unordered_map>
 #include <string_view>
 
+using namespace std::literals::string_literals;
 using namespace std::literals::string_view_literals;
 
 #if SOURCE_ENGINE == SE_TF2
@@ -91,6 +92,10 @@ class IStaticPropMgrServer *staticpropmgr = nullptr;
 #ifdef __HAS_DAMAGERULES
 #include <IDamageRules.h>
 #include <public/damageinfo.cpp>
+#endif
+
+#ifdef __HAS_ANIMHELPERS
+#include <IAnimHelpers.h>
 #endif
 
 #include <toolframework/itoolentity.h>
@@ -258,6 +263,13 @@ int m_angAbsRotationOffset = -1;
 int m_angRotationOffset = -1;
 int m_bloodColorOffset = -1;
 int m_CollisionGroupOffset = -1;
+
+int m_bSequenceFinishedOffset = -1;
+int m_flPlaybackRateOffset = -1;
+int m_nSequenceOffset = -1;
+int m_flAnimTimeOffset = -1;
+int m_flCycleOffset = -1;
+int m_flGroundSpeedOffset = -1;
 
 ConVar *NextBotStop = nullptr;
 
@@ -1224,10 +1236,165 @@ inline bool FClassnameIs(CBaseEntity *pEntity, const char *szClassname)
 	return pEntity->ClassMatches(szClassname);
 }
 
+#ifdef __HAS_ANIMHELPERS
+IAnimHelpers *g_pAnimHelpers = nullptr;
+#endif
+
+class CBaseAnimating : public CBaseEntity
+{
+public:
+	int SelectWeightedSequence(int activity)
+	{
+	#ifdef __HAS_ANIMHELPERS
+		return g_pAnimHelpers ? g_pAnimHelpers->SelectWeightedSequence(this, activity) : -1;
+	#else
+		return -1;
+	#endif
+	}
+
+	void StudioFrameAdvance()
+	{
+	#ifdef __HAS_ANIMHELPERS
+		if(g_pAnimHelpers) {
+			g_pAnimHelpers->StudioFrameAdvance(this);
+		}
+	#endif
+	}
+	
+	void DispatchAnimEvents()
+	{
+	#ifdef __HAS_ANIMHELPERS
+		if(g_pAnimHelpers) {
+			g_pAnimHelpers->DispatchAnimEvents(this);
+		}
+	#endif
+	}
+
+	void ResetSequenceInfo()
+	{
+	#ifdef __HAS_ANIMHELPERS
+		if(g_pAnimHelpers) {
+			g_pAnimHelpers->ResetSequenceInfo(this);
+		}
+	#endif
+	}
+
+	bool GetSequeceFinished()
+	{
+		if(m_bSequenceFinishedOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_bSequenceFinished", &info);
+			m_bSequenceFinishedOffset = info.actual_offset;
+		}
+
+		return *(bool *)((unsigned char *)this + m_bSequenceFinishedOffset);
+	}
+
+	void SetSequeceFinished(bool fin)
+	{
+		if(m_bSequenceFinishedOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_bSequenceFinished", &info);
+			m_bSequenceFinishedOffset = info.actual_offset;
+		}
+
+		*(bool *)((unsigned char *)this + m_bSequenceFinishedOffset) = fin;
+	}
+
+	void SetPlaybackRate(float rate)
+	{
+		if(m_flPlaybackRateOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_flPlaybackRate", &info);
+			m_flPlaybackRateOffset = info.actual_offset;
+		}
+
+		*(float *)((unsigned char *)this + m_flPlaybackRateOffset) = rate;
+		SetEdictStateChanged(this, m_flPlaybackRateOffset);
+	}
+
+	int GetSequence()
+	{
+		if(m_nSequenceOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_nSequence", &info);
+			m_nSequenceOffset = info.actual_offset;
+		}
+
+		return *(int *)((unsigned char *)this + m_nSequenceOffset);
+	}
+
+	void SetSequence(int seq)
+	{
+		if(m_nSequenceOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_nSequence", &info);
+			m_nSequenceOffset = info.actual_offset;
+		}
+
+		*(int *)((unsigned char *)this + m_nSequenceOffset) = seq;
+		SetEdictStateChanged(this, m_nSequenceOffset);
+	}
+
+	void SetAnimTime(float tim)
+	{
+		if(m_flAnimTimeOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_flAnimTime", &info);
+			m_flAnimTimeOffset = info.actual_offset;
+		}
+
+		*(float *)((unsigned char *)this + m_flAnimTimeOffset) = tim;
+		SetEdictStateChanged(this, m_flAnimTimeOffset);
+	}
+
+	void SetCycle(float tim)
+	{
+		if(m_flCycleOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_flCycle", &info);
+			m_flCycleOffset = info.actual_offset;
+		}
+
+		*(float *)((unsigned char *)this + m_flCycleOffset) = tim;
+		SetEdictStateChanged(this, m_flCycleOffset);
+	}
+
+	void ResetSequence(int seq)
+	{
+		int old = GetSequence();
+		bool changed = (old != seq);
+		SetSequence(seq);
+		if(changed) {
+			SetAnimTime(gpGlobals->curtime);
+			SetCycle(0.0f);
+			ResetSequenceInfo();
+		}
+	}
+
+	float GetGroundSpeed()
+	{
+		if(m_flGroundSpeedOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_flGroundSpeed", &info);
+			m_flGroundSpeedOffset = info.actual_offset;
+		}
+
+		return *(float *)((unsigned char *)this + m_flGroundSpeedOffset);
+	}
+};
+
 class CBaseToggle : public CBaseEntity
 {
 };
-
 
 enum Disposition_t 
 {
@@ -1258,7 +1425,7 @@ enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
 
 #define BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE 0.9f
 
-class CBaseCombatCharacter : public CBaseEntity
+class CBaseCombatCharacter : public CBaseAnimating
 {
 public:
 	CNavArea *GetLastKnownArea()
@@ -2903,6 +3070,40 @@ public:
 #endif
 };
 
+enum LookAtPriorityType
+{
+	BORING,
+	INTERESTING,				// last known enemy location, dangerous sound location
+	IMPORTANT,					// a danger
+	CRITICAL,					// an active threat to our safety
+	MANDATORY					// nothing can interrupt this look at - two simultaneous look ats with this priority is an error
+};
+
+enum PostureType
+{
+	STAND,
+	CROUCH,
+	SIT,
+	CRAWL,
+	LIE
+};
+
+enum ActivityType 
+{ 
+	MOTION_CONTROLLED_XY	= 0x0001,	// XY position and orientation of the bot is driven by the animation.
+	MOTION_CONTROLLED_Z		= 0x0002,	// Z position of the bot is driven by the animation.
+	ACTIVITY_UNINTERRUPTIBLE= 0x0004,	// activity can't be changed until animation finishes
+	ACTIVITY_TRANSITORY		= 0x0008,	// a short animation that takes over from the underlying animation momentarily, resuming it upon completion
+	ENTINDEX_PLAYBACK_RATE	= 0x0010,	// played back at different rates based on entindex
+};
+
+enum ArousalType
+{
+	NEUTRAL,
+	ALERT,
+	INTENSE
+};
+
 class IBody : public INextBotComponent
 {
 public:
@@ -2910,7 +3111,7 @@ public:
 	virtual ~IBody() {}
 
 	virtual void Reset( void )  { INextBotComponent::Reset(); }			// reset to initial state
-	virtual void Update( void )  {}										// update internal state
+	virtual void Update( void )  {  }										// update internal state
 
 	/**
 	 * Move the bot to a new position.
@@ -2923,14 +3124,6 @@ public:
 	virtual const Vector &GetEyePosition( void );
 	virtual const Vector &GetViewVector( void );
 
-	enum LookAtPriorityType
-	{
-		BORING,
-		INTERESTING,				// last known enemy location, dangerous sound location
-		IMPORTANT,					// a danger
-		CRITICAL,					// an active threat to our safety
-		MANDATORY					// nothing can interrupt this look at - two simultaneous look ats with this priority is an error
-	};
 	virtual void AimHeadTowards( const Vector &lookAtPos, 
 								 LookAtPriorityType priority = BORING, 
 								 float duration = 0.0f,
@@ -2954,15 +3147,6 @@ public:
 	
 	virtual float GetMaxHeadAngularVelocity( void ) const { return 1000.0f; }			// return max turn rate of head in degrees/second
 
-	enum ActivityType 
-	{ 
-		MOTION_CONTROLLED_XY	= 0x0001,	// XY position and orientation of the bot is driven by the animation.
-		MOTION_CONTROLLED_Z		= 0x0002,	// Z position of the bot is driven by the animation.
-		ACTIVITY_UNINTERRUPTIBLE= 0x0004,	// activity can't be changed until animation finishes
-		ACTIVITY_TRANSITORY		= 0x0008,	// a short animation that takes over from the underlying animation momentarily, resuming it upon completion
-		ENTINDEX_PLAYBACK_RATE	= 0x0010,	// played back at different rates based on entindex
-	};
-
 	/**
 	 * Begin an animation activity, return false if we cant do that right now.
 	 */
@@ -2973,23 +3157,23 @@ public:
 	virtual bool IsActivity( Activity act ) const { return GetActivity() == act; }						// return true if currently animating activity matches the given one
 	virtual bool HasActivityType( unsigned int flags ) const { return false; }			// return true if currently animating activity has any of the given flags
 
-	enum PostureType
-	{
-		STAND,
-		CROUCH,
-		SIT,
-		CRAWL,
-		LIE
-	};
 	virtual void SetDesiredPosture( PostureType posture )  {}			// request a posture change
-	virtual PostureType GetDesiredPosture( void ) const { return IBody::STAND; }				// get posture body is trying to assume
+	virtual PostureType GetDesiredPosture( void ) const { return STAND; }				// get posture body is trying to assume
 	virtual bool IsDesiredPosture( PostureType posture ) const { return GetDesiredPosture() == posture; }			// return true if body is trying to assume this posture
 	virtual bool IsInDesiredPosture( void ) const { return GetActualPosture() == GetDesiredPosture(); }						// return true if body's actual posture matches its desired posture
 
-	virtual PostureType GetActualPosture( void ) const { return IBody::STAND; }					// return body's current actual posture
+	virtual PostureType GetActualPosture( void ) const { return STAND; }					// return body's current actual posture
 	virtual bool IsActualPosture( PostureType posture ) const { return GetActualPosture() == posture; }			// return true if body is actually in the given posture
 
-	virtual bool IsPostureMobile( void ) const { return true; }							// return true if body's current posture allows it to move around the world
+	virtual bool IsPostureMobile( void ) const
+	{
+		switch(GetActualPosture()) {
+			case LIE:
+			case SIT:
+			{ return false; }
+		}
+		return true;
+	}
 	virtual bool IsPostureChanging( void ) const { return false; }						// return true if body's posture is in the process of changing to new posture
 	
 	
@@ -2997,14 +3181,8 @@ public:
 	 * "Arousal" is the level of excitedness/arousal/anxiety of the body.
 	 * Is changes instantaneously to avoid complex interactions with posture transitions.
 	 */
-	enum ArousalType
-	{
-		NEUTRAL,
-		ALERT,
-		INTENSE
-	};
 	virtual void SetArousal( ArousalType arousal ) {}					// arousal level change
-	virtual ArousalType GetArousal( void ) const { return IBody::NEUTRAL; }						// get arousal level
+	virtual ArousalType GetArousal( void ) const { return NEUTRAL; }						// get arousal level
 	virtual bool IsArousal( ArousalType arousal ) const { return GetArousal() == arousal; }				// return true if body is at this arousal level
 
 
@@ -3545,6 +3723,10 @@ public:
 class IIntentionStub : public IIntention
 {
 public:
+	void Update() override
+	{
+	}
+
 	virtual const char *GetDebugString() const { return "IIntentionStub"; }
 	
 	IIntentionStub( INextBot *bot, bool reg ) : IIntention( bot, reg ) {
@@ -4277,89 +4459,125 @@ struct SPActionEntry
 	
 	IdentityToken_t *pId = nullptr;
 	
-	bool set_function(const std::string &name, IPluginFunction *func)
+	bool set_function(std::string_view name, IPluginFunction *func)
 	{
-		if(name == "OnStart") {
+		if(name == "OnStart"sv) {
 			onstart = func;
-		} else if(name == "Update") {
+			return true;
+		} else if(name == "Update"sv) {
 			onupdate = func;
-		} else if(name == "OnSuspend") {
+			return true;
+		} else if(name == "OnSuspend"sv) {
 			onsus = func;
-		} else if(name == "OnResume") {
+			return true;
+		} else if(name == "OnResume"sv) {
 			onresume = func;
-		} else if(name == "OnEnd") {
+			return true;
+		} else if(name == "OnEnd"sv) {
 			onend = func;
-		} else if(name == "OnEnd") {
+			return true;
+		} else if(name == "OnEnd"sv) {
 			onend = func;
-		} else if(name == "InitialContainedAction") {
+			return true;
+		} else if(name == "InitialContainedAction"sv) {
 			intialact = func;
-		} else if(name == "OnLandOnGround") {
+			return true;
+		} else if(name == "OnLandOnGround"sv) {
 			landgrnd = func;
-		} else if(name == "OnContact") {
+			return true;
+		} else if(name == "OnContact"sv) {
 			oncontact = func;
-		} else if(name == "OnAnimationActivityComplete") {
+			return true;
+		} else if(name == "OnAnimationActivityComplete"sv) {
 			animcompl = func;
-		} else if(name == "OnAnimationActivityInterrupted") {
+			return true;
+		} else if(name == "OnAnimationActivityInterrupted"sv) {
 			animinter = func;
-		} else if(name == "OnAnimationEvent") {
+			return true;
+		} else if(name == "OnAnimationEvent"sv) {
 			animevent = func;
-		} else if(name == "OnOtherKilled") {
+			return true;
+		} else if(name == "OnOtherKilled"sv) {
 			otherkilled = func;
-		} else if(name == "OnSight") {
+			return true;
+		} else if(name == "OnSight"sv) {
 			onsight = func;
-		} else if(name == "OnLostSight") {
+			return true;
+		} else if(name == "OnLostSight"sv) {
 			onlosesight = func;
-		} else if(name == "OnShoved") {
+			return true;
+		} else if(name == "OnShoved"sv) {
 			shoved = func;
-		} else if(name == "OnBlinded") {
+			return true;
+		} else if(name == "OnBlinded"sv) {
 			blinded = func;
-		} else if(name == "OnTerritoryContested") {
+			return true;
+		} else if(name == "OnTerritoryContested"sv) {
 			terrcontest = func;
-		} else if(name == "OnTerritoryCaptured") {
+			return true;
+		} else if(name == "OnTerritoryCaptured"sv) {
 			terrcap = func;
-		} else if(name == "OnTerritoryLost") {
+			return true;
+		} else if(name == "OnTerritoryLost"sv) {
 			terrlost = func;
-		} else if(name == "OnThreatChanged") {
+			return true;
+		} else if(name == "OnThreatChanged"sv) {
 			threachngd = func;
-		} else if(name == "OnHitByVomitJar") {
+			return true;
+		} else if(name == "OnHitByVomitJar"sv) {
 			hitvom = func;
-		} else if(name == "OnDrop") {
+			return true;
+		} else if(name == "OnDrop"sv) {
 			drop = func;
-		} else if(name == "OnMoveToSuccess") {
+			return true;
+		} else if(name == "OnMoveToSuccess"sv) {
 			movesucc = func;
-		} else if(name == "OnStuck") {
+			return true;
+		} else if(name == "OnStuck"sv) {
 			stuck = func;
-		} else if(name == "OnUnStuck") {
+			return true;
+		} else if(name == "OnUnStuck"sv) {
 			unstuck = func;
-		} else if(name == "OnIgnite") {
+			return true;
+		} else if(name == "OnIgnite"sv) {
 			ignite = func;
-		} else if(name == "OnInjured") {
+			return true;
+		} else if(name == "OnInjured"sv) {
 			injured = func;
-		} else if(name == "OnKilled") {
+			return true;
+		} else if(name == "OnKilled"sv) {
 			killed = func;
-		} else if(name == "OnWin") {
+			return true;
+		} else if(name == "OnWin"sv) {
 			win = func;
-		} else if(name == "OnLose") {
+			return true;
+		} else if(name == "OnLose"sv) {
 			lose = func;
-		} else if(name == "OnEnteredSpit") {
+			return true;
+		} else if(name == "OnEnteredSpit"sv) {
 			enterspit = func;
-		} else if(name == "OnModelChanged") {
+			return true;
+		} else if(name == "OnModelChanged"sv) {
 			mdlchnd = func;
-		} else if(name == "OnMoveToFailure") {
+			return true;
+		} else if(name == "OnMoveToFailure"sv) {
 			movefail = func;
-		} else if(name == "OnSound") {
+			return true;
+		} else if(name == "OnSound"sv) {
 			sound = func;
-		} else if(name == "OnWeaponFired") {
+			return true;
+		} else if(name == "OnWeaponFired"sv) {
 			wepfired = func;
-		} else if(name == "OnActorEmoted") {
+			return true;
+		} else if(name == "OnActorEmoted"sv) {
 			actemote = func;
-		} else if(name == "OnPickUp") {
+			return true;
+		} else if(name == "OnPickUp"sv) {
 			pickup = func;
-		} else {
-			return false;
+			return true;
 		}
 		
-		return true;
+		return false;
 	}
 	
 	Handle_t hndl = BAD_HANDLE;
@@ -5485,13 +5703,14 @@ public:
 			return pContext->ThrowNativeError("this plugin doenst own this component");
 		}
 		
-		char *name = nullptr;
-		pContext->LocalToString(params[2], &name);
+		char *name_ptr = nullptr;
+		pContext->LocalToString(params[2], &name_ptr);
+		std::string_view name{name_ptr};
 		
 		IPluginFunction *func = pContext->GetFunctionById(params[3]);
 		
 		if(!set_function(name, func)) {
-			return pContext->ThrowNativeError("invalid name %s", name);
+			return pContext->ThrowNativeError("invalid name %s", name_ptr);
 		}
 		
 		return 0;
@@ -5502,7 +5721,7 @@ public:
 		pId = nullptr;
 	}
 	
-	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func)
 	{ return false; }
 	
 	IdentityToken_t *pId = nullptr;
@@ -5572,17 +5791,17 @@ public:
 		ishinder = nullptr;
 	}
 	
-	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func) override
 	{
-		if(name == "InitialContainedAction") {
+		if(name == "InitialContainedAction"sv) {
 			initact = func;
-		} else if(name == "IsHindrance") {
+			return true;
+		} else if(name == "IsHindrance"sv) {
 			ishinder = func;
-		} else {
-			return false;
+			return true;
 		}
 		
-		return true;
+		return IPluginNextBotComponent::set_function(name, func);
 	}
 	
 	bool IsTankImmediatelyDangerousTo(CBasePlayer *pPlayer, CBaseCombatCharacter *pBCC)
@@ -5674,6 +5893,12 @@ CBaseEntity *IBody::GetEntity() { return GetBot()->GetEntity(); }
 
 bool IBody::SetPosition( const Vector &pos )
 {
+	if(!IsPostureMobile() ||
+		HasActivityType(MOTION_CONTROLLED_XY) ||
+		HasActivityType(MOTION_CONTROLLED_Z)) {
+		return false;
+	}
+
 	GetBot()->GetEntity()->SetAbsOrigin( pos );
 	return true;
 }
@@ -6111,21 +6336,23 @@ public:
 		RETURN_META_VALUE(MRES_SUPERCEDE, res);
 	}
 	
-	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func) override
 	{
-		if(name == "ClimbLadder") {
+		if(name == "ClimbLadder"sv) {
 			climbladdr = func;
-		} else if(name == "DescendLadder") {
+			return true;
+		} else if(name == "DescendLadder"sv) {
 			desceladdr = func;
-		} else if(name == "ClimbUpToLedge") {
+			return true;
+		} else if(name == "ClimbUpToLedge"sv) {
 			climbledge = func;
-		} else if(name == "ShouldCollideWith") {
+			return true;
+		} else if(name == "ShouldCollideWith"sv) {
 			collidewith = func;
-		} else {
-			return false;
+			return true;
 		}
 		
-		return true;
+		return IPluginNextBotComponent::set_function(name, func);
 	}
 
 	void HookUpdate()
@@ -6337,19 +6564,16 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		return res;
 	}
 	
-	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func) override
 	{
 		if(customlocomotion_base_vars_t::set_function(name, func)) {
 			return true;
-		}
-		
-		if(name == "TraverseLadder") {
+		} else if(name == "TraverseLadder"sv) {
 			travladdr = func;
-		} else {
-			return false;
+			return true;
 		}
 		
-		return true;
+		return IPluginNextBotComponent::set_function(name, func);
 	}
 	
 	virtual void remove_hooks(ILocomotion *loc)
@@ -7269,10 +7493,352 @@ public:
 		HullHeight = 68.0f;
 	}
 
-	bool StartActivity( Activity act, unsigned int flags = 0 ) override { return true; }
-	
-	bool set_function(const std::string &name, IPluginFunction *func) override
+	IPluginFunction *selectseq = nullptr;
+	IPluginFunction *translact = nullptr;
+
+	Activity TranslateActivity(Activity act)
 	{
+		if(translact != nullptr) {
+			translact->PushCell((cell_t)this);
+			translact->PushCell((cell_t)act);
+			translact->Execute((cell_t *)&act);
+		}
+
+		return act;
+	}
+
+	int SelectAnimationSequence( Activity act ) const override
+	{
+		int seq = -1;
+
+		INextBot *bot = GetBot();
+		CBaseCombatCharacter *pEntity = bot->GetEntity();
+
+		if(selectseq != nullptr) {
+			selectseq->PushCell((cell_t)this);
+			selectseq->PushCell(gamehelpers->EntityToBCompatRef(pEntity));
+			selectseq->PushCell((cell_t)act);
+			selectseq->Execute((cell_t *)&seq);
+		}
+
+		if(seq == -1) {
+			seq = pEntity->SelectWeightedSequence(act);
+		}
+
+		if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+			//TODO!!!! activity and sequence name
+			DevMsg("%s: IBodyCustom::SelectAnimationSequence([%i, %s]) = [%i, %s]\n", bot->GetDebugIdentifier(), act, "", seq, "");
+		}
+
+		return seq;
+	}
+
+	bool StartActivity( Activity act, unsigned int flags = 0 ) override
+	{
+		INextBot *bot = GetBot();
+
+		if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+			//TODO!!!! activity name
+			DevMsg("%s: IBodyCustom::StartActivity([%i, %s], %i)\n", bot->GetDebugIdentifier(), act, "", flags);
+		}
+
+		if(act == ACT_INVALID) {
+			return false;
+		}
+
+		act = TranslateActivity(act);
+
+		if(act == ACT_INVALID) {
+			return false;
+		}
+
+		int seq = SelectAnimationSequence(act);
+		if(seq == -1) {
+			return false;
+		}
+
+		if((current_flags & ACTIVITY_UNINTERRUPTIBLE) && !(flags & ACTIVITY_UNINTERRUPTIBLE)) {
+			return false;
+		}
+
+		if(flags & ACTIVITY_UNINTERRUPTIBLE) {
+			current_flags |= ACTIVITY_UNINTERRUPTIBLE;
+			flags &= ~ACTIVITY_UNINTERRUPTIBLE;
+		}
+
+		if(flags & ACTIVITY_TRANSITORY) {
+			flags &= ~ACTIVITY_TRANSITORY;
+			if(current_act[1].act != act) {
+				current_act[1].seq = seq;
+			}
+			current_act[1].act = act;
+			current_act[1].flags = flags;
+			current_flags |= ACTIVITY_TRANSITORY;
+		} else {
+			if(current_act[0].act != act) {
+				current_act[0].seq = seq;
+			}
+			current_act[0].act = act;
+			current_act[0].flags = flags;
+		}
+
+		return true;
+	}
+
+	Activity GetActivity() const override
+	{
+		if(current_flags & ACTIVITY_TRANSITORY) {
+			return current_act[1].act;
+		} else {
+			return current_act[0].act;
+		}
+	}
+
+	int GetSequence()
+	{
+		if(current_flags & ACTIVITY_TRANSITORY) {
+			return current_act[1].seq;
+		} else {
+			return current_act[0].seq;
+		}
+	}
+
+	bool HasActivityType( unsigned int flags ) const override
+	{
+		if(flags == ACTIVITY_TRANSITORY) {
+			return !!(current_flags & ACTIVITY_TRANSITORY);
+		} else if(flags == ACTIVITY_UNINTERRUPTIBLE) {
+			return !!(current_flags & ACTIVITY_UNINTERRUPTIBLE);
+		}
+
+		flags &= ~(ACTIVITY_TRANSITORY|ACTIVITY_UNINTERRUPTIBLE);
+
+		if(current_flags & ACTIVITY_TRANSITORY) {
+			return !!(current_act[1].flags & flags);
+		} else {
+			return !!(current_act[0].flags & flags);
+		}
+	}
+
+	void SetDesiredPosture( PostureType posture ) override
+	{ desired_posture = posture; }
+	PostureType GetDesiredPosture( void ) const override
+	{ return desired_posture; }
+
+	PostureType GetActualPosture( void ) const override
+	{ return current_posture; }
+
+	bool IsPostureChanging( void ) const override
+	{
+		if(!!(current_flags & ACTIVITY_TRANSITORY)) {
+			return (current_act[1].act == ACT_TRANSITION);
+		}
+
+		return false;
+	}
+
+	void SetArousal( ArousalType arousal ) override
+	{ current_arousal = arousal; }
+	ArousalType GetArousal( void ) const override
+	{ return current_arousal; }
+
+	struct act_info_t
+	{
+		Activity act = ACT_INVALID;
+		int seq = -1;
+		unsigned int flags = 0;
+
+		void reset()
+		{
+			act = ACT_INVALID;
+			seq = -1;
+			flags = 0;
+		}
+	};
+
+	act_info_t current_act[2];
+	Activity last_activity = ACT_INVALID;
+	unsigned int current_flags = 0;
+	ArousalType current_arousal = NEUTRAL;
+	PostureType current_posture = STAND;
+	PostureType desired_posture = STAND;
+
+	void Reset() override
+	{
+		IBody::Reset();
+
+		current_act[0].reset();
+		current_act[1].reset();
+		last_activity = ACT_INVALID;
+
+		current_flags = 0;
+		current_arousal = NEUTRAL;
+		current_posture = STAND;
+		desired_posture = STAND;
+	}
+
+	void Update() override
+	{
+		IBody::Update();
+
+		INextBot *bot = GetBot();
+		CBaseCombatCharacter *pEntity = bot->GetEntity();
+
+		if(last_activity != ACT_INVALID && !IsActivity(last_activity)) {
+			if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+				//TODO!!!! activity name
+				DevMsg("%s: IBodyCustom::OnAnimationActivityInterrupted([%i, %s])\n", bot->GetDebugIdentifier(), last_activity, "");
+			}
+
+			bot->OnAnimationActivityInterrupted(last_activity);
+		}
+
+		last_activity = GetActivity();
+
+		if(!!(current_flags & ACTIVITY_TRANSITORY)) {
+			if(current_act[1].seq == -1) {
+				if(current_act[1].act != ACT_INVALID) {
+					current_act[1].seq = SelectAnimationSequence(current_act[1].act);
+				}
+			}
+
+			if(current_act[1].seq != -1) {
+				pEntity->ResetSequence(current_act[1].seq);
+
+				if(pEntity->GetSequeceFinished()) {
+					current_act[1].seq = -1;
+
+					if(current_act[1].act != ACT_INVALID) {
+						if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+							//TODO!!!! activity name
+							DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[1].act, "");
+						}
+
+						bot->OnAnimationActivityComplete(current_act[1].act);
+					}
+
+					pEntity->SetSequeceFinished(false);
+				}
+			}
+
+			if(current_act[1].seq == -1) {
+				Activity act = current_act[1].act;
+
+				current_flags &= ~ACTIVITY_TRANSITORY;
+				current_act[1].reset();
+
+				if(act == ACT_TRANSITION && current_posture != desired_posture) {
+					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+						DevMsg("%s: IBodyCustom::OnPostureChanged(%i, %i)\n", bot->GetDebugIdentifier(), current_posture, desired_posture);
+					}
+
+					current_posture = desired_posture;
+
+					bot->OnPostureChanged();
+				}
+			}
+		} else {
+			if(current_posture != desired_posture) {
+				if(StartActivity(ACT_TRANSITION, ACTIVITY_TRANSITORY)) {
+					return;
+				} else {
+					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+						DevMsg("%s: IBodyCustom::OnPostureChanged(%i, %i)\n", bot->GetDebugIdentifier(), current_posture, desired_posture);
+					}
+
+					current_posture = desired_posture;
+
+					bot->OnPostureChanged();
+				}
+			}
+
+			if(current_act[0].seq == -1) {
+				if(current_act[0].act != ACT_INVALID) {
+					current_act[0].seq = SelectAnimationSequence(current_act[0].act);
+				}
+			}
+
+			if(current_act[0].seq != -1) {
+				pEntity->ResetSequence(current_act[0].seq);
+
+				if(pEntity->GetSequeceFinished()) {
+					if(current_act[0].act != ACT_INVALID) {
+						current_act[0].seq = SelectAnimationSequence(current_act[0].act);
+
+						if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+							//TODO!!!! activity name
+							DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[0].act, "");
+						}
+
+						bot->OnAnimationActivityComplete(current_act[0].act);
+					}
+
+					pEntity->SetSequeceFinished(false);
+				}
+			}
+		}
+
+		ILocomotion *locomotion = bot->GetLocomotionInterface();
+
+		float anim_speed = pEntity->GetGroundSpeed();
+		if(anim_speed < 0.1f) {
+			if(IsActivity(ACT_RUN) || IsActivity(ACT_WALK)) {
+				if(locomotion->IsRunning()) {
+					auto it{data.find("run_anim_speed"s)};
+					if(it != data.cend()) {
+						anim_speed = sp_ctof(it->second[0]);
+					}
+				} else {
+					auto it{data.find("walk_anim_speed"s)};
+					if(it != data.cend()) {
+						anim_speed = sp_ctof(it->second[0]);
+					}
+				}
+			}
+		}
+
+		float ground_speed = locomotion->GetGroundSpeed();
+
+		float playback_rate = 1.0f;
+
+		if(ground_speed > 0.1f && anim_speed > 0.1f) {
+			playback_rate = (ground_speed / anim_speed);
+		}
+
+		if(playback_rate > 2.0f) {
+			playback_rate = 2.0f;
+		}
+
+		if(playback_rate < -4.0f) {
+			playback_rate = -4.0f;
+		} else if(playback_rate > 12.0f) {
+			playback_rate = 12.0f;
+		}
+
+		pEntity->SetPlaybackRate(playback_rate);
+
+		pEntity->StudioFrameAdvance();
+		pEntity->DispatchAnimEvents();
+	}
+
+	void plugin_unloaded() override
+	{
+		IPluginNextBotComponent::plugin_unloaded();
+
+		selectseq = nullptr;
+		translact = nullptr;
+	}
+
+	bool set_function(std::string_view name, IPluginFunction *func) override
+	{
+		if(name == "SelectAnimationSequence"sv) {
+			selectseq = func;
+			return true;
+		} else if(name == "TranslateActivity"sv) {
+			translact = func;
+			return true;
+		}
+
 		return IPluginNextBotComponent::set_function(name, func);
 	}
 
@@ -7351,9 +7917,9 @@ public:
 		IPluginNextBotComponent::plugin_unloaded();
 	}
 	
-	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func) override
 	{
-		return false;
+		return IPluginNextBotComponent::set_function(name, func);
 	}
 	
 	virtual void remove_hooks(IVision *bytes)
@@ -9786,9 +10352,11 @@ cell_t CNavMeshPlaceToName(IPluginContext *pContext, const cell_t *params)
 	if(!name) {
 		name = "";
 	}
-	pContext->StringToLocal(params[2], params[3], name);
 
-	return 0;
+	size_t written = 0;
+	pContext->StringToLocalUTF8(params[2], params[3], name, &written);
+
+	return written;
 }
 
 cell_t CNavMeshNameToPlace(IPluginContext *pContext, const cell_t *params)
@@ -9898,6 +10466,26 @@ cell_t CNavAreaGetZ(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
 	return sp_ftoc(area->GetZ(sp_ctof(params[2]), sp_ctof(params[3])));
+}
+
+cell_t CNavAreaGetClosestPointOnArea(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector pos(sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]));
+
+	Vector close;
+	area->GetClosestPointOnArea(pos, &close);
+
+	pContext->LocalToPhysAddr(params[3], &addr);
+
+	addr[0] = sp_ftoc(close.x);
+	addr[1] = sp_ftoc(close.y);
+	addr[2] = sp_ftoc(close.z);
+
+	return 0;
 }
 
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
@@ -11398,6 +11986,98 @@ cell_t IBodyIsPostureMobile(IPluginContext *pContext, const cell_t *params)
 	return area->IsPostureMobile();
 }
 
+cell_t IBodyIsPostureChanging(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsPostureChanging();
+}
+
+cell_t IBodyStartActivity(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->StartActivity((Activity)params[2], (unsigned int)params[3]);
+}
+
+cell_t IBodySelectAnimationSequence(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->SelectAnimationSequence((Activity)params[2]);
+}
+
+cell_t IBodyGetActivity(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->GetActivity();
+}
+
+cell_t IBodyInDesiredPosture(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsInDesiredPosture();
+}
+
+cell_t IBodyIsActivity(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsActivity((Activity)params[2]);
+}
+
+cell_t IBodyIsDesiredPosture(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsDesiredPosture((PostureType)params[2]);
+}
+
+cell_t IBodyIsArousal(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsArousal((ArousalType)params[2]);
+}
+
+cell_t IBodyIsActualPosture(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->IsActualPosture((PostureType)params[2]);
+}
+
+cell_t IBodyHasActivityType(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->HasActivityType((unsigned int)params[2]);
+}
+
+cell_t IBodyDesiredPostureget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->GetDesiredPosture();
+}
+
+cell_t IBodyActualPostureget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->GetActualPosture();
+}
+
+cell_t IBodyDesiredPostureset(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	area->SetDesiredPosture((PostureType)params[2]);
+	return 0;
+}
+
+cell_t IBodyArousalget(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	return area->GetArousal();
+}
+
+cell_t IBodyArousalset(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+	area->SetArousal((ArousalType)params[2]);
+	return 0;
+}
+
 cell_t ILocomotionRun(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -11533,6 +12213,15 @@ cell_t handle_get_data(IPluginContext *pContext, const cell_t *params, spvarmap_
 	return it->second[0];
 }
 
+cell_t handle_has_data(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{data.find(name)};
+	return (it != data.end() && it->second.size() > 0);
+}
+
 cell_t handle_set_data_array(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
 {
 	char *name = nullptr;
@@ -11606,6 +12295,14 @@ cell_t CustomComponentget_data(IPluginContext *pContext, const cell_t *params)
 }
 
 template <typename T>
+cell_t CustomComponenthas_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return handle_has_data(pContext, params, vars.data);
+}
+
+template <typename T>
 cell_t CustomComponentset_data_array(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
@@ -11627,6 +12324,8 @@ cell_t NextBotFlyingLocomotionset_data(IPluginContext *pContext, const cell_t *p
 { return CustomComponentset_data<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionget_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentget_data<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionhas_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponenthas_data<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionset_data_array(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data_array<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -11638,6 +12337,8 @@ cell_t GameLocomotionCustomset_data(IPluginContext *pContext, const cell_t *para
 { return CustomComponentset_data<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentget_data<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomhas_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponenthas_data<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data_array<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -11649,6 +12350,8 @@ cell_t GameVisionCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentget_data<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomhas_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponenthas_data<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data_array<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -12013,6 +12716,12 @@ cell_t IBodyCustomCollisionGroupset(IPluginContext *pContext, const cell_t *para
 	return 0;
 }
 #endif
+
+cell_t IBodyCustomSequenceget(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	return locomotion->GetSequence();
+}
 
 #if SOURCE_ENGINE == SE_TF2
 class SPForEachKnownEntity : public IForEachKnownEntity
@@ -12773,17 +13482,17 @@ public:
 		isfren = nullptr;
 	}
 	
-	virtual bool set_function(const std::string &name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func) override
 	{
-		if(name == "IsAbleToBlockMovementOf") {
+		if(name == "IsAbleToBlockMovementOf"sv) {
 			ableblock = func;
-		} else if(name == "ShouldTouch") {
+			return true;
+		} else if(name == "ShouldTouch"sv) {
 			shouldtouch = func;
-		} else {
-			return false;
+			return true;
 		}
 		
-		return true;
+		return IPluginNextBotComponent::set_function(name, func);
 	}
 	
 	INextBot *bot = nullptr;
@@ -12865,6 +13574,13 @@ cell_t Componentget_data(IPluginContext *pContext, const cell_t *params)
 }
 
 template <typename T>
+cell_t Componenthas_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return handle_has_data(pContext, params, locomotion->data);
+}
+
+template <typename T>
 cell_t Componentset_data_array(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
@@ -12884,6 +13600,8 @@ cell_t INextBotCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<INextBotCustom>(pContext, params); }
+cell_t INextBotCustomhas_data(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_data<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -12919,13 +13637,14 @@ cell_t BehaviorActionEntryset_function(IPluginContext *pContext, const cell_t *p
 		return pContext->ThrowNativeError("this plugin doenst own this entry");
 	}
 	
-	char *name = nullptr;
-	pContext->LocalToString(params[2], &name);
+	char *name_ptr = nullptr;
+	pContext->LocalToString(params[2], &name_ptr);
+	std::string_view name{name_ptr};
 	
 	IPluginFunction *func = pContext->GetFunctionById(params[3]);
 	
 	if(!obj->set_function(name, func)) {
-		return pContext->ThrowNativeError("invalid name %s", name);
+		return pContext->ThrowNativeError("invalid name %s", name_ptr);
 	}
 	
 	return 0;
@@ -12982,6 +13701,8 @@ cell_t BehaviorActionset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<SPAction>(pContext, params); }
 cell_t BehaviorActionget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<SPAction>(pContext, params); }
+cell_t BehaviorActionhas_data(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_data<SPAction>(pContext, params); }
 cell_t BehaviorActionset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<SPAction>(pContext, params); }
 cell_t BehaviorActionget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -12993,6 +13714,8 @@ cell_t IIntentionCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomhas_data(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_data<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -13004,6 +13727,8 @@ cell_t IBodyCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomhas_data(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_data<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -13496,6 +14221,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.HasAvoidanceObstacle", CNavAreaHasAvoidanceObstacle},
 	{"CNavArea.IsPotentiallyVisibleToTeam", CNavAreaIsPotentiallyVisibleToTeam},
 	{"CNavArea.GetZ", CNavAreaGetZ},
+	{"CNavArea.GetClosestPointOnArea", CNavAreaGetClosestPointOnArea},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
@@ -13627,6 +14353,7 @@ sp_nativeinfo_t natives[] =
 	{"NextBotFlyingLocomotion.set_function", NextBotFlyingLocomotionset_function},
 	{"NextBotFlyingLocomotion.set_data", NextBotFlyingLocomotionset_data},
 	{"NextBotFlyingLocomotion.get_data", NextBotFlyingLocomotionget_data},
+	{"NextBotFlyingLocomotion.has_data", NextBotFlyingLocomotionhas_data},
 	{"NextBotFlyingLocomotion.set_data_array", NextBotFlyingLocomotionset_data_array},
 	{"NextBotFlyingLocomotion.get_data_array", NextBotFlyingLocomotionget_data_array},
 
@@ -13661,24 +14388,28 @@ sp_nativeinfo_t natives[] =
 	MACRO_FUNC(GameLocomotionCustom, ".set_function", set_function)
 	MACRO_FUNC(GameLocomotionCustom, ".set_data", set_data)
 	MACRO_FUNC(GameLocomotionCustom, ".get_data", get_data)
+	MACRO_FUNC(GameLocomotionCustom, ".has_data", has_data)
 	MACRO_FUNC(GameLocomotionCustom, ".set_data_array", set_data_array)
 	MACRO_FUNC(GameLocomotionCustom, ".get_data_array", get_data_array)
 
 	MACRO_FUNC(GameVisionCustom, ".set_function", set_function)
 	MACRO_FUNC(GameVisionCustom, ".set_data", set_data)
 	MACRO_FUNC(GameVisionCustom, ".get_data", get_data)
+	MACRO_FUNC(GameVisionCustom, ".has_data", has_data)
 	MACRO_FUNC(GameVisionCustom, ".set_data_array", set_data_array)
 	MACRO_FUNC(GameVisionCustom, ".get_data_array", get_data_array)
 	
 	{"IIntentionCustom.set_function", IIntentionCustomset_function},
 	{"IIntentionCustom.set_data", IIntentionCustomset_data},
 	{"IIntentionCustom.get_data", IIntentionCustomget_data},
+	{"IIntentionCustom.has_data", IIntentionCustomhas_data},
 	{"IIntentionCustom.set_data_array", IIntentionCustomset_data_array},
 	{"IIntentionCustom.get_data_array", IIntentionCustomget_data_array},
 	
 	{"IBodyCustom.set_function", IBodyCustomset_function},
 	{"IBodyCustom.set_data", IBodyCustomset_data},
 	{"IBodyCustom.get_data", IBodyCustomget_data},
+	{"IBodyCustom.has_data", IBodyCustomhas_data},
 	{"IBodyCustom.set_data_array", IBodyCustomset_data_array},
 	{"IBodyCustom.get_data_array", IBodyCustomget_data_array},
 	
@@ -13686,6 +14417,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBotCustom.set_function", INextBotCustomset_function},
 	{"INextBotCustom.set_data", INextBotCustomset_data},
 	{"INextBotCustom.get_data", INextBotCustomget_data},
+	{"INextBotCustom.has_data", INextBotCustomhas_data},
 	{"INextBotCustom.set_data_array", INextBotCustomset_data_array},
 	{"INextBotCustom.get_data_array", INextBotCustomget_data_array},
 	
@@ -13746,7 +14478,22 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"IBody.GetHullMins", IBodyGetHullMins},
 	{"IBody.GetHullMaxs", IBodyGetHullMaxs},
-	{"IBody.IsPostureMobile", IBodyIsPostureMobile},
+	{"IBody.PostureMobile.get", IBodyIsPostureMobile},
+	{"IBody.PostureChanging.get", IBodyIsPostureChanging},
+	{"IBody.StartActivity", IBodyStartActivity},
+	{"IBody.SelectAnimationSequence", IBodySelectAnimationSequence},
+	{"IBody.Activity.get", IBodyGetActivity},
+	{"IBody.IsActivity", IBodyIsActivity},
+	{"IBody.HasActivityType", IBodyHasActivityType},
+	{"IBody.DesiredPosture.get", IBodyDesiredPostureget},
+	{"IBody.DesiredPosture.set", IBodyDesiredPostureset},
+	{"IBody.InDesiredPosture.get", IBodyInDesiredPosture},
+	{"IBody.IsDesiredPosture", IBodyIsDesiredPosture},
+	{"IBody.ActualPosture.get", IBodyActualPostureget},
+	{"IBody.IsActualPosture", IBodyIsActualPosture},
+	{"IBody.Arousal.set", IBodyArousalset},
+	{"IBody.Arousal.get", IBodyArousalget},
+	{"IBody.IsArousal", IBodyIsArousal},
 	{"IBodyCustom.HullWidth.set", IBodyCustomHullWidthset},
 	{"IBodyCustom.HullHeight.set", IBodyCustomHullHeightset},
 	{"IBodyCustom.StandHullHeight.set", IBodyCustomStandHullHeightset},
@@ -13755,6 +14502,7 @@ sp_nativeinfo_t natives[] =
 #if SOURCE_ENGINE == SE_TF2
 	{"IBodyCustom.CollisionGroup.set", IBodyCustomCollisionGroupset},
 #endif
+	{"IBodyCustom.Sequence.get", IBodyCustomSequenceget},
 #if SOURCE_ENGINE == SE_TF2
 	{"CKnownEntity.Entity.get", CKnownEntityEntityget},
 	{"CKnownEntity.LastKnownPositionBeenSeen.get", CKnownEntityLastKnownPositionBeenSeenget},
@@ -13792,6 +14540,7 @@ sp_nativeinfo_t natives[] =
 	{"BehaviorAction.Entry.get", BehaviorActionEntryget},
 	{"BehaviorAction.set_data", BehaviorActionset_data},
 	{"BehaviorAction.get_data", BehaviorActionget_data},
+	{"BehaviorAction.has_data", BehaviorActionhas_data},
 	{"BehaviorAction.set_data_array", BehaviorActionset_data_array},
 	{"BehaviorAction.get_data_array", BehaviorActionget_data_array},
 	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
@@ -15147,6 +15896,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #ifdef __HAS_DAMAGERULES
 	sharesys->AddDependency(myself, "damagerules.ext", false, true);
 #endif
+#ifdef __HAS_ANIMHELPERS
+	sharesys->AddDependency(myself, "animhelpers.ext", false, true);
+#endif
 
 	sharesys->RegisterLibrary(myself, "nextbot");
 	sharesys->AddNatives(myself, natives);
@@ -15184,6 +15936,9 @@ void Sample::SDK_OnAllLoaded()
 #ifdef __HAS_DAMAGERULES
 	SM_GET_LATE_IFACE(DAMAGERULES, g_pDamageRules);
 #endif
+#ifdef __HAS_ANIMHELPERS
+	SM_GET_LATE_IFACE(ANIMHELPERS, g_pAnimHelpers);
+#endif
 	SM_GET_LATE_IFACE(SDKHOOKS, g_pSDKHooks);
 	SM_GET_LATE_IFACE(SDKTOOLS, g_pSDKTools);
 	g_pSDKHooks->AddEntityListener(this);
@@ -15203,6 +15958,11 @@ bool Sample::QueryInterfaceDrop(SMInterface *pInterface)
 		return false;
 	else
 #endif
+#ifdef __HAS_ANIMHELPERS
+	if(pInterface == g_pAnimHelpers)
+		return false;
+	else
+#endif
 	if(pInterface == g_pSDKHooks)
 		return false;
 	else if(pInterface == g_pSDKTools)
@@ -15216,6 +15976,12 @@ void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_DAMAGERULES_NAME) == 0)
 	{
 		g_pDamageRules = NULL;
+	} else 
+#endif
+#ifdef __HAS_ANIMHELPERS
+	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_ANIMHELPERS_NAME) == 0)
+	{
+		g_pAnimHelpers = NULL;
 	} else 
 #endif
 	if(strcmp(pInterface->GetInterfaceName(), SMINTERFACE_SDKHOOKS_NAME) == 0)
