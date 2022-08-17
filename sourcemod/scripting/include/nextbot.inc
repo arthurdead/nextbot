@@ -8,6 +8,7 @@
 #endif
 
 #include <sdktools>
+#include <dhooks>
 #tryinclude <animhelpers>
 
 #if !defined animhelpers_included
@@ -96,48 +97,57 @@ enum struct BehaviorResult
 
 typeset nextbot_functions
 {
+	//INextBotCustom.IsAbleToBlockMovementOf
+	function MRESReturn (INextBotCustom custom, INextBot bot, INextBot other, bool &result);
+
+	//INextBotCustom.ShouldTouch
+	function MRESReturn (INextBotCustom custom, INextBot bot, int other, bool &result);
+
+	//IIntentionCustom.InitialContainedAction
+	function BehaviorAction (int entity);
+
+	//IIntentionCustom.IsHindrance
+	function QueryResultType (IIntentionCustom intention, INextBot bot, int blocker);
+
+	//GameLocomotionCustom.TraverseLadder
+	function MRESReturn (GameLocomotionCustom locomotion, bool &result);
+
+	//ILocomotion.ClimbLadder
+	//ILocomotion.DescendLadder
+	function MRESReturn (ILocomotion locomotion, CNavLadder ladder, CNavArea goal);
+
+	//ILocomotion.ClimbUpToLedge
+	function MRESReturn (ILocomotion locomotion, const float goal[3], const float fwd[3], int obstacle, bool &result);
+
+	//ILocomotion.ShouldCollideWith
+	function MRESReturn (ILocomotion locomotion, int other, bool &result);
+
+	//ILocomotion.IsEntityTraversable
+	function MRESReturn (ILocomotion locomotion, int obstacle, TraverseWhenType when, bool &result);
+
+	//IBodyCustom.SelectAnimationSequence
+	function int (IBodyCustom body, int entity, Activity act);
+
+	//IBodyCustom.TranslateActivity
+	function Activity (IBodyCustom body, Activity act);
+
 	//BehaviorActionEntry.OnStart
 	//BehaviorActionEntry.OnSuspend
 	//BehaviorActionEntry.OnResume
-	function BehaviorResultType (BehaviorAction action, int entity, BehaviorAction prior, BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, BehaviorAction prior, BehaviorResult result);
+
 	//BehaviorActionEntry.Update
-	function BehaviorResultType (BehaviorAction action, int entity, float interval, BehaviorResult result);
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, float interval, BehaviorResult result);
+
 	//BehaviorActionEntry.OnEnd
-	function void (BehaviorAction action, int entity, BehaviorAction next);
+	function void (BehaviorAction action, INextBot bot, int entity, BehaviorAction next);
+
 	//BehaviorActionEntry.InitialContainedAction
-	function BehaviorAction (BehaviorAction action, int entity);
-	
-	//IIntentionCustom.InitialContainedAction
-	function BehaviorAction (int entity);
-	
-	//IIntentionCustom.IsHindrance
-	function QueryResultType (IIntentionCustom intention, INextBot bot, int blocker);
-	
-	//GameLocomotionCustom.TraverseLadder
-	function bool (GameLocomotionCustom locomotion);
-	//GameLocomotionCustom.ClimbLadder
-	//NextBotFlyingLocomotion.ClimbLadder
-	//GameLocomotionCustom.DescendLadder
-	//NextBotFlyingLocomotion.DescendLadder
-	function void (ILocomotion locomotion, CNavLadder ladder, CNavArea goal);
-	//GameLocomotionCustom.ClimbUpToLedge
-	//NextBotFlyingLocomotion.ClimbUpToLedge
-	function bool (ILocomotion locomotion, const float goal[3], const float fwd[3], int obstacle);
-	//GameLocomotionCustom.ShouldCollideWith
-	//NextBotFlyingLocomotion.ShouldCollideWith
-	function bool (ILocomotion locomotion, int other);
-	
-	//INextBotCustom.IsAbleToBlockMovementOf
-	function bool (INextBotCustom custom, INextBot bot, INextBot other);
-	//INextBotCustom.ShouldTouch
-	function bool (INextBotCustom custom, INextBot bot, int other);
-	
+	function BehaviorAction (BehaviorAction action, INextBot bot, int entity);
+
 	//BehaviorActionEntry.OnLeaveGround
 	//BehaviorActionEntry.OnLandOnGround
 	//BehaviorActionEntry.OnContact
-	//BehaviorActionEntry.OnAnimationActivityComplete
-	//BehaviorActionEntry.OnAnimationActivityInterrupted
-	//BehaviorActionEntry.OnAnimationEvent
 	//BehaviorActionEntry.OnSight
 	//BehaviorActionEntry.OnLostSight
 	//BehaviorActionEntry.OnShoved
@@ -148,8 +158,15 @@ typeset nextbot_functions
 	//BehaviorActionEntry.OnThreatChanged
 	//BehaviorActionEntry.OnHitByVomitJar
 	//BehaviorActionEntry.OnDrop
-	function BehaviorResultType (BehaviorAction action, int entity, int ground, BehaviorResult result);
-	
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, int ground, BehaviorResult result);
+
+	//BehaviorActionEntry.OnAnimationEvent
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, int event, BehaviorResult result);
+
+	//BehaviorActionEntry.OnAnimationActivityComplete
+	//BehaviorActionEntry.OnAnimationActivityInterrupted
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, Activity act, BehaviorResult result);
+
 	//BehaviorActionEntry.OnMoveToSuccess
 	//BehaviorActionEntry.OnStuck
 	//BehaviorActionEntry.OnUnStuck
@@ -158,32 +175,27 @@ typeset nextbot_functions
 	//BehaviorActionEntry.OnLose
 	//BehaviorActionEntry.OnEnteredSpit
 	//BehaviorActionEntry.OnModelChanged
-	function BehaviorResultType (BehaviorAction action, int entity, BehaviorResult result);
-	
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, BehaviorResult result);
+
 	//BehaviorActionEntry.OnMoveToFailure
-	function BehaviorResultType (BehaviorAction action, int entity, MoveToFailureType type, BehaviorResult result);
-	
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, MoveToFailureType type, BehaviorResult result);
+
 	//BehaviorActionEntry.OnSound
-	function BehaviorResultType (BehaviorAction action, int entity, int source, const float pos[3], BehaviorResult result);
-	
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, int source, const float pos[3], BehaviorResult result);
+
 	//BehaviorActionEntry.OnWeaponFired
 	//BehaviorActionEntry.OnActorEmoted
 	//BehaviorActionEntry.OnPickUp
-	function BehaviorResultType (BehaviorAction action, int entity, int who, int weapon, BehaviorResult result);
-	
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, int who, int weapon, BehaviorResult result);
+
 #if defined damagerules_included
 	//BehaviorActionEntry.OnInjured
 	//BehaviorActionEntry.OnKilled
-	function BehaviorResultType (BehaviorAction action, int entity, const CTakeDamageInfo info, BehaviorResult result);
-	
-	//BehaviorActionEntry.OnOtherKilled
-	function BehaviorResultType (BehaviorAction action, int entity, int victim, const CTakeDamageInfo info, BehaviorResult result);
-#endif
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, const CTakeDamageInfo info, BehaviorResult result);
 
-	//IBodyCustom.SelectAnimationSequence
-	function int (IBodyCustom body, int entity, Activity act);
-	//IBodyCustom.TranslateActivity
-	function Activity (IBodyCustom body, Activity act);
+	//BehaviorActionEntry.OnOtherKilled
+	function BehaviorResultType (BehaviorAction action, INextBot bot, int entity, int victim, const CTakeDamageInfo info, BehaviorResult result);
+#endif
 };
 
 #if defined damagerules_included
