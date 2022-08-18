@@ -8765,6 +8765,7 @@ public:
 		// don't lead over cliffs
 		CNavArea *leadArea = NULL;
 
+	#if 0
 		CBaseCombatCharacter *pBCC = subject->MyCombatCharacterPointer();
 		if ( pBCC && CloseEnough( pathTarget, subjectPos, 3.0 ) )
 		{
@@ -8819,6 +8820,9 @@ public:
 				}
 			}
 		}
+	#else
+		leadArea = TheNavMesh->GetNearestNavArea( pathTarget );
+	#endif
 
 
 		if ( !leadArea || leadArea->GetZ( pathTarget.x, pathTarget.y ) < pathTarget.z - mover->GetMaxJumpHeight() )
