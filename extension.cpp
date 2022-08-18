@@ -250,6 +250,9 @@ int CBaseCombatCharacterFInViewConeEnt = -1;
 int CBaseCombatCharacterFInAimConeVec = -1;
 int CBaseCombatCharacterFInAimConeEnt = -1;
 
+int CBaseCombatCharacterCheckTraceHullAttackRange = -1;
+int CBaseCombatCharacterCheckTraceHullAttackEndPoint = -1;
+
 void *CBaseCombatCharacterIsAbleToSeeEnt = nullptr;
 void *CBaseCombatCharacterIsAbleToSeeCC = nullptr;
 
@@ -1612,6 +1615,16 @@ public:
 	bool IsAbleToSee( CBaseCombatCharacter *pBCC, FieldOfViewCheckType checkFOV )
 	{
 		return call_mfunc<bool, CBaseCombatCharacter, CBaseCombatCharacter *, FieldOfViewCheckType>(this, CBaseCombatCharacterIsAbleToSeeCC, pBCC, checkFOV);
+	}
+
+	CBaseEntity *CheckTraceHullAttack( float flDist, const Vector &mins, const Vector &maxs, int iDamage, int iDmgType, float forceScale, bool bDamageAnyNPC )
+	{
+		return call_vfunc<CBaseEntity *, CBaseCombatCharacter, float, const Vector &, const Vector &, int, int, float, bool>(this, CBaseCombatCharacterCheckTraceHullAttackRange, flDist, mins, maxs, iDamage, iDmgType, forceScale, bDamageAnyNPC);
+	}
+
+	CBaseEntity *CheckTraceHullAttack( const Vector &vStart, const Vector &vEnd, const Vector &mins, const Vector &maxs, int iDamage, int iDmgType, float flForceScale, bool bDamageAnyNPC )
+	{
+		return call_vfunc<CBaseEntity *, CBaseCombatCharacter, const Vector &, const Vector &, const Vector &, const Vector &, int, int, float, bool>(this, CBaseCombatCharacterCheckTraceHullAttackEndPoint, vStart, vEnd, mins, maxs, iDamage, iDmgType, flForceScale, bDamageAnyNPC);
 	}
 };
 
@@ -13969,6 +13982,58 @@ cell_t CombatCharacterIsAbleToSeeEnt(IPluginContext *pContext, const cell_t *par
 	return pSubject->IsAbleToSee(pTarget, (FieldOfViewCheckType)params[3]);
 }
 
+cell_t CombatCharacterHullAttackRange(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+
+	Vector mins{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	pContext->LocalToPhysAddr(params[4], &addr);
+
+	Vector maxs{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	CBaseEntity *pHit = pSubject->CheckTraceHullAttack(sp_ctof(params[2]), mins, maxs, params[5], params[6], sp_ctof(params[7]), params[8]);
+
+	return pHit ? gamehelpers->EntityToBCompatRef(pHit) : -1;
+}
+
+cell_t CombatCharacterHullAttackEndPoint(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	Vector vStart{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	pContext->LocalToPhysAddr(params[3], &addr);
+
+	Vector vEnd{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	pContext->LocalToPhysAddr(params[4], &addr);
+
+	Vector mins{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	pContext->LocalToPhysAddr(params[5], &addr);
+
+	Vector maxs{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
+
+	CBaseEntity *pHit = pSubject->CheckTraceHullAttack(vStart, vEnd, mins, maxs, params[6], params[7], sp_ctof(params[8]), params[9]);
+
+	return pHit ? gamehelpers->EntityToBCompatRef(pHit) : -1;
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -14407,6 +14472,8 @@ sp_nativeinfo_t natives[] =
 	{"CombatCharacterInAimConeVec", CombatCharacterInAimConeVec},
 	{"CombatCharacterInAimConeEnt", CombatCharacterInAimConeEnt},
 	{"CombatCharacterIsAbleToSeeEnt", CombatCharacterIsAbleToSeeEnt},
+	{"CombatCharacterHullAttackRange", CombatCharacterHullAttackRange},
+	{"CombatCharacterHullAttackEndPoint", CombatCharacterHullAttackEndPoint},
 	{NULL, NULL}
 };
 
@@ -15967,6 +16034,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseEntity)", &CBaseCombatCharacterIsAbleToSeeEnt);
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter)", &CBaseCombatCharacterIsAbleToSeeCC);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::CheckTraceHullAttack(float)", &CBaseCombatCharacterCheckTraceHullAttackRange);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::CheckTraceHullAttack(Vector)", &CBaseCombatCharacterCheckTraceHullAttackEndPoint);
 
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);

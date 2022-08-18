@@ -537,6 +537,14 @@
 			{
 				"linux" "236"
 			}
+			"CBaseCombatCharacter::CheckTraceHullAttack(float)"
+			{
+				"linux" "302"
+			}
+			"CBaseCombatCharacter::CheckTraceHullAttack(Vector)"
+			{
+				"linux" "303"
+			}
 		}
 		"Signatures"
 		{
