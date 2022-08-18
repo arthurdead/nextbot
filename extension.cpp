@@ -92,6 +92,16 @@ class IStaticPropMgrServer *staticpropmgr = nullptr;
 #ifdef __HAS_DAMAGERULES
 #include <IDamageRules.h>
 #include <public/damageinfo.cpp>
+#else
+#define BASE_DAMAGEINFO_STRUCT_SIZE ((sizeof(cell_t) * 3) * 3 + sizeof(cell_t) * 10)
+
+#if SOURCE_ENGINE == SE_TF2
+#define DAMAGEINFO_STRUCT_SIZE (BASE_DAMAGEINFO_STRUCT_SIZE + sizeof(cell_t) * 7)
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+#define DAMAGEINFO_STRUCT_SIZE (BASE_DAMAGEINFO_STRUCT_SIZE + sizeof(cell_t) * 7)
+#endif
+
+#define DAMAGEINFO_STRUCT_SIZE_IN_CELL (DAMAGEINFO_STRUCT_SIZE / sizeof(cell_t))
 #endif
 
 #ifdef __HAS_ANIMHELPERS
@@ -4632,7 +4642,12 @@ struct SPActionEntry
 };
 
 #define RESVARS_REASON_SIZE 64
-#define RESVARS_SIZE (RESVARS_REASON_SIZE+2)
+#define RESVARS_REASON_SIZE_IN_CELL (RESVARS_REASON_SIZE / sizeof(cell_t))
+#define RESVARS_SIZE (sizeof(cell_t) + RESVARS_REASON_SIZE + sizeof(cell_t))
+#define RESVARS_SIZE_IN_CELL (RESVARS_SIZE / sizeof(cell_t))
+
+static_assert(sizeof(ActionResultType) == sizeof(cell_t));
+static_assert(sizeof(SPAction *) == sizeof(cell_t));
 
 #include <npcevent.h>
 
@@ -4644,32 +4659,67 @@ public:
 	using BaseClass = Action<SPActor>;
 	
 	virtual const char *GetName( void ) const { return name.c_str(); }
-	
-	static void initvars(cell_t *vars, SPActionResult &result)
+
+	static void initvars_base_impl(cell_t *&vars, SPActionResult &result)
 	{
-		
+		*vars = (cell_t)result.m_type;
+		++vars;
+
+		strncpy((char *)vars, result.m_reason.c_str(), result.m_reason.length()+1);
+		vars += RESVARS_REASON_SIZE_IN_CELL;
 	}
-	
-	static void initvars(cell_t *vars, SPEventDesiredResult &result)
+
+	static void initvars_event_impl(cell_t *&vars, SPEventDesiredResult &result)
 	{
-		vars[1] = (cell_t)RESULT_TRY;
+		initvars_base_impl((cell_t *&)vars, (SPActionResult &)result);
+
+		*vars = (cell_t)result.m_priority;
 	}
-	
-	static void varstoresult(cell_t *vars, SPActionResult &result)
+
+	static void varstoresult_base_impl(const cell_t *&vars, SPActionResult &result)
 	{
-		result.m_action = (SPAction *)vars[0];
-		
-		std::string reason{(char *)&vars[2]};
+		result.m_action = (SPAction *)*vars;
+		++vars;
+
+		std::string reason{};
+		reason.assign((const char *)vars, RESVARS_REASON_SIZE);
+
+		vars += RESVARS_REASON_SIZE_IN_CELL;
+
 		result.set_reason(std::move(reason));
 	}
-	
-	static void varstoresult(cell_t *vars, SPEventDesiredResult &result)
+
+	static void varstoresult_event_impl(const cell_t *&vars, SPEventDesiredResult &result)
 	{
-		varstoresult(vars, (SPActionResult &)result);
-		
-		result.m_priority = (EventResultPriorityType)vars[1];
+		varstoresult_base_impl((const cell_t *&)vars, (SPActionResult &)result);
+
+		result.m_priority = (EventResultPriorityType)*vars;
 	}
-	
+
+	static void initvars_base(cell_t *vars, SPActionResult &result)
+	{
+		cell_t *vars_tmp{vars};
+		initvars_base_impl((cell_t *&)vars_tmp, (SPActionResult &)result);
+	}
+
+	static void initvars_event(cell_t *vars, SPEventDesiredResult &result)
+	{
+		cell_t *vars_tmp{vars};
+		initvars_event_impl((cell_t *&)vars_tmp, (SPEventDesiredResult &)result);
+	}
+
+	static void varstoresult_base(const cell_t *vars, SPActionResult &result)
+	{
+		const cell_t *vars_tmp{vars};
+		varstoresult_base_impl((const cell_t *&)vars_tmp, (SPActionResult &)result);
+	}
+
+	static void varstoresult_event(const cell_t *vars, SPEventDesiredResult &result)
+	{
+		const cell_t *vars_tmp{vars};
+		varstoresult_event_impl((const cell_t *&)vars_tmp, (SPEventDesiredResult &)result);
+	}
+
 	virtual ~SPAction()
 	{
 		if(entry) {
@@ -4720,12 +4770,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell((cell_t)priorAction);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_base(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_base(resvars, result);
 		
 		return result;
 	}
@@ -4748,12 +4798,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushFloat(interval);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_base(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_base(resvars, result);
 		
 		return result;
 	}
@@ -4776,12 +4826,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell((cell_t)interruptingAction);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_base(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_base(resvars, result);
 		
 		return result;
 	}
@@ -4804,12 +4854,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell((cell_t)interruptingAction);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_base(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_base(resvars, result);
 		
 		return result;
 	}
@@ -4851,12 +4901,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(ground));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -4878,12 +4928,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(ground));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -4905,12 +4955,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(other));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -4931,12 +4981,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -4958,12 +5008,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(reason);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -4984,12 +5034,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5010,12 +5060,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5038,12 +5088,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(activity);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5065,12 +5115,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(activity);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5096,12 +5146,12 @@ public:
 #elif SOURCE_ENGINE == SE_TF2
 		func->PushCell(event->event);
 #endif
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5122,12 +5172,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5148,17 +5198,26 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t *spdmginfo = nullptr;
 #ifdef __HAS_DAMAGERULES
 		if(g_pDamageRules) {
-			g_pDamageRules->PushDamageInfo(func, info);
+			spdmginfo = new cell_t[g_pDamageRules->SPDamageInfoStructSizeInCell()]{0};
+			g_pDamageRules->PushDamageInfo(func, spdmginfo, info);
+		} else {
+			spdmginfo = new cell_t[DAMAGEINFO_STRUCT_SIZE_IN_CELL]{0};
+			func->PushArray(spdmginfo, DAMAGEINFO_STRUCT_SIZE_IN_CELL, 0);
 		}
+#else
+		spdmginfo = new cell_t[DAMAGEINFO_STRUCT_SIZE_IN_CELL]{0};
+		func->PushArray(spdmginfo, DAMAGEINFO_STRUCT_SIZE_IN_CELL, 0);
 #endif
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
+		delete[] spdmginfo;
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5179,17 +5238,26 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
+		cell_t *spdmginfo = nullptr;
 #ifdef __HAS_DAMAGERULES
 		if(g_pDamageRules) {
-			g_pDamageRules->PushDamageInfo(func, info);
+			spdmginfo = new cell_t[g_pDamageRules->SPDamageInfoStructSizeInCell()]{0};
+			g_pDamageRules->PushDamageInfo(func, spdmginfo, info);
+		} else {
+			spdmginfo = new cell_t[DAMAGEINFO_STRUCT_SIZE_IN_CELL]{0};
+			func->PushArray(spdmginfo, DAMAGEINFO_STRUCT_SIZE_IN_CELL, 0);
 		}
+#else
+		spdmginfo = new cell_t[DAMAGEINFO_STRUCT_SIZE_IN_CELL]{0};
+		func->PushArray(spdmginfo, DAMAGEINFO_STRUCT_SIZE_IN_CELL, 0);
 #endif
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
+		delete[] spdmginfo;
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5211,17 +5279,26 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(victim));
+		cell_t *spdmginfo = nullptr;
 #ifdef __HAS_DAMAGERULES
 		if(g_pDamageRules) {
-			g_pDamageRules->PushDamageInfo(func, info);
+			spdmginfo = new cell_t[g_pDamageRules->SPDamageInfoStructSizeInCell()]{0};
+			g_pDamageRules->PushDamageInfo(func, spdmginfo, info);
+		} else {
+			spdmginfo = new cell_t[DAMAGEINFO_STRUCT_SIZE_IN_CELL]{0};
+			func->PushArray(spdmginfo, DAMAGEINFO_STRUCT_SIZE_IN_CELL, 0);
 		}
+#else
+		spdmginfo = new cell_t[DAMAGEINFO_STRUCT_SIZE_IN_CELL]{0};
+		func->PushArray(spdmginfo, DAMAGEINFO_STRUCT_SIZE_IN_CELL, 0);
 #endif
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
+		delete[] spdmginfo;
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5243,12 +5320,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5270,12 +5347,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5299,12 +5376,12 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(source));
 		cell_t addr[3]{sp_ftoc(pos.x), sp_ftoc(pos.y), sp_ftoc(pos.z)};
 		func->PushArray(addr, 3);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5328,12 +5405,12 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(whoFired));
 		func->PushCell(gamehelpers->EntityToBCompatRef((CBaseEntity *)weapon));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5355,12 +5432,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5382,12 +5459,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(giver));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5409,12 +5486,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(item));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5437,12 +5514,12 @@ public:
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(emoter));
 		func->PushCell(emote);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5473,12 +5550,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(pusher));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5500,12 +5577,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(blinder));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5527,12 +5604,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(territoryID);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5554,12 +5631,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(territoryID);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5581,12 +5658,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(territoryID);
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5607,12 +5684,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5633,12 +5710,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5661,12 +5738,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(territoryID));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5687,12 +5764,12 @@ public:
 		func->PushCell((cell_t)this);
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -5714,12 +5791,12 @@ public:
 		func->PushCell((cell_t)me->MyNextBotPointer());
 		func->PushCell(gamehelpers->EntityToBCompatRef(me));
 		func->PushCell(gamehelpers->EntityToBCompatRef(territoryID));
-		cell_t resvars[RESVARS_SIZE]{0};
-		initvars(resvars, result);
-		func->PushArray(resvars, RESVARS_SIZE, SM_PARAM_COPYBACK);
+		cell_t resvars[RESVARS_SIZE_IN_CELL]{0};
+		initvars_event(resvars, result);
+		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult(resvars, result);
+		varstoresult_event(resvars, result);
 		
 		return result;
 	}
@@ -7235,6 +7312,8 @@ INextBotComponent::~INextBotComponent()
 {
 	m_bot->UnregisterComponent( this );
 }
+
+static_assert(sizeof(Activity) == sizeof(cell_t));
 
 class IBodyCustom : public IBody, public IPluginNextBotComponent
 {
@@ -13523,15 +13602,13 @@ cell_t CombatCharacterEventKilled(IPluginContext *pContext, const cell_t *params
 		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
 	}
 	
-#ifdef __HAS_DAMAGERULES
 	CTakeDamageInfo info{};
+#ifdef __HAS_DAMAGERULES
 	if(g_pDamageRules) {
 		g_pDamageRules->ParamToDamageInfo(pContext, params[2], info);
 	}
-	pCombat->Event_Killed(info);
-#else
-	return pContext->ThrowNativeError("Ext was compiled without damagerules");
 #endif
+	pCombat->Event_Killed(info);
 
 	return 0;
 }

@@ -9,7 +9,19 @@
 
 #include <sdktools>
 #include <dhooks>
+
+#if defined REQUIRE_EXTENSIONS
+	#define __NB_EXT_WAS_REQUIRED
+#endif
+
+#undef REQUIRE_EXTENSIONS
 #tryinclude <animhelpers>
+#tryinclude <damagerules>
+#tryinclude <datamaps>
+
+#if defined __NB_EXT_WAS_REQUIRED
+	#define REQUIRE_EXTENSIONS
+#endif
 
 #if !defined animhelpers_included
 enum Activity
@@ -76,16 +88,14 @@ methodmap BehaviorAction
 enum struct BehaviorResult
 {
 	BehaviorAction action;
-	EventResultPriorityType priority;
 	char reason[BEHAVIOR_REASON_MAX];
-	
+	EventResultPriorityType priority;
+
 	void set_reason(const char[] str)
 	{
 		strcopy(this.reason, BEHAVIOR_REASON_MAX, str);
 	}
 }
-
-#tryinclude <damagerules>
 
 #if defined GAME_TF2
 #define GameLocomotionCustom NextBotGroundLocomotionCustom
@@ -1768,8 +1778,6 @@ methodmap InfectedChasePath < DirectChasePath
 native bool EntityIsCombatCharacter(int entity);
 native CNavArea GetEntityLastKnownArea(int entity);
 native INextBot MakeEntityNextBot(int entity);
-
-#tryinclude <datamaps>
 
 native Address AllocateNextBotCombatCharacter(int size_modifier);
 native int GetNextBotCombatCharacterSize();
