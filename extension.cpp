@@ -545,34 +545,6 @@ float UTIL_VecToPitch( const Vector &vec )
 	return pitch;
 }
 
-#if SOURCE_ENGINE == SE_TF2
-enum Class_T
-{
-	CLASS_NONE = 0,
-	CLASS_PLAYER,
-	CLASS_PLAYER_ALLY,
-
-	CLASS_TFGOAL,
-	CLASS_TFGOAL_TIMER,
-	CLASS_TFGOAL_ITEM,
-	CLASS_TFSPAWN,
-	CLASS_MACHINE,
-
-	//CUSTOM ADDED!!
-
-	//TF2
-	CLASS_ZOMBIE,
-	CLASS_HHH,
-	CLASS_WIZARD,
-	CLASS_EYEBALL,
-	CLASS_TANK,
-
-	NUM_AI_CLASSES
-};
-#else
-	#error
-#endif
-
 class CBaseEntity : public IServerEntity
 {
 public:
@@ -14774,24 +14746,6 @@ DETOUR_DECL_MEMBER2(IsTankImmediatelyDangerousTo, bool, CBasePlayer *, pPlayer, 
 }
 #endif
 
-enum npc_type : unsigned char
-{
-	npc_none =    0,
-	npc_any =     (1 << 0),
-	npc_undead =  (1 << 1),
-	npc_default = (1 << 2),
-	npc_custom = (npc_any|(1 << 3)),
-#if SOURCE_ENGINE == SE_TF2
-	npc_zombie = (npc_default|npc_any|npc_undead|(1 << 4)),
-	npc_hhh =    (npc_default|npc_any|npc_undead|(1 << 5)),
-	npc_eye =    (npc_default|npc_any|npc_undead|(1 << 6)),
-	npc_wizard = (npc_default|npc_any|npc_undead|(1 << 7)),
-	npc_tank =   (npc_default|npc_any|(1 << 8)),
-#else
-	#error
-#endif
-};
-
 static npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname)
 {
 #if SOURCE_ENGINE == SE_TF2
@@ -14812,6 +14766,11 @@ static npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classn
 		return npc_custom;
 	}
 	return npc_none;
+}
+
+npc_type Sample::entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname)
+{
+	return ::entity_to_npc_type(pEntity, classname);
 }
 
 #if SOURCE_ENGINE == SE_TF2
@@ -14915,7 +14874,9 @@ enum HalloweenBossType
 
 	//CUSTOM ADDED
 	HALLOWEEN_BOSS_ZOMBIE,
-	HALLOWEEN_BOSS_TANK
+	HALLOWEEN_BOSS_TANK,
+
+	HALLOWEEN_BOSS_CUSTOM_NPC
 };
 
 class CombatCharacterVTableHack : public CBaseCombatCharacter
@@ -14954,6 +14915,7 @@ public:
 			case CLASS_WIZARD: return HALLOWEEN_BOSS_MERASMUS;
 			case CLASS_EYEBALL: return HALLOWEEN_BOSS_MONOCULUS;
 			case CLASS_TANK: return HALLOWEEN_BOSS_TANK;
+			case CLASS_CUSTOM_NPC: return HALLOWEEN_BOSS_CUSTOM_NPC;
 		}
 
 		return HALLOWEEN_BOSS_INVALID;
@@ -15656,6 +15618,8 @@ public:
 			case CLASS_EYEBALL:			return "CLASS_EYEBALL";
 			case CLASS_TANK:			return "CLASS_TANK";
 
+			case CLASS_CUSTOM_NPC:		return "CLASS_CUSTOM_NPC";
+
 			default:					return "MISSING CLASS in ClassifyText()";
 		}
 	}
@@ -15686,6 +15650,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_EYEBALL, D_FR, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_TANK, D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_PLAYER, D_LI, 0);
@@ -15700,6 +15665,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_EYEBALL, D_FR, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_PLAYER_ALLY, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_PLAYER, D_LI, 0);
@@ -15714,6 +15680,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_EYEBALL, D_FR, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_PLAYER, D_LI, 0);
@@ -15728,6 +15695,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_EYEBALL, D_FR, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_TIMER, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_PLAYER, D_LI, 0);
@@ -15742,6 +15710,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_EYEBALL, D_FR, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFGOAL_ITEM, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_PLAYER, D_LI, 0);
@@ -15756,6 +15725,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_EYEBALL, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TFSPAWN, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_PLAYER, D_NU, 0);
@@ -15770,6 +15740,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_WIZARD, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_EYEBALL, D_HT, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_MACHINE, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_PLAYER, D_HT, 0);
@@ -15784,6 +15755,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_WIZARD, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_EYEBALL, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ZOMBIE, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_PLAYER, D_HT, 0);
@@ -15798,6 +15770,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_WIZARD, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_EYEBALL, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HHH, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_PLAYER, D_HT, 0);
@@ -15812,6 +15785,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_WIZARD, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_EYEBALL, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_WIZARD, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_PLAYER, D_HT, 0);
@@ -15826,6 +15800,7 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_WIZARD, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_EYEBALL, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_EYEBALL, CLASS_CUSTOM_NPC, D_NU, 0);
 
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_NONE, D_NU, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_PLAYER, D_HT, 0);
@@ -15840,6 +15815,22 @@ public:
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_WIZARD, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_EYEBALL, D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_TANK, D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_TANK, CLASS_CUSTOM_NPC, D_NU, 0);
+
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_NONE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_PLAYER, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_PLAYER_ALLY, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_TFGOAL, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_TFGOAL_TIMER, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_TFGOAL_ITEM, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_TFSPAWN, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_MACHINE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_ZOMBIE, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_HHH, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_WIZARD, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_EYEBALL, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_TANK, D_NU, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_CUSTOM_NPC, CLASS_CUSTOM_NPC, D_NU, 0);
 	}
 
 	bool DetourShouldAutoAim( CBasePlayer *pPlayer, edict_t *target )
@@ -16284,6 +16275,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	sharesys->AddDependency(myself, "animhelpers.ext", false, true);
 #endif
 
+	sharesys->AddInterface(myself, this);
 	sharesys->RegisterLibrary(myself, "nextbot");
 	sharesys->AddNatives(myself, natives);
 

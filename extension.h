@@ -37,6 +37,7 @@
  * @brief Sample extension code header.
  */
 
+#include "public/INextBotExt.h"
 #include "smsdk_ext.h"
 #include <ISDKHooks.h>
 
@@ -44,9 +45,11 @@
  * @brief Sample implementation of the SDK Extension.
  * Note: Uncomment one of the pre-defined virtual functions in order to use it.
  */
-class Sample : public SDKExtension, public IPluginsListener, public IHandleTypeDispatch, public IConCommandBaseAccessor, public ISMEntityListener
+class Sample : public SDKExtension, public IPluginsListener, public IHandleTypeDispatch, public IConCommandBaseAccessor, public ISMEntityListener, public INextBotExt
 {
 public:
+	virtual npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname);
+
 	virtual void OnEntityCreated(CBaseEntity *pEntity, const char *classname);
 
 	virtual void OnHandleDestroy(HandleType_t type, void *object);
