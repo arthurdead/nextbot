@@ -35,9 +35,40 @@
 #include <vector>
 #include <unordered_map>
 #include <string_view>
+#include <cstdint>
 
 using namespace std::literals::string_literals;
 using namespace std::literals::string_view_literals;
+
+#include <cxxabi.h>
+#if __has_include(<tinfo.h>)
+	#include <tinfo.h>
+#else
+namespace __cxxabiv1
+{
+	struct vtable_prefix 
+	{
+		// Offset to most derived object.
+		ptrdiff_t whole_object;
+
+		// Additional padding if necessary.
+#ifdef _GLIBCXX_VTABLE_PADDING
+		ptrdiff_t padding1;
+#endif
+
+		// Pointer to most derived type_info.
+		const __class_type_info *whole_type;
+
+		// Additional padding if necessary.
+#ifdef _GLIBCXX_VTABLE_PADDING
+		ptrdiff_t padding2;
+#endif
+
+		// What a class's vptr points to.
+		const void *origin;
+	};
+}
+#endif
 
 #if SOURCE_ENGINE == SE_TF2
 	#define TF_DLL
@@ -494,6 +525,24 @@ float UTIL_VecToYaw( const Vector &vec )
 		yaw += 360;
 
 	return yaw;
+}
+
+float UTIL_VecToPitch( const Vector &vec )
+{
+	if (vec.y == 0 && vec.x == 0)
+	{
+		if (vec.z < 0)
+			return 180.0;
+		else
+			return -180.0;
+	}
+
+	float dist = vec.Length2D();
+	float pitch = atan2( -vec.z, dist );
+
+	pitch = RAD2DEG(pitch);
+
+	return pitch;
 }
 
 #if SOURCE_ENGINE == SE_TF2
@@ -2961,7 +3010,23 @@ class ILocomotion : public INextBotComponent
 {
 public:
 	virtual ~ILocomotion() = 0;
-	
+
+	virtual void Reset( void )
+	{
+		INextBotComponent::Reset();
+
+		m_motionVector = Vector( 1.0f, 0.0f, 0.0f );
+		m_speed = 0.0f;
+		m_groundMotionVector = m_motionVector;
+		m_groundSpeed = m_speed;
+
+		m_moveRequestTimer.Invalidate();
+
+		m_isStuck = false;
+		m_stuckTimer.Invalidate();
+		m_stuckPos = vec3_origin;
+	}
+
 	//
 	// The primary locomotive method
 	// Depending on the physics of the bot's motion, it may not actually
@@ -4209,31 +4274,6 @@ SH_DECL_MANUALHOOK0(MyInfectedPointer, 0, 0, 0, CBaseEntity *)
 SH_DECL_MANUALHOOK0(GetClass, 0, 0, 0, int)
 SH_DECL_MANUALHOOK1(CanBeA, 0, 0, 0, bool, int)
 SH_DECL_HOOK0(CBaseEntity, GetDataDescMap, SH_NOATTRIB, 0, datamap_t *);
-
-namespace __cxxabiv1
-{
-	struct vtable_prefix 
-	{
-		// Offset to most derived object.
-		ptrdiff_t whole_object;
-
-		// Additional padding if necessary.
-#ifdef _GLIBCXX_VTABLE_PADDING
-		ptrdiff_t padding1;
-#endif
-
-		// Pointer to most derived type_info.
-		const __class_type_info *whole_type;
-
-		// Additional padding if necessary.
-#ifdef _GLIBCXX_VTABLE_PADDING
-		ptrdiff_t padding2;
-#endif
-
-		// What a class's vptr points to.
-		const void *origin;
-	};
-}
 
 void **infectedvtable = nullptr;
 
@@ -6395,17 +6435,32 @@ SH_DECL_HOOK1(ILocomotion, ShouldCollideWith, SH_NOATTRIB, 0, bool, CBaseEntity 
 SH_DECL_HOOK1(ILocomotion, IsAreaTraversable, SH_NOATTRIB, 0, bool, const CNavArea * );
 SH_DECL_HOOK2(ILocomotion, IsEntityTraversable, SH_NOATTRIB, 0, bool, CBaseEntity *, TraverseWhenType );
 
-bool g_bInCustomLocomotion = false;
-bool g_bInFlyingLocomotion = false;
+enum LocomotionType : unsigned char
+{
+	Locomotion_None =    0,
+	Locomotion_Any =     (1 << 0),
+	Locomotion_Ground =  (Locomotion_Any|(1 << 1)),
+	Locomotion_Flying =  (Locomotion_Any|(1 << 2)),
+	Locomotion_Custom =  (1 << 3),
+	Locomotion_AnyCustom = (Locomotion_Any|Locomotion_Custom),
+	Locomotion_FlyingCustom = (Locomotion_Flying|Locomotion_Custom),
+	Locomotion_GroundCustom = (Locomotion_Ground|Locomotion_Custom),
+};
+
+LocomotionType g_nLocomotionType = Locomotion_None;
+
+static bool g_bHackDetectLocomotion = false;
 
 struct customlocomotion_base_vars_t : IPluginNextBotComponent
 {
 public:
-	customlocomotion_base_vars_t(IdentityToken_t *id)
-		: IPluginNextBotComponent{id} {}
+	customlocomotion_base_vars_t(IdentityToken_t *id, LocomotionType type_)
+		: IPluginNextBotComponent{id}, type{type_} {  }
 	
-	virtual ~customlocomotion_base_vars_t() {}
-	
+	virtual ~customlocomotion_base_vars_t() override {}
+
+	LocomotionType type = Locomotion_AnyCustom;
+
 	bool update_hooked = false;
 
 	float step = 18.0f;
@@ -6414,12 +6469,11 @@ public:
 	float run = 150.0f;
 	float walk = 75.0f;
 #if SOURCE_ENGINE == SE_TF2
-	float accel = 500.0f;
-	float deaccel = 500.0f;
+	float maxaccel = 500.0f;
+	float maxdeaccel = 500.0f;
 #endif
 	float limit = 99999999.9f;
 	float slope = 0.6f;
-	spvarmap_t data{};
 	
 	IPluginFunction *climbladdr = nullptr;
 	IPluginFunction *desceladdr = nullptr;
@@ -6427,7 +6481,7 @@ public:
 	IPluginFunction *collidewith = nullptr;
 	IPluginFunction *entitytaver = nullptr;
 	
-	virtual void plugin_unloaded()
+	virtual void plugin_unloaded() override
 	{
 		IPluginNextBotComponent::plugin_unloaded();
 		
@@ -6556,9 +6610,9 @@ public:
 	void HookUpdate()
 	{
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
-		g_bInCustomLocomotion = true;
+		g_nLocomotionType = type;
 		SH_CALL(loc, &ILocomotion::Update)();
-		g_bInCustomLocomotion = false;
+		g_nLocomotionType = Locomotion_None;
 		RETURN_META(MRES_SUPERCEDE);
 	}
 	
@@ -6591,6 +6645,7 @@ public:
 	virtual void add_hooks(ILocomotion *bytes, bool hook_update = true)
 	{
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
+
 		if(hook_update) {
 			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
 			update_hooked = true;
@@ -6620,10 +6675,20 @@ public:
 		ILocomotion *loc = META_IFACEPTR(ILocomotion);
 		
 		remove_hooks(loc);
-		
+
 		this->~customlocomotion_base_vars_t();
 		
 		RETURN_META(MRES_IGNORED);
+	}
+
+	float HookGetSpeedLimit()
+	{
+		if(g_bHackDetectLocomotion) {
+			g_nLocomotionType = type;
+			RETURN_META_VALUE(MRES_SUPERCEDE, *reinterpret_cast<float *>(&type));
+		} else {
+			RETURN_META_VALUE(MRES_SUPERCEDE, limit);
+		}
 	}
 	
 	float HookGetMaxJumpHeight()
@@ -6638,12 +6703,10 @@ public:
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, walk); }
 #if SOURCE_ENGINE == SE_TF2
 	float HookGetMaxAcceleration()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, accel); }
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, maxaccel); }
 	float HookGetMaxDeceleration()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, deaccel); }
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, maxdeaccel); }
 #endif
-	float HookGetSpeedLimit()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, limit); }
 	float HookGetTraversableSlopeLimit()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, slope); }
 };
@@ -6734,8 +6797,8 @@ class GameLocomotionCustom;
 	
 struct customlocomotion_vars_t : customlocomotion_base_vars_t
 {
-	customlocomotion_vars_t(IdentityToken_t *id)
-		: customlocomotion_base_vars_t{id} {}
+	customlocomotion_vars_t(IdentityToken_t *id, LocomotionType type_)
+		: customlocomotion_base_vars_t{id, type_} {}
 	
 	float yaw = 250.0f;
 	
@@ -6744,7 +6807,7 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 	float HookGetMaxYawRate()
 	{ RETURN_META_VALUE(MRES_SUPERCEDE, yaw); }
 	
-	virtual void plugin_unloaded()
+	virtual void plugin_unloaded() override
 	{
 		customlocomotion_base_vars_t::plugin_unloaded();
 		
@@ -6780,7 +6843,7 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		return IPluginNextBotComponent::set_function(name, func);
 	}
 	
-	virtual void remove_hooks(ILocomotion *loc)
+	virtual void remove_hooks(ILocomotion *loc) override
 	{
 		customlocomotion_base_vars_t::remove_hooks(loc);
 		
@@ -6789,9 +6852,9 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		SH_REMOVE_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
 	}
 	
-	virtual void add_hooks(ILocomotion *loc)
+	virtual void add_hooks(ILocomotion *loc, bool hook_update = true) override
 	{
-		customlocomotion_base_vars_t::add_hooks(loc);
+		customlocomotion_base_vars_t::add_hooks(loc, hook_update);
 		
 		GameLocomotion *gameloc = (GameLocomotion *)loc;
 		
@@ -6810,19 +6873,41 @@ public:
 	struct vars_t : customlocomotion_vars_t
 	{
 		vars_t(IdentityToken_t *id)
-			: customlocomotion_vars_t{id} {}
-		
+			: customlocomotion_vars_t{id, Locomotion_GroundCustom} {}
+
+		virtual void add_hooks(ILocomotion *bytes, bool hook_update = true) override
+		{
+			customlocomotion_vars_t::add_hooks(bytes, hook_update);
+
+			NextBotGroundLocomotion *loc{(NextBotGroundLocomotion *)bytes};
+
+			SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, loc, SH_MEMBER(this, &vars_t::HookGetGravity), false);
+			SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, loc, SH_MEMBER(this, &vars_t::HookGetFrictionForward), false);
+			SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, loc, SH_MEMBER(this, &vars_t::HookGetFrictionSideways), false);
+		}
+
+		virtual void remove_hooks(ILocomotion *bytes) override
+		{
+			customlocomotion_vars_t::remove_hooks(bytes);
+
+			NextBotGroundLocomotion *loc{(NextBotGroundLocomotion *)bytes};
+
+			SH_REMOVE_HOOK(NextBotGroundLocomotion, GetGravity, loc, SH_MEMBER(this, &vars_t::HookGetGravity), false);
+			SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionForward, loc, SH_MEMBER(this, &vars_t::HookGetFrictionForward), false);
+			SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionSideways, loc, SH_MEMBER(this, &vars_t::HookGetFrictionSideways), false);
+		}
+
+		float HookGetGravity()
+		{ RETURN_META_VALUE(MRES_SUPERCEDE, gravity); }
+		float HookGetFrictionForward()
+		{ RETURN_META_VALUE(MRES_SUPERCEDE, fricforward); }
+		float HookGetFrictionSideways()
+		{ RETURN_META_VALUE(MRES_SUPERCEDE, fricsideway); }
+
 		float gravity = 1000.0f;
 		float fricforward = 0.0f;
 		float fricsideway = 3.0f;
 	};
-	
-	float HookGetGravity()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().gravity); }
-	float HookGetFrictionForward()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricforward); }
-	float HookGetFrictionSideways()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, getvars().fricsideway); }
 	
 	unsigned char *vars_ptr()
 	{ return (((unsigned char *)this) + sizeof(NextBotGroundLocomotion)); }
@@ -6837,10 +6922,6 @@ public:
 		new (bytes->vars_ptr()) vars_t(id);
 		
 		bytes->getvars().add_hooks(bytes);
-		
-		SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetGravity), false);
-		SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionForward), false);
-		SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, bytes, SH_MEMBER(bytes, &NextBotGroundLocomotionCustom::HookGetFrictionSideways), false);
 		
 		if(!reg) {
 			bot->m_componentList = bytes->m_nextComponent;
@@ -6863,8 +6944,65 @@ public:
 	struct vars_t : customlocomotion_base_vars_t
 	{
 		vars_t(IdentityToken_t *id)
-			: customlocomotion_base_vars_t{id} {}
-		
+			: customlocomotion_base_vars_t{id, Locomotion_FlyingCustom} {}
+
+		virtual void add_hooks(ILocomotion *bytes, bool hook_update = false) override
+		{
+			customlocomotion_base_vars_t::add_hooks(bytes, false);
+
+			CNextBotFlyingLocomotion *loc{(CNextBotFlyingLocomotion *)bytes};
+
+			SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
+			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
+			SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), false);
+			SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
+			SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
+			SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false);
+			SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false);
+			SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
+			SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
+		}
+
+		virtual void remove_hooks(ILocomotion *bytes) override
+		{
+			customlocomotion_base_vars_t::remove_hooks(bytes);
+
+			CNextBotFlyingLocomotion *loc{(CNextBotFlyingLocomotion *)bytes};
+
+			SH_REMOVE_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
+			SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
+			SH_REMOVE_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), false);
+			SH_REMOVE_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
+			SH_REMOVE_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
+			SH_REMOVE_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false);
+			SH_REMOVE_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false);
+			SH_REMOVE_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
+			SH_REMOVE_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
+		}
+
+		void HookSetDesiredSpeed(float speed)
+		{
+			m_desiredSpeed = speed;
+			RETURN_META(MRES_SUPERCEDE);
+		}
+
+		float HookGetDesiredSpeed( void )
+		{
+			RETURN_META_VALUE(MRES_SUPERCEDE, m_desiredSpeed);
+		}
+
+		const Vector &HookGetGroundNormal( void )
+		{
+			static Vector up( 0, 0, 1.0f );
+
+			RETURN_META_VALUE(MRES_SUPERCEDE, up);
+		}
+
+		const Vector &HookGetVelocity( void )
+		{
+			RETURN_META_VALUE(MRES_SUPERCEDE, m_velocity);
+		}
+
 		float m_desiredSpeed = 0.0f;
 		float m_currentSpeed = 0.0f;
 		Vector m_forward = vec3_origin;
@@ -6877,6 +7015,7 @@ public:
 		float vdamp = 1.0f;
 
 		float yaw = 250.0f;
+		float pitch = 250.0f;
 	};
 
 	unsigned char *vars_ptr()
@@ -6886,7 +7025,9 @@ public:
 
 	void HookApproach(const Vector &goalPos, float goalWeight)
 	{
-		SH_CALL(this, &ILocomotion::Approach)(goalPos, goalWeight);
+		ILocomotion *loc = META_IFACEPTR(ILocomotion);
+
+		SH_CALL(loc, &ILocomotion::Approach)(goalPos, goalWeight);
 
 		Vector flyGoal = goalPos;
 		flyGoal.z += getvars().m_desiredAltitude;
@@ -6903,7 +7044,13 @@ public:
 
 	void HookReset()
 	{
-		SH_CALL(this, &ILocomotion::Reset)();
+		ILocomotion *loc = META_IFACEPTR(ILocomotion);
+
+	#if 0
+		SH_CALL(loc, &ILocomotion::Reset)();
+	#else
+		loc->ILocomotion::Reset();
+	#endif
 
 		getvars().m_velocity = vec3_origin;
 		getvars().m_acceleration = vec3_origin;
@@ -6949,9 +7096,11 @@ public:
 
 	void HookUpdate()
 	{
-		g_bInFlyingLocomotion = true;
+		ILocomotion *loc = META_IFACEPTR(ILocomotion);
 
-		SH_CALL(this, &ILocomotion::Update)();
+		g_nLocomotionType = Locomotion_FlyingCustom;
+
+		SH_CALL(loc, &ILocomotion::Update)();
 
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 		const float deltaT = GetUpdateInterval();
@@ -7081,59 +7230,45 @@ public:
 
 		getvars().m_acceleration = vec3_origin;
 
-		g_bInFlyingLocomotion = false;
+		g_nLocomotionType = Locomotion_None;
 		RETURN_META(MRES_SUPERCEDE);
-	}
-
-	void HookSetDesiredSpeed(float speed)
-	{
-		getvars().m_desiredSpeed = speed;
-		RETURN_META(MRES_SUPERCEDE);
-	}
-
-	float HookGetDesiredSpeed( void )
-	{
-		RETURN_META_VALUE(MRES_SUPERCEDE, getvars().m_desiredSpeed);
 	}
 
 	void HookFaceTowards( const Vector &target )
 	{
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 
-	#if 0
 		Vector toTarget = target - me->WorldSpaceCenter();
-		toTarget.z = 0.0f;
 
-		QAngle angles;
-		VectorAngles( toTarget, angles );
-
-		me->SetAbsAngles( angles );
-	#else
 		const float deltaT = GetUpdateInterval();
 	
 		QAngle angles = me->GetLocalAngles();
-		
-		float desiredYaw = UTIL_VecToYaw( target - GetFeet() );
 
-		float angleDiff = UTIL_AngleDiff( desiredYaw, angles.y );
-		
+		float desiredYaw = UTIL_VecToYaw( toTarget );
+		float yawAngleDiff = UTIL_AngleDiff( desiredYaw, angles.y );
 		float deltaYaw = GetMaxYawRate() * deltaT;
-		
-		if (angleDiff < -deltaYaw)
-		{
+		if (yawAngleDiff < -deltaYaw) {
 			angles.y -= deltaYaw;
-		}
-		else if (angleDiff > deltaYaw)
-		{
+		} else if (yawAngleDiff > deltaYaw) {
 			angles.y += deltaYaw;
+		} else {
+			angles.y += yawAngleDiff;
 		}
-		else
-		{
-			angles.y += angleDiff;
+
+		float desiredPitch = UTIL_VecToPitch( toTarget );
+		float pitchAngleDiff = UTIL_AngleDiff( desiredPitch, angles.x );
+		float deltaPitch = GetMaxPitchRate() * deltaT;
+		if (pitchAngleDiff < -deltaPitch) {
+			angles.x -= deltaPitch;
+		} else if (pitchAngleDiff > deltaPitch) {
+			angles.x += deltaPitch;
+		} else {
+			angles.x += pitchAngleDiff;
 		}
-		
+
+		//TODO!!! limit pitch
+
 		me->SetLocalAngles( angles );
-	#endif
 
 		RETURN_META(MRES_SUPERCEDE);
 	}
@@ -7156,21 +7291,14 @@ public:
 		RETURN_META_VALUE(MRES_SUPERCEDE, feet);
 	}
 
-	const Vector &HookGetGroundNormal( void )
-	{
-		static Vector up( 0, 0, 1.0f );
-
-		RETURN_META_VALUE(MRES_SUPERCEDE, up);
-	}
-
-	const Vector &HookGetVelocity( void )
-	{
-		RETURN_META_VALUE(MRES_SUPERCEDE, getvars().m_velocity);
-	}
-
 	float GetMaxYawRate( void )
 	{
 		return getvars().yaw;
+	}
+
+	float GetMaxPitchRate( void )
+	{
+		return getvars().pitch;
 	}
 
 	void Deflect( CBaseEntity *deflector )
@@ -7195,16 +7323,6 @@ public:
 		new (bytes->vars_ptr()) vars_t(id);
 		
 		bytes->getvars().add_hooks(bytes, false);
-
-		SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookReset), false);
-		SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookUpdate), false);
-		SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookApproach), false);
-		SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookFaceTowards), false);
-		SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookSetDesiredSpeed), false);
-		SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetDesiredSpeed), false);
-		SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetGroundNormal), false);
-		SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetVelocity), false);
-		SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(bytes, &CNextBotFlyingLocomotion::HookGetFeet), false);
 		
 		if(!reg) {
 			bot->m_componentList = bytes->m_nextComponent;
@@ -7221,7 +7339,7 @@ public:
 	struct vars_t : customlocomotion_vars_t
 	{
 		vars_t(IdentityToken_t *id)
-			: customlocomotion_vars_t{id} {}
+			: customlocomotion_vars_t{id, Locomotion_GroundCustom} {}
 	};
 	
 	unsigned char *vars_ptr()
@@ -7250,11 +7368,11 @@ public:
 
 DETOUR_DECL_MEMBER0(TraverseLadder, bool)
 {
-	if(!g_bInCustomLocomotion && !g_bInFlyingLocomotion) {
+	if(!(g_nLocomotionType & Locomotion_Custom)) {
 		return DETOUR_MEMBER_CALL(TraverseLadder)();
 	}
 
-	if(g_bInCustomLocomotion) {
+	if(g_nLocomotionType == Locomotion_GroundCustom) {
 		GameLocomotionCustom *gameloc = (GameLocomotionCustom *)this;
 		bool val = false;
 		META_RES res = gameloc->getvars().TraverseLadder(gameloc, val);
@@ -7271,8 +7389,6 @@ DETOUR_DECL_MEMBER0(TraverseLadder, bool)
 				return val;
 			}
 		}
-	} else if(g_bInFlyingLocomotion) {
-		
 	}
 
 	return DETOUR_MEMBER_CALL(TraverseLadder)();
@@ -7285,6 +7401,7 @@ INextBotGeneric *INextBotGeneric::create(CBaseEntity *pEntity)
 {
 	INextBotGeneric *bytes = (INextBotGeneric *)calloc(1, sizeof(INextBot) + sizeof(vars_t));
 	call_mfunc<void>(bytes, INextBotCTOR);
+
 	new (bytes->vars_ptr()) vars_t();
 	
 	bytes->getvars().pEntity = pEntity;
@@ -7750,14 +7867,13 @@ public:
 	customvision_base_vars_t(IdentityToken_t *id)
 		: IPluginNextBotComponent{id} {}
 	
-	virtual ~customvision_base_vars_t() {}
+	virtual ~customvision_base_vars_t() override {}
 	
 	float maxrange = 2000.0;
 	float minreco = 0.0;
 	float deffov = 90.0;
-	spvarmap_t data{};
 	
-	virtual void plugin_unloaded()
+	virtual void plugin_unloaded() override
 	{
 		IPluginNextBotComponent::plugin_unloaded();
 	}
@@ -10554,7 +10670,7 @@ cell_t INextBotIsRangeLessThanEntity(IPluginContext *pContext, const cell_t *par
 		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
 	}
 	
-	return sp_ftoc(bot->IsRangeLessThan(pEntity, sp_ctof(params[3])));
+	return bot->IsRangeLessThan(pEntity, sp_ctof(params[3]));
 }
 
 cell_t INextBotIsRangeLessThanVector(IPluginContext *pContext, const cell_t *params)
@@ -10565,7 +10681,7 @@ cell_t INextBotIsRangeLessThanVector(IPluginContext *pContext, const cell_t *par
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
 	
-	return sp_ftoc(bot->IsRangeLessThan(vec, sp_ctof(params[3])));
+	return bot->IsRangeLessThan(vec, sp_ctof(params[3]));
 }
 
 cell_t INextBotIsRangeGreaterThanEntity(IPluginContext *pContext, const cell_t *params)
@@ -10578,7 +10694,7 @@ cell_t INextBotIsRangeGreaterThanEntity(IPluginContext *pContext, const cell_t *
 		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
 	}
 	
-	return sp_ftoc(bot->IsRangeGreaterThan(pEntity, sp_ctof(params[3])));
+	return bot->IsRangeGreaterThan(pEntity, sp_ctof(params[3]));
 }
 
 cell_t INextBotIsRangeGreaterThanVector(IPluginContext *pContext, const cell_t *params)
@@ -10589,7 +10705,7 @@ cell_t INextBotIsRangeGreaterThanVector(IPluginContext *pContext, const cell_t *
 	pContext->LocalToPhysAddr(params[2], &addr);
 	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
 	
-	return sp_ftoc(bot->IsRangeGreaterThan(vec, sp_ctof(params[3])));
+	return bot->IsRangeGreaterThan(vec, sp_ctof(params[3]));
 }
 
 cell_t INextBotGetRangeToEntity(IPluginContext *pContext, const cell_t *params)
@@ -10723,6 +10839,20 @@ cell_t INextBotComponentBotget(IPluginContext *pContext, const cell_t *params)
 	INextBotComponent *bot = (INextBotComponent *)params[1];
 	
 	return (cell_t)bot->GetBot();
+}
+
+cell_t INextBotComponentUpdateIntervalget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBotComponent *bot = (INextBotComponent *)params[1];
+	
+	return sp_ftoc(bot->GetUpdateInterval());
+}
+
+cell_t INextBotComponentLastUpdateTimeget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBotComponent *bot = (INextBotComponent *)params[1];
+	
+	return sp_ftoc(bot->m_lastUpdateTime);
 }
 
 cell_t INextBotComponentBotReset(IPluginContext *pContext, const cell_t *params)
@@ -10971,7 +11101,11 @@ cell_t INextBotAllocateCustomLocomotion(IPluginContext *pContext, const cell_t *
 
 cell_t INextBotAllocateFlyingLocomotion(IPluginContext *pContext, const cell_t *params)
 {
+#if SOURCE_ENGINE == SE_TF2
 	return INextBotAllocateCustomComponent<CNextBotFlyingLocomotion>(pContext, params, &INextBot::GetLocomotionInterface, &INextBot::m_baseLocomotion);
+#else
+	#error
+#endif
 }
 
 cell_t INextBotAllocateCustomBody(IPluginContext *pContext, const cell_t *params)
@@ -11612,6 +11746,34 @@ cell_t ILocomotionSpeedget(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 	return sp_ftoc(area->GetSpeed());
+}
+
+cell_t ILocomotionTypeget(IPluginContext *pContext, const cell_t *params)
+{
+	ILocomotion *area = (ILocomotion *)params[1];
+
+	LocomotionType type = Locomotion_Any;
+
+	if(dynamic_cast<CNextBotFlyingLocomotion *>(area) != nullptr) {
+		type = Locomotion_FlyingCustom;
+	} else if(dynamic_cast<NextBotGroundLocomotionCustom *>(area) != nullptr) {
+		type = Locomotion_GroundCustom;
+	} else if(dynamic_cast<NextBotGroundLocomotion *>(area) != nullptr) {
+		type = Locomotion_Ground;
+	} else {
+		LocomotionType old_type = g_nLocomotionType;
+		g_bHackDetectLocomotion = true;
+		float hack = area->GetSpeedLimit();
+		g_bHackDetectLocomotion = false;
+		type = *reinterpret_cast<LocomotionType *>(&hack);
+		//type = g_nLocomotionType;
+		g_nLocomotionType = old_type;
+		if(type == Locomotion_None) {
+			type = Locomotion_Any;
+		}
+	}
+
+	return type;
 }
 
 cell_t ILocomotionDesiredSpeedset(IPluginContext *pContext, const cell_t *params)
@@ -12311,6 +12473,12 @@ cell_t NextBotFlyingLocomotionMaxYawRateget(IPluginContext *pContext, const cell
 	return sp_ftoc(area->GetMaxYawRate());
 }
 
+cell_t NextBotFlyingLocomotionMaxPitchRateget(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *area = (CNextBotFlyingLocomotion *)params[1];
+	return sp_ftoc(area->GetMaxPitchRate());
+}
+
 cell_t GameLocomotionLadderget(IPluginContext *pContext, const cell_t *params)
 {
 	GameLocomotion *area = (GameLocomotion *)params[1];
@@ -12371,18 +12539,25 @@ cell_t NextBotFlyingLocomotionMaxYawRateset(IPluginContext *pContext, const cell
 	return 0;
 }
 
+cell_t NextBotFlyingLocomotionMaxPitchRateset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
+	locomotion->getvars().pitch = sp_ctof(params[2]);
+	return 0;
+}
+
 #if SOURCE_ENGINE == SE_TF2
 cell_t NextBotFlyingLocomotionMaxAccelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
-	locomotion->getvars().accel = sp_ctof(params[2]);
+	locomotion->getvars().maxaccel = sp_ctof(params[2]);
 	return 0;
 }
 
 cell_t NextBotFlyingLocomotionMaxDecelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	CNextBotFlyingLocomotion *locomotion = (CNextBotFlyingLocomotion *)params[1];
-	locomotion->getvars().deaccel = sp_ctof(params[2]);
+	locomotion->getvars().maxdeaccel = sp_ctof(params[2]);
 	return 0;
 }
 #endif
@@ -12440,14 +12615,14 @@ cell_t NextBotFlyingLocomotionStepHeightset(IPluginContext *pContext, const cell
 cell_t NextBotGroundLocomotionCustomMaxAccelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().accel = sp_ctof(params[2]);
+	locomotion->getvars().maxaccel = sp_ctof(params[2]);
 	return 0;
 }
 
 cell_t NextBotGroundLocomotionCustomMaxDecelerationset(IPluginContext *pContext, const cell_t *params)
 {
 	NextBotGroundLocomotionCustom *locomotion = (NextBotGroundLocomotionCustom *)params[1];
-	locomotion->getvars().deaccel = sp_ctof(params[2]);
+	locomotion->getvars().maxdeaccel = sp_ctof(params[2]);
 	return 0;
 }
 #endif
@@ -14176,6 +14351,7 @@ sp_nativeinfo_t natives[] =
 	{"ILocomotion.ClearStuckStatus", ILocomotionClearStuckStatus},
 	{"ILocomotion.Ground.get", ILocomotionGroundget},
 	{"ILocomotion.Speed.get", ILocomotionSpeedget},
+	{"ILocomotion.Type.get", ILocomotionTypeget},
 	{"INextBot.INextBot", INextBotget},
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
@@ -14209,6 +14385,8 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.IsDebugging", INextBotIsDebuggingNative},
 	{"INextBot.MakeCustom", INextBotMakeCustom},
 	{"INextBotComponent.Bot.get", INextBotComponentBotget},
+	{"INextBotComponent.UpdateInterval.get", INextBotComponentUpdateIntervalget},
+	{"INextBotComponent.LastUpdateTime.get", INextBotComponentLastUpdateTimeget},
 	{"INextBotComponent.Reset", INextBotComponentBotReset},
 #if SOURCE_ENGINE == SE_TF2
 	{"CTFPathFollower.CTFPathFollower", CTFPathFollowerCTORNative},
@@ -14240,6 +14418,8 @@ sp_nativeinfo_t natives[] =
 	{"NextBotFlyingLocomotion.VerticalDamp.set", NextBotFlyingLocomotionVerticalDampset},
 	{"NextBotFlyingLocomotion.MaxYawRate.get", NextBotFlyingLocomotionMaxYawRateget},
 	{"NextBotFlyingLocomotion.MaxYawRate.set", NextBotFlyingLocomotionMaxYawRateset},
+	{"NextBotFlyingLocomotion.MaxPitchRate.get", NextBotFlyingLocomotionMaxPitchRateget},
+	{"NextBotFlyingLocomotion.MaxPitchRate.set", NextBotFlyingLocomotionMaxPitchRateset},
 
 #if SOURCE_ENGINE == SE_TF2
 	{"NextBotFlyingLocomotion.MaxAcceleration.set", NextBotFlyingLocomotionMaxAccelerationset},

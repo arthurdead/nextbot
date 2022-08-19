@@ -459,6 +459,16 @@ methodmap INextBotComponent < INextBotEventResponder
 	{
 		public native get();
 	}
+
+	property float UpdateInterval
+	{
+		public native get();
+	}
+
+	property float LastUpdateTime
+	{
+		public native get();
+	}
 	
 	public native void Reset();
 };
@@ -469,8 +479,25 @@ enum TraverseWhenType
 	EVENTUALLY
 };
 
+enum LocomotionType
+{
+	Locomotion_None =    0,
+	Locomotion_Any =     (1 << 0),
+	Locomotion_Ground =  (view_as<int>(Locomotion_Any)|(1 << 1)),
+	Locomotion_Flying =  (view_as<int>(Locomotion_Any)|(1 << 2)),
+	Locomotion_Custom =  (1 << 3),
+	Locomotion_AnyCustom = (Locomotion_Any|Locomotion_Custom),
+	Locomotion_FlyingCustom = (Locomotion_Flying|Locomotion_Custom),
+	Locomotion_GroundCustom = (Locomotion_Ground|Locomotion_Custom),
+};
+
 methodmap ILocomotion < INextBotComponent
 {
+	property LocomotionType Type
+	{
+		public native get();
+	}
+
 	property float StepHeight
 	{
 		public native get();
@@ -623,6 +650,8 @@ methodmap ILocomotion < INextBotComponent
 	public native void DriveTo(const float pos[3]);
 };
 
+#define ILocomotion_Null (view_as<ILocomotion>(Address_Null))
+
 methodmap NextBotFlyingLocomotion < ILocomotion
 {
 	property float StepHeight
@@ -710,6 +739,12 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 	//public native void SetVelocity(const float accel[3]);
 
 	property float MaxYawRate
+	{
+		public native get();
+		public native set(float height);
+	}
+
+	property float MaxPitchRate
 	{
 		public native get();
 		public native set(float height);
@@ -868,6 +903,410 @@ methodmap GameLocomotionCustom < GameLocomotion
 #define ZombieBotLocomotionCustom_Null (view<ZombieBotLocomotionCustom>(Address_Null))
 #define GameLocomotionCustom_Null ZombieBotLocomotionCustom_Null
 #endif
+
+methodmap AnyLocomotion < ILocomotion
+{
+#if defined GAME_TF2
+	property float Gravity
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type & Locomotion_Ground) {
+				return view_as<GameLocomotion>(this).Gravity;
+			}
+
+			return 0.0;
+		}
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).Gravity = height;
+			}
+		}
+	}
+
+	property float FrictionForward
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type & Locomotion_Ground) {
+				return view_as<GameLocomotion>(this).FrictionForward;
+			}
+
+			return 0.0;
+		}
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).FrictionForward = height;
+			}
+		}
+	}
+
+	property float FrictionSideways
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type & Locomotion_Ground) {
+				return view_as<GameLocomotion>(this).FrictionSideways;
+			}
+
+			return 0.0;
+		}
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).FrictionSideways = height;
+			}
+		}
+	}
+#endif
+
+	property float MaxYawRate
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type & Locomotion_Ground) {
+				return view_as<GameLocomotion>(this).MaxYawRate;
+			} else if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).MaxYawRate;
+			}
+
+			return 0.0;
+		}
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).MaxYawRate = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).MaxYawRate = height;
+			}
+		}
+	}
+
+	property float MaxPitchRate
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).MaxPitchRate;
+			}
+
+			return 0.0;
+		}
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).MaxPitchRate = height;
+			}
+		}
+	}
+
+	property float StepHeight
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).StepHeight = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).StepHeight = height;
+			}
+		}
+	}
+
+	property float MaxJumpHeight
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).MaxJumpHeight = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).MaxJumpHeight = height;
+			}
+		}
+	}
+
+	property float DeathDropHeight
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).DeathDropHeight = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).DeathDropHeight = height;
+			}
+		}
+	}
+
+	property float RunSpeed
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).RunSpeed = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).RunSpeed = height;
+			}
+		}
+	}
+
+	property float WalkSpeed
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).WalkSpeed = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).WalkSpeed = height;
+			}
+		}
+	}
+
+#if defined GAME_TF2
+	property float MaxAcceleration
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).MaxAcceleration = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).MaxAcceleration = height;
+			}
+		}
+	}
+
+	property float MaxDeceleration
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).MaxDeceleration = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).MaxDeceleration = height;
+			}
+		}
+	}
+#endif
+
+	property float SpeedLimit
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).SpeedLimit = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).SpeedLimit = height;
+			}
+		}
+	}
+
+	property float TraversableSlopeLimit
+	{
+		public set(float height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).TraversableSlopeLimit = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).TraversableSlopeLimit = height;
+			}
+		}
+	}
+
+	public void set_function(const char[] name, nextbot_functions func)
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_GroundCustom) {
+			view_as<GameLocomotionCustom>(this).set_function(name, func);
+		} else if(type == Locomotion_FlyingCustom) {
+			view_as<NextBotFlyingLocomotion>(this).set_function(name, func);
+		}
+	}
+
+	public void set_data(const char[] name, any data)
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_GroundCustom) {
+			view_as<GameLocomotionCustom>(this).set_data(name, data);
+		} else if(type == Locomotion_FlyingCustom) {
+			view_as<NextBotFlyingLocomotion>(this).set_data(name, data);
+		}
+	}
+	public any get_data(const char[] name)
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_GroundCustom) {
+			return view_as<GameLocomotionCustom>(this).get_data(name);
+		} else if(type == Locomotion_FlyingCustom) {
+			return view_as<NextBotFlyingLocomotion>(this).get_data(name);
+		}
+
+		return 0.0;
+	}
+	public bool has_data(const char[] name)
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_GroundCustom) {
+			return view_as<GameLocomotionCustom>(this).has_data(name);
+		} else if(type == Locomotion_FlyingCustom) {
+			return view_as<NextBotFlyingLocomotion>(this).has_data(name);
+		}
+
+		return false;
+	}
+	
+	public void set_data_array(const char[] name, const any[] data, int len)
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_GroundCustom) {
+			view_as<GameLocomotionCustom>(this).set_data_array(name, data, len);
+		} else if(type == Locomotion_FlyingCustom) {
+			view_as<NextBotFlyingLocomotion>(this).set_data_array(name, data, len);
+		}
+	}
+	public void get_data_array(const char[] name, any[] data, int len)
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_GroundCustom) {
+			view_as<GameLocomotionCustom>(this).get_data_array(name, data, len);
+		} else if(type == Locomotion_FlyingCustom) {
+			view_as<NextBotFlyingLocomotion>(this).get_data_array(name, data, len);
+		}
+	}
+
+	property float DesiredAltitude
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).DesiredAltitude;
+			}
+
+			return 0.0;
+		}
+		public set(float altitude)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).DesiredAltitude = altitude;
+			}
+		}
+	}
+
+	property float Acceleration
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).Acceleration;
+			}
+
+			return 0.0;
+		}
+		public set(float accel)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).Acceleration = accel;
+			}
+		}
+	}
+
+	property float HorizontalDamp
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).HorizontalDamp;
+			}
+
+			return 0.0;
+		}
+		public set(float damp)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).HorizontalDamp = damp;
+			}
+		}
+	}
+
+	property float VerticalDamp
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).VerticalDamp;
+			}
+
+			return 0.0;
+		}
+		public set(float damp)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).VerticalDamp = damp;
+			}
+		}
+	}
+};
+
+#define AnyLocomotion_Null (view_as<AnyLocomotion>(Address_Null))
 
 #if defined GAME_TF2
 methodmap CKnownEntity
@@ -1358,11 +1797,11 @@ methodmap INextBot < INextBotEventResponder
 		return false;
 	}
 
-	public native float IsRangeLessThanEntity(int entity, float range);
-	public native float IsRangeLessThanVector(const float vec[3], float range);
+	public native bool IsRangeLessThanEntity(int entity, float range);
+	public native bool IsRangeLessThanVector(const float vec[3], float range);
 
-	public native float IsRangeGreaterThanEntity(int entity, float range);
-	public native float IsRangeGreaterThanVector(const float vec[3], float range);
+	public native bool IsRangeGreaterThanEntity(int entity, float range);
+	public native bool IsRangeGreaterThanVector(const float vec[3], float range);
 
 	public native float GetRangeToEntity(int entity);
 	public native float GetRangeToVector(const float vec[3]);
@@ -1456,6 +1895,14 @@ methodmap INextBot < INextBotEventResponder
 
 	public native GameLocomotionCustom AllocateCustomLocomotion();
 	public native NextBotFlyingLocomotion AllocateFlyingLocomotion();
+	public AnyLocomotion AllocateLocomotion(bool flying)
+	{
+		if(flying) {
+			return view_as<AnyLocomotion>(this.AllocateFlyingLocomotion());
+		} else {
+			return view_as<AnyLocomotion>(this.AllocateCustomLocomotion());
+		}
+	}
 	public native GameVisionCustom AllocateCustomVision();
 	public native IBodyCustom AllocateCustomBody();
 	public native IIntentionCustom AllocateCustomIntention(allocintent_func_t func, const char[] name = "");
