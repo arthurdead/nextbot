@@ -6450,6 +6450,7 @@ enum LocomotionType : unsigned char
 LocomotionType g_nLocomotionType = Locomotion_None;
 
 static bool g_bHackDetectLocomotion = false;
+static LocomotionType g_nHackDetectLocomotion = Locomotion_None;
 
 struct customlocomotion_base_vars_t : IPluginNextBotComponent
 {
@@ -6684,11 +6685,9 @@ public:
 	float HookGetSpeedLimit()
 	{
 		if(g_bHackDetectLocomotion) {
-			g_nLocomotionType = type;
-			RETURN_META_VALUE(MRES_SUPERCEDE, *reinterpret_cast<float *>(&type));
-		} else {
-			RETURN_META_VALUE(MRES_SUPERCEDE, limit);
+			g_nHackDetectLocomotion = type;
 		}
+		RETURN_META_VALUE(MRES_SUPERCEDE, limit);
 	}
 	
 	float HookGetMaxJumpHeight()
@@ -11744,25 +11743,15 @@ cell_t ILocomotionTypeget(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
-	LocomotionType type = Locomotion_Any;
+	g_nHackDetectLocomotion = Locomotion_None;
+	g_bHackDetectLocomotion = true;
+	area->GetSpeedLimit();
+	LocomotionType type = g_nHackDetectLocomotion;
+	g_bHackDetectLocomotion = false;
+	g_nHackDetectLocomotion = Locomotion_None;
 
-	if(dynamic_cast<CNextBotFlyingLocomotion *>(area) != nullptr) {
-		type = Locomotion_FlyingCustom;
-	} else if(dynamic_cast<NextBotGroundLocomotionCustom *>(area) != nullptr) {
-		type = Locomotion_GroundCustom;
-	} else if(dynamic_cast<NextBotGroundLocomotion *>(area) != nullptr) {
-		type = Locomotion_Ground;
-	} else {
-		LocomotionType old_type = g_nLocomotionType;
-		g_bHackDetectLocomotion = true;
-		float hack = area->GetSpeedLimit();
-		g_bHackDetectLocomotion = false;
-		type = *reinterpret_cast<LocomotionType *>(&hack);
-		//type = g_nLocomotionType;
-		g_nLocomotionType = old_type;
-		if(type == Locomotion_None) {
-			type = Locomotion_Any;
-		}
+	if(type == Locomotion_None) {
+		type = Locomotion_Any;
 	}
 
 	return type;
