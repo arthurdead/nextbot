@@ -4397,7 +4397,7 @@ public:
 		SH_REMOVE_MANUALHOOK(CanBeA, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookCanBeA), false);
 		SH_REMOVE_MANUALHOOK(GetClass, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookGetClass), false);
 		SH_REMOVE_MANUALHOOK(Classify, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookClassify), false);
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	static NextBotCombatCharacter *create(size_t size_modifier, int cls)
@@ -5964,7 +5964,7 @@ public:
 		delete m_behavior;
 		m_behavior = nullptr;
 
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	virtual ~IIntentionCustom()
@@ -6138,7 +6138,7 @@ public:
 		
 		getvars().~vars_t();
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	CBaseCombatCharacter *HookGetEntity( void )
@@ -6162,7 +6162,7 @@ public:
 		
 		delete this;
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	INextBot *HookMyNextBotPointer()
@@ -6182,7 +6182,7 @@ public:
 		
 		pEntity->SetMoveType(MOVETYPE_CUSTOM);
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	static INextBotGeneric *create(CBaseEntity *pEntity);
@@ -6678,7 +6678,7 @@ public:
 
 		this->~customlocomotion_base_vars_t();
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 
 	float HookGetSpeedLimit()
@@ -6954,7 +6954,7 @@ public:
 
 			SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
 			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
-			SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), false);
+			SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), true);
 			SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
 			SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
 			SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false);
@@ -6971,7 +6971,7 @@ public:
 
 			SH_REMOVE_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
 			SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
-			SH_REMOVE_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), false);
+			SH_REMOVE_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), true);
 			SH_REMOVE_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
 			SH_REMOVE_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
 			SH_REMOVE_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false);
@@ -7025,10 +7025,6 @@ public:
 
 	void HookApproach(const Vector &goalPos, float goalWeight)
 	{
-		ILocomotion *loc = META_IFACEPTR(ILocomotion);
-
-		SH_CALL(loc, &ILocomotion::Approach)(goalPos, goalWeight);
-
 		Vector flyGoal = goalPos;
 		flyGoal.z += getvars().m_desiredAltitude;
 
@@ -7039,18 +7035,14 @@ public:
 
 		getvars().m_acceleration += getvars().accel * toGoal;
 
-		RETURN_META(MRES_SUPERCEDE);
+		RETURN_META(MRES_HANDLED);
 	}
 
 	void HookReset()
 	{
-		ILocomotion *loc = META_IFACEPTR(ILocomotion);
+		ILocomotion *loc{META_IFACEPTR(ILocomotion)};
 
-	#if 0
-		SH_CALL(loc, &ILocomotion::Reset)();
-	#else
 		loc->ILocomotion::Reset();
-	#endif
 
 		getvars().m_velocity = vec3_origin;
 		getvars().m_acceleration = vec3_origin;
@@ -7900,7 +7892,7 @@ public:
 		
 		this->~customvision_base_vars_t();
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	float HookGetMaxVisionRange() { RETURN_META_VALUE(MRES_SUPERCEDE, maxrange); }
@@ -8795,7 +8787,7 @@ public:
 		m_throttleTimer.Invalidate();
 		m_lifetimeTimer.Invalidate();
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	void ctor(SubjectChaseType chaseHow)
@@ -8814,7 +8806,7 @@ public:
 	
 	void RemoveHooks()
 	{
-		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &ChasePath::HookInvalidate), false);
+		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &ChasePath::HookInvalidate), true);
 	}
 	
 	void dtor()
@@ -8830,7 +8822,7 @@ public:
 		
 		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &ChasePath::dtor), false);
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	Vector PredictSubjectPosition( INextBot *bot, CBaseEntity *subject )
@@ -9153,7 +9145,7 @@ public:
 		new (bytes->vars_ptr()) vars_t();
 		bytes->ctor(chaseHow);
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &ChasePath::dtor), false);
-		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &ChasePath::HookInvalidate), false);
+		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &ChasePath::HookInvalidate), true);
 		bytes->getvars().pIsRepathNeeded = &ChasePath::IsRepathNeeded;
 		bytes->getvars().pUpdate = &ChasePath::Update;
 		bytes->getvars().pRemoveHooks = &ChasePath::RemoveHooks;
@@ -9741,7 +9733,7 @@ public:
 		m_throttleTimer.Invalidate();
 		m_pathThreat = NULL;
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	void dtor()
@@ -9749,9 +9741,9 @@ public:
 		getvars().~vars_t();
 		
 		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &RetreatPath::dtor), false);
-		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &RetreatPath::HookInvalidate), false);
+		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &RetreatPath::HookInvalidate), true);
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	void Update( INextBot *bot, CBaseEntity *threat )
@@ -9857,7 +9849,7 @@ public:
 		call_mfunc<void>(bytes, PathFollowerCTOR);
 		new (bytes->vars_ptr()) vars_t();
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &RetreatPath::dtor), false);
-		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), false);
+		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), true);
 		return bytes;
 	}
 };
@@ -10893,7 +10885,7 @@ struct pointer_holder_t
 	{
 		INextBot *bot = META_IFACEPTR(INextBot);
 		dtor(bot);
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	ILocomotion *HookGetLocomotionInterface()
@@ -13490,7 +13482,7 @@ public:
 		
 		delete this;
 		
-		RETURN_META(MRES_IGNORED);
+		RETURN_META(MRES_HANDLED);
 	}
 	
 	~INextBotCustom()
