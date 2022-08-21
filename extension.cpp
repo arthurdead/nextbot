@@ -1441,6 +1441,13 @@ public:
 		}
 	}
 
+	void RestartSequence()
+	{
+		SetAnimTime(gpGlobals->curtime);
+		SetCycle(0.0f);
+		SetSequeceFinished(false);
+	}
+
 	float GetGroundSpeed()
 	{
 		if(m_flGroundSpeedOffset == -1) {
@@ -7642,7 +7649,7 @@ public:
 						bot->OnAnimationActivityComplete(current_act[1].act);
 					}
 
-					pEntity->SetSequeceFinished(false);
+					pEntity->RestartSequence();
 				}
 			}
 
@@ -7698,36 +7705,38 @@ public:
 						bot->OnAnimationActivityComplete(current_act[0].act);
 					}
 
-					pEntity->SetSequeceFinished(false);
+					pEntity->RestartSequence();
 				}
 			}
 		}
 
 		ILocomotion *locomotion = bot->GetLocomotionInterface();
 
-		float anim_speed = pEntity->GetGroundSpeed();
-		if(anim_speed < 0.1f) {
-			if(IsActivity(ACT_RUN) || IsActivity(ACT_WALK)) {
-				if(locomotion->IsRunning()) {
-					auto it{data.find("run_anim_speed"s)};
-					if(it != data.cend()) {
-						anim_speed = sp_ctof(it->second[0]);
-					}
-				} else {
-					auto it{data.find("walk_anim_speed"s)};
-					if(it != data.cend()) {
-						anim_speed = sp_ctof(it->second[0]);
+		float playback_rate = 1.0f;
+
+		if(locomotion->IsOnGround()) {
+			float anim_speed = pEntity->GetGroundSpeed();
+			if(anim_speed < 0.1f) {
+				if(IsActivity(ACT_RUN) || IsActivity(ACT_WALK)) {
+					if(locomotion->IsRunning()) {
+						auto it{data.find("run_anim_speed"s)};
+						if(it != data.cend()) {
+							anim_speed = sp_ctof(it->second[0]);
+						}
+					} else {
+						auto it{data.find("walk_anim_speed"s)};
+						if(it != data.cend()) {
+							anim_speed = sp_ctof(it->second[0]);
+						}
 					}
 				}
 			}
-		}
 
-		float ground_speed = locomotion->GetGroundSpeed();
+			float ground_speed = locomotion->GetGroundSpeed();
 
-		float playback_rate = 1.0f;
-
-		if(ground_speed > 0.1f && anim_speed > 0.1f) {
-			playback_rate = (ground_speed / anim_speed);
+			if(ground_speed > 0.1f && anim_speed > 0.1f) {
+				playback_rate = (ground_speed / anim_speed);
+			}
 		}
 
 		if(playback_rate > 2.0f) {
