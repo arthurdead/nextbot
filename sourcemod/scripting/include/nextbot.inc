@@ -1637,7 +1637,7 @@ methodmap IBodyCustom < IBody
 		public native set(float height);
 	}
 
-	property float HullHeight
+	property float LieHullHeight
 	{
 		public native set(float height);
 	}
@@ -2210,7 +2210,17 @@ methodmap ChasePath < PathFollower
 {
 	public native ChasePath(SubjectChaseType chaseHow);
 
-	public native void Update(INextBot bot, int entity, pathcompute_func_t functor, any data = 0, float predictedpos[3] = NULL_VECTOR);
+	property float LeadRadius
+	{
+		public native get();
+		public native set(float height);
+	}
+
+	public native bool IsRepathNeeded(INextBot bot, int entity);
+
+	public native void PredictSubjectPosition(INextBot bot, int entity, float predictedpos[3]);
+
+	public native void Update(INextBot bot, int entity, pathcompute_func_t functor, any data = 0, const float predictedpos[3] = NULL_VECTOR);
 };
 
 methodmap DirectChasePath < ChasePath

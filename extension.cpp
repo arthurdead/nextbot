@@ -6394,6 +6394,7 @@ SH_DECL_HOOK0(ILocomotion, GetGroundNormal, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, GetVelocity, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK1_void(ILocomotion, FaceTowards, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, GetFeet, SH_NOATTRIB, 0, const Vector &);
+SH_DECL_HOOK0(ILocomotion, IsOnGround, SH_NOATTRIB, 0, bool);
 
 SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
@@ -6916,6 +6917,8 @@ ConVar tf_bot_npc_minion_avoid_force( "tf_bot_npc_minion_avoid_force", "100" );
 ConVar tf_bot_npc_minion_deflect_range( "tf_bot_npc_minion_deflect_range", "300" );
 ConVar tf_bot_npc_minion_deflect_force( "tf_bot_npc_minion_deflect_force", "2000" );
 
+ConVar tf_bot_npc_minion_init_vel( "tf_bot_npc_minion_init_vel", "250" );
+
 class CNextBotFlyingLocomotion : public ILocomotion
 {
 public:
@@ -6939,6 +6942,7 @@ public:
 			SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false);
 			SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
+			SH_ADD_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
 		}
 
 		virtual void remove_hooks(ILocomotion *bytes) override
@@ -6956,6 +6960,7 @@ public:
 			SH_REMOVE_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false);
 			SH_REMOVE_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_REMOVE_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
+			SH_REMOVE_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
 		}
 
 		void HookSetDesiredSpeed(float speed)
@@ -6979,6 +6984,11 @@ public:
 		const Vector &HookGetVelocity( void )
 		{
 			RETURN_META_VALUE(MRES_SUPERCEDE, m_velocity);
+		}
+
+		bool HookIsOnGround()
+		{
+			RETURN_META_VALUE(MRES_SUPERCEDE, true);
 		}
 
 		float m_desiredSpeed = 0.0f;
@@ -7016,6 +7026,11 @@ public:
 		RETURN_META(MRES_HANDLED);
 	}
 
+	void SetVelocity( const Vector &velocity )
+	{
+		getvars().m_velocity = velocity;
+	}
+
 	void HookReset()
 	{
 		ILocomotion *loc{META_IFACEPTR(ILocomotion)};
@@ -7030,6 +7045,20 @@ public:
 		getvars().m_desiredAltitude = 50.0f;
 
 		RETURN_META(MRES_SUPERCEDE);
+	}
+
+	void InitVelocity()
+	{
+		Vector initVelocity;
+
+		float s, c;
+		SinCos( RandomFloat( -M_PI, M_PI ), &s, &c );
+
+		initVelocity.x = c * tf_bot_npc_minion_init_vel.GetFloat();
+		initVelocity.y = s * tf_bot_npc_minion_init_vel.GetFloat();
+		initVelocity.z = 0.0f;
+
+		SetVelocity( initVelocity );
 	}
 
 	void MaintainAltitude( void )
@@ -7421,8 +7450,6 @@ public:
 	IBodyCustom( INextBot *bot, bool reg, IdentityToken_t *id )
 		: IBody( bot, reg ), IPluginNextBotComponent(id)
 	{
-		HullWidth = 26.0f;
-		HullHeight = 68.0f;
 	}
 
 	IPluginFunction *selectseq = nullptr;
@@ -7778,29 +7805,59 @@ public:
 
 	virtual const char *GetDebugString() const { return "IBodyCustom"; }
 	
-	void SetHullWidth(float height)
-	{
-		HullWidth = height;
-	}
-	
-	void SetHullHeight(float height)
-	{
-		HullHeight = height;
-	}
-	
-	float HullWidth;
-	float HullHeight;
+	float HullWidth = 26.0f;
+
+	float LieHullHeight = 16.0f;
 	float StandHullHeight = 68.0f;
 	float CrouchHullHeight = 32.0f;
+
 	int SolidMask = MASK_NPCSOLID;
 #if SOURCE_ENGINE == SE_TF2
 	int CollisionGroup = COLLISION_GROUP_NPC;
 #endif
 	
 	float GetHullWidth( void ) override { return HullWidth; }							// width of bot's collision hull in XY plane
-	float GetHullHeight( void ) override { return HullHeight; }							// height of bot's current collision hull based on posture
 	float GetStandHullHeight( void ) override { return StandHullHeight; }						// height of bot's collision hull when standing
 	float GetCrouchHullHeight( void ) override { return CrouchHullHeight; }					// height of bot's collision hull when crouched
+
+	float GetHullHeight( void ) override
+	{
+		switch( GetActualPosture() )
+		{
+		case LIE:
+			return LieHullHeight;
+
+		case SIT:
+		case CROUCH:
+			return GetCrouchHullHeight();
+
+		case STAND:
+		default:
+			return GetStandHullHeight();
+		}
+	}
+
+	const Vector &GetHullMins( void ) override
+	{
+		static Vector hullMins;
+
+		hullMins.x = -GetHullWidth()/2.0f;
+		hullMins.y = hullMins.x;
+		hullMins.z = 0.0f;
+
+		return hullMins;
+	}
+
+	const Vector &GetHullMaxs( void ) override
+	{
+		static Vector hullMaxs;
+
+		hullMaxs.x = GetHullWidth()/2.0f;
+		hullMaxs.y = hullMaxs.x;
+		hullMaxs.z = GetHullHeight();
+
+		return hullMaxs;
+	}
 
 	unsigned int GetSolidMask( void ) override { return SolidMask; }					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
 #if SOURCE_ENGINE == SE_TF2
@@ -9701,6 +9758,9 @@ public:
 	struct vars_t
 	{
 		float maxlen = 1000.0f;
+		float tolerancerate = 0.33f;
+		float mintolerance = 0.0f;
+		float repathtime = 0.5f;
 	};
 	
 	unsigned char *vars_ptr()
@@ -9776,8 +9836,8 @@ public:
 		// the closer we get, the more accurate our path needs to be
 		Vector to = threat->GetAbsOrigin() - bot->GetPosition();
 		
-		const float minTolerance = 0.0f;
-		const float toleranceRate = 0.33f;
+		const float minTolerance = getvars().mintolerance;
+		const float toleranceRate = getvars().tolerancerate;
 		
 		float tolerance = minTolerance + toleranceRate * to.Length();
 
@@ -9813,7 +9873,7 @@ public:
 				BuildTrivialPath( bot, bot->GetPosition() - to );
 			}
 				
-			const float minRepathInterval = 0.5f;
+			const float minRepathInterval = getvars().repathtime;
 			m_throttleTimer.Start( minRepathInterval );
 		}
 	}
@@ -10046,12 +10106,63 @@ cell_t ChasePathPredictSubjectPosition(IPluginContext *pContext, const cell_t *p
 	Vector PredictedSubjectPos = obj->PredictSubjectPosition(bot, pSubject);
 
 	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[3], &addr);
+	pContext->LocalToPhysAddr(params[4], &addr);
 	addr[0] = sp_ftoc(PredictedSubjectPos.x);
 	addr[1] = sp_ftoc(PredictedSubjectPos.y);
 	addr[2] = sp_ftoc(PredictedSubjectPos.z);
 	
 	return 0;
+}
+
+cell_t ChasePathIsRepathNeeded(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ChasePath *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], ChasePathHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+	
+	INextBot *bot = (INextBot *)params[2];
+
+	return (obj->*(obj->getvars().pIsRepathNeeded))( bot, pSubject );
+}
+
+cell_t ChasePathLeadRadiusset(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ChasePath *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], ChasePathHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	obj->getvars().radius = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t ChasePathLeadRadiusget(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ChasePath *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], ChasePathHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	return sp_ftoc(obj->getvars().radius);
 }
 
 cell_t RetreatPathUpdateNative(IPluginContext *pContext, const cell_t *params)
@@ -12662,14 +12773,7 @@ cell_t GameVisionCustomDefaultFieldOfViewset(IPluginContext *pContext, const cel
 cell_t IBodyCustomHullWidthset(IPluginContext *pContext, const cell_t *params)
 {
 	IBodyCustom *locomotion = (IBodyCustom *)params[1];
-	locomotion->SetHullWidth(sp_ctof(params[2]));
-	return 0;
-}
-
-cell_t IBodyCustomHullHeightset(IPluginContext *pContext, const cell_t *params)
-{
-	IBodyCustom *locomotion = (IBodyCustom *)params[1];
-	locomotion->SetHullHeight(sp_ctof(params[2]));
+	locomotion->HullWidth = sp_ctof(params[2]);
 	return 0;
 }
 
@@ -12684,6 +12788,13 @@ cell_t IBodyCustomCrouchHullHeightset(IPluginContext *pContext, const cell_t *pa
 {
 	IBodyCustom *locomotion = (IBodyCustom *)params[1];
 	locomotion->CrouchHullHeight = sp_ctof(params[2]);
+	return 0;
+}
+
+cell_t IBodyCustomLieHullHeightset(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *locomotion = (IBodyCustom *)params[1];
+	locomotion->LieHullHeight = sp_ctof(params[2]);
 	return 0;
 }
 
@@ -14209,6 +14320,9 @@ sp_nativeinfo_t natives[] =
 	{"PathFollower.Update", PathFollowerUpdateNative},
 	{"ChasePath.Update", ChasePathUpdateNative},
 	{"ChasePath.PredictSubjectPosition", ChasePathPredictSubjectPosition},
+	{"ChasePath.IsRepathNeeded", ChasePathIsRepathNeeded},
+	{"ChasePath.LeadRadius.set", ChasePathLeadRadiusset},
+	{"ChasePath.LeadRadius.get", ChasePathLeadRadiusget},
 	{"RetreatPath.Update", RetreatPathUpdateNative},
 	{"PathFollower.MinLookAheadDistance.get", PathFollowerMinLookAheadDistanceget},
 	{"PathFollower.MinLookAheadDistance.set", PathFollowerMinLookAheadDistanceset},
@@ -14540,9 +14654,9 @@ sp_nativeinfo_t natives[] =
 	{"IBody.Arousal.get", IBodyArousalget},
 	{"IBody.IsArousal", IBodyIsArousal},
 	{"IBodyCustom.HullWidth.set", IBodyCustomHullWidthset},
-	{"IBodyCustom.HullHeight.set", IBodyCustomHullHeightset},
 	{"IBodyCustom.StandHullHeight.set", IBodyCustomStandHullHeightset},
 	{"IBodyCustom.CrouchHullHeight.set", IBodyCustomCrouchHullHeightset},
+	{"IBodyCustom.LieHullHeight.set", IBodyCustomLieHullHeightset},
 	{"IBodyCustom.SolidMask.set", IBodyCustomSolidMaskset},
 #if SOURCE_ENGINE == SE_TF2
 	{"IBodyCustom.CollisionGroup.set", IBodyCustomCollisionGroupset},
