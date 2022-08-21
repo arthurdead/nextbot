@@ -7663,21 +7663,21 @@ public:
 
 			if(current_act[1].seq != -1) {
 				pEntity->ResetSequence(current_act[1].seq);
+			}
 
-				if(pEntity->GetSequeceFinished()) {
-					current_act[1].seq = -1;
+			if(pEntity->GetSequeceFinished()) {
+				current_act[1].seq = -1;
 
-					if(current_act[1].act != ACT_INVALID) {
-						if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-							//TODO!!!! activity name
-							DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[1].act, "");
-						}
-
-						bot->OnAnimationActivityComplete(current_act[1].act);
+				if(current_act[1].act != ACT_INVALID) {
+					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+						//TODO!!!! activity name
+						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[1].act, "");
 					}
 
-					pEntity->RestartSequence();
+					bot->OnAnimationActivityComplete(current_act[1].act);
 				}
+
+				pEntity->RestartSequence();
 			}
 
 			if(current_act[1].seq == -1) {
@@ -7719,21 +7719,25 @@ public:
 
 			if(current_act[0].seq != -1) {
 				pEntity->ResetSequence(current_act[0].seq);
+			}
 
-				if(pEntity->GetSequeceFinished()) {
-					if(current_act[0].act != ACT_INVALID) {
-						current_act[0].seq = SelectAnimationSequence(current_act[0].act);
+			if(pEntity->GetSequeceFinished()) {
+				if(current_act[0].act != ACT_INVALID) {
+					current_act[0].seq = SelectAnimationSequence(current_act[0].act);
 
-						if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-							//TODO!!!! activity name
-							DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[0].act, "");
-						}
-
-						bot->OnAnimationActivityComplete(current_act[0].act);
+					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+						//TODO!!!! activity name
+						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[0].act, "");
 					}
 
-					pEntity->RestartSequence();
+					bot->OnAnimationActivityComplete(current_act[0].act);
 				}
+
+				if(current_act[0].seq != -1) {
+					pEntity->SetSequence(current_act[0].seq);
+				}
+
+				pEntity->RestartSequence();
 			}
 		}
 

@@ -215,6 +215,17 @@ native void CombatCharacterEventKilled(int entity, const CTakeDamageInfoVar info
 native int CombatCharacterHullAttackRange(int entity, float flDist, const float mins[3], const float maxs[3], int iDamage, int iDmgType, float forceScale = 1.0, bool bDamageAnyNPC = false);
 native int CombatCharacterHullAttackEndPoint(int entity, const float vStart[3], const float vEnd[3], const float mins[3], const float maxs[3], int iDamage, int iDmgType, float flForceScale = 1.0, bool bDamageAnyNPC = false);
 
+enum Disposition_t 
+{
+	D_ER,		// Undefined - error
+	D_HT,		// Hate
+	D_FR,		// Fear
+	D_LI,		// Like
+	D_NU		// Neutral
+};
+
+//native Disposition_t CombatCharacterDisposition(int entity, int target);
+
 enum NavAttributeType
 {
 	NAV_MESH_INVALID		= 0,

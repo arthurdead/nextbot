@@ -545,6 +545,10 @@
 			{
 				"linux" "303"
 			}
+			"CBaseCombatCharacter::IRelationType"
+			{
+				"linux" "305"
+			}
 		}
 		"Signatures"
 		{
