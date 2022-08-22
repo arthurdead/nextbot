@@ -549,6 +549,22 @@
 			{
 				"linux" "305"
 			}
+			"CBaseCombatCharacter::OnPursuedBy"
+			{
+				"linux" "326"
+			}
+			"CBaseCombatCharacter::ClearLastKnownArea"
+			{
+				"linux" "322"
+			}
+			"CBaseCombatCharacter::OnNavAreaChanged"
+			{
+				"linux" "324"
+			}
+			"CBaseEntity::Deflected"
+			{
+				"linux" "157"
+			}
 		}
 		"Signatures"
 		{

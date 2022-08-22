@@ -284,6 +284,9 @@ int CBaseCombatCharacterFInAimConeEnt = -1;
 int CBaseCombatCharacterCheckTraceHullAttackRange = -1;
 int CBaseCombatCharacterCheckTraceHullAttackEndPoint = -1;
 
+int CBaseCombatCharacterIRelationType = -1;
+int CBaseCombatCharacterOnPursuedBy = -1;
+
 void *CBaseCombatCharacterIsAbleToSeeEnt = nullptr;
 void *CBaseCombatCharacterIsAbleToSeeCC = nullptr;
 
@@ -544,6 +547,8 @@ float UTIL_VecToPitch( const Vector &vec )
 
 	return pitch;
 }
+
+int m_lifeStateOffset = -1;
 
 class CBaseEntity : public IServerEntity
 {
@@ -1231,6 +1236,18 @@ public:
 		return call_vfunc<bool, CBaseEntity, const Vector &, int, CBaseEntity **>(this, CBaseEntityFVisibleVec, vecTarget, traceMask, ppBlocker);
 	}
 
+	bool IsAlive()
+	{
+		if(m_lifeStateOffset == -1) {
+			datamap_t *map = gamehelpers->GetDataMap(this);
+			sm_datatable_info_t info{};
+			gamehelpers->FindDataMapInfo(map, "m_lifeState", &info);
+			m_lifeStateOffset = info.actual_offset;
+		}
+
+		return *(char *)(((unsigned char *)this) + m_lifeStateOffset) == LIFE_ALIVE;
+	}
+
 	//GARBAGE
 	int GetHealth() { return 0; }
 	int m_takedamage;
@@ -1494,6 +1511,52 @@ enum FieldOfViewCheckType { USE_FOV, DISREGARD_FOV };
 
 #define BCC_DEFAULT_LOOK_TOWARDS_TOLERANCE 0.9f
 
+int CBaseCombatCharacterIsAreaTraversable = -1;
+int CBaseCombatCharacterClearLastKnownArea = -1;
+int CBaseCombatCharacterOnNavAreaChanged = -1;
+
+int m_lastNavAreaOffset = -1;
+int m_registeredNavTeamOffset = -1;
+int m_NavAreaUpdateMonitorOffset = -1;
+
+ConVar *nb_last_area_update_tolerance = nullptr;
+
+struct CAI_MoveMonitor
+{
+	bool IsMarkSet()
+	{
+		return ( m_flMarkTolerance != NO_MARK );
+	}
+
+	bool TargetMoved( CBaseEntity *pEntity )
+	{
+		if ( IsMarkSet() && pEntity != NULL )
+		{
+			float distance = ( m_vMark - pEntity->GetAbsOrigin() ).Length();
+			if ( distance > m_flMarkTolerance )
+				return true;
+		}
+		return false;
+	}
+
+	void SetMark( CBaseEntity *pEntity, float tolerance )
+	{
+		if ( pEntity )
+		{
+			m_vMark = pEntity->GetAbsOrigin();
+			m_flMarkTolerance = tolerance;
+		}
+	}
+
+	enum
+	{
+		NO_MARK = -1
+	};
+
+	Vector m_vMark;
+	float m_flMarkTolerance;
+};
+
 class CBaseCombatCharacter : public CBaseAnimating
 {
 public:
@@ -1506,8 +1569,6 @@ public:
 	{
 		call_vfunc<void>(this, CBaseCombatCharacterUpdateLastKnownArea);
 	}
-	
-	void OnNavAreaRemoved(CNavArea *) {}
 	
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	bool CanBeA(int cls)
@@ -1654,6 +1715,59 @@ public:
 	{
 		return call_vfunc<CBaseEntity *, CBaseCombatCharacter, const Vector &, const Vector &, const Vector &, const Vector &, int, int, float, bool>(this, CBaseCombatCharacterCheckTraceHullAttackEndPoint, vStart, vEnd, mins, maxs, iDamage, iDmgType, flForceScale, bDamageAnyNPC);
 	}
+
+	void OnPursuedBy( INextBot *pPursuer )
+	{
+		call_vfunc<void, CBaseCombatCharacter, INextBot *>(this, CBaseCombatCharacterOnPursuedBy, pPursuer);
+	}
+
+	Disposition_t IRelationType(CBaseEntity *pTarget)
+	{
+		return call_vfunc<Disposition_t, CBaseCombatCharacter, CBaseEntity *>(this, CBaseCombatCharacterIRelationType, pTarget);
+	}
+
+	bool IsAreaTraversable( CNavArea *area )
+	{
+		return call_vfunc<bool, CBaseCombatCharacter, CNavArea *>(this, CBaseCombatCharacterIsAreaTraversable, area);
+	}
+
+	void ClearLastKnownArea( void )
+	{
+		call_vfunc<void, CBaseCombatCharacter>(this, CBaseCombatCharacterClearLastKnownArea);
+	}
+
+	void OnNavAreaChanged( CNavArea *enteredArea, CNavArea *leftArea )
+	{
+		call_vfunc<void, CBaseCombatCharacter>(this, CBaseCombatCharacterOnNavAreaChanged, enteredArea, leftArea);
+	}
+
+	CNavArea *GetLastNavArea()
+	{
+		return *(CNavArea **)((unsigned char *)this + m_lastNavAreaOffset);
+	}
+
+	void SetLastNavArea(CNavArea *area)
+	{
+		*(CNavArea **)((unsigned char *)this + m_lastNavAreaOffset) = area;
+	}
+
+	int GetRegisteredNavTeam()
+	{
+		return *(int *)((unsigned char *)this + m_registeredNavTeamOffset);
+	}
+
+	void SetRegisteredNavTeam(int team)
+	{
+		*(int *)((unsigned char *)this + m_registeredNavTeamOffset) = team;
+	}
+
+	CAI_MoveMonitor &GetNavAreaUpdateMonitor()
+	{
+		return *(CAI_MoveMonitor *)((unsigned char *)this + m_NavAreaUpdateMonitorOffset);
+	}
+
+	//GARBAGE
+	void OnNavAreaRemoved(CNavArea *){}
 };
 
 class CBasePlayer : public CBaseCombatCharacter
@@ -3931,7 +4045,7 @@ public:
 	 * different PathFollowers used in the various behaviors the bot may be doing.
 	 */
 #if SOURCE_ENGINE == SE_TF2
-	virtual const PathFollower *GetCurrentPath( void ) const = 0;
+	virtual PathFollower *GetCurrentPath( void ) = 0;
 	virtual void SetCurrentPath( const PathFollower *path ) = 0;
 	virtual void NotifyPathDestruction( const PathFollower *path ) = 0;		// this PathFollower is going away, which may or may not be ours
 #endif
@@ -4129,6 +4243,7 @@ ConVar *r_visualizetraces = nullptr;
 
 SH_DECL_MANUALHOOK0_void(GenericDtor, 1, 0, 0);
 SH_DECL_MANUALHOOK0_void(UpdateOnRemove, 0, 0, 0);
+SH_DECL_MANUALHOOK0_void(UpdateLastKnownArea, 0, 0, 0);
 
 class NextBotCombatCharacter : public CBaseCombatCharacter
 {
@@ -6911,13 +7026,25 @@ public:
 	}
 };
 
-ConVar tf_bot_npc_minion_avoid_range( "tf_bot_npc_minion_avoid_range", "100" );
-ConVar tf_bot_npc_minion_avoid_force( "tf_bot_npc_minion_avoid_force", "100" );
+ConVar tf_npc_flying_avoid_range( "tf_npc_flying_avoid_range", "100" );
+ConVar tf_npc_flying_avoid_force( "tf_npc_flying_avoid_force", "100" );
 
-ConVar tf_bot_npc_minion_deflect_range( "tf_bot_npc_minion_deflect_range", "300" );
-ConVar tf_bot_npc_minion_deflect_force( "tf_bot_npc_minion_deflect_force", "2000" );
+ConVar tf_npc_flying_deflect_range( "tf_npc_flying_deflect_range", "300" );
+ConVar tf_npc_flying_deflect_force( "tf_npc_flying_deflect_force", "2000" );
 
-ConVar tf_bot_npc_minion_init_vel( "tf_bot_npc_minion_init_vel", "250" );
+ConVar tf_npc_flying_init_vel( "tf_npc_flying_init_vel", "250" );
+
+ConVar tf_npc_flying_algo( "tf_npc_flying_algo", "0" );
+ConVar tf_npc_flying_loc_onground( "tf_npc_flying_loc_onground", "1" );
+
+static bool g_bFlyingLocomotionIgnorePitch{false};
+
+CBaseEntity *FindEntityByClassname( CBaseEntity *pStartEntity, const char *szName )
+{
+	return servertools->FindEntityByClassname( pStartEntity, szName );
+}
+
+SH_DECL_MANUALHOOK2_void(Deflected, 0, 0, 0, CBaseEntity *, Vector &);
 
 class CNextBotFlyingLocomotion : public ILocomotion
 {
@@ -6943,6 +7070,16 @@ public:
 			SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
 			SH_ADD_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
+
+			CBaseEntity *pEntity = bytes->GetBot()->GetEntity();
+
+			CBaseCombatCharacter *pCC = pEntity->MyCombatCharacterPointer();
+			if(pCC) {
+				SH_ADD_MANUALHOOK(UpdateLastKnownArea, pCC, SH_MEMBER(this, &vars_t::HookUpdateLastKnownArea), false);
+			}
+
+			SH_ADD_MANUALHOOK(Deflected, pEntity, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookDeflected), false);
+			SH_ADD_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &vars_t::HookUpdateOnRemove), false);
 		}
 
 		virtual void remove_hooks(ILocomotion *bytes) override
@@ -6961,6 +7098,24 @@ public:
 			SH_REMOVE_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_REMOVE_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
 			SH_REMOVE_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
+		}
+
+		void HookUpdateOnRemove()
+		{
+			CBaseEntity *pThis = META_IFACEPTR(CBaseEntity);
+
+			CBaseCombatCharacter *pCC = pThis->MyCombatCharacterPointer();
+			if(pCC) {
+				SH_REMOVE_MANUALHOOK(UpdateLastKnownArea, pCC, SH_MEMBER(this, &vars_t::HookUpdateLastKnownArea), false);
+			}
+
+			INextBot *bot = pThis->MyNextBotPointer();
+			ILocomotion *loc = bot->GetLocomotionInterface();
+
+			SH_REMOVE_MANUALHOOK(Deflected, pThis, SH_MEMBER((CNextBotFlyingLocomotion *)loc, &CNextBotFlyingLocomotion::HookDeflected), false);
+			SH_REMOVE_MANUALHOOK(UpdateOnRemove, pThis, SH_MEMBER(this, &vars_t::HookUpdateOnRemove), false);
+
+			RETURN_META(MRES_HANDLED);
 		}
 
 		void HookSetDesiredSpeed(float speed)
@@ -6988,7 +7143,61 @@ public:
 
 		bool HookIsOnGround()
 		{
-			RETURN_META_VALUE(MRES_SUPERCEDE, true);
+			RETURN_META_VALUE(MRES_SUPERCEDE, tf_npc_flying_loc_onground.GetBool());
+		}
+
+		void HookUpdateLastKnownArea()
+		{
+			CBaseCombatCharacter *pThis = META_IFACEPTR(CBaseCombatCharacter);
+
+			if ( TheNavMesh->IsGenerating() )
+			{
+				pThis->ClearLastKnownArea();
+				return;
+			}
+
+		#if 1
+			if ( nb_last_area_update_tolerance->GetFloat() > 0.0f )
+			{
+				// skip this test if we're not standing on the world (ie: elevators that move us)
+				if ( pThis->GetGroundEntity() == NULL || pThis->GetGroundEntity()->IsWorld() )
+				{
+					if ( pThis->GetLastNavArea() && pThis->GetNavAreaUpdateMonitor().IsMarkSet() && !pThis->GetNavAreaUpdateMonitor().TargetMoved( pThis ) )
+						return;
+
+					pThis->GetNavAreaUpdateMonitor().SetMark( pThis, nb_last_area_update_tolerance->GetFloat() );
+				}
+			}
+		#endif
+
+			// find the area we are directly standing in
+			CNavArea *area = TheNavMesh->GetNearestNavArea( pThis, GETNAVAREA_CHECK_LOS, 500.0f );
+			if ( !area )
+				return;
+
+			// make sure we can actually use this area - if not, consider ourselves off the mesh
+			if ( !pThis->IsAreaTraversable( area ) )
+				return;
+
+			if ( area != pThis->GetLastNavArea() )
+			{
+				// player entered a new nav area
+				if ( pThis->GetLastNavArea() )
+				{
+					pThis->GetLastNavArea()->DecrementPlayerCount( pThis->GetRegisteredNavTeam(), pThis->entindex() );
+					pThis->GetLastNavArea()->OnExit( pThis, area );
+				}
+
+				pThis->SetRegisteredNavTeam( pThis->GetTeamNumber() );
+				area->IncrementPlayerCount( pThis->GetRegisteredNavTeam(), pThis->entindex() );
+				area->OnEnter( pThis, pThis->GetLastNavArea() );
+
+				pThis->OnNavAreaChanged( area, pThis->GetLastNavArea() );
+
+				pThis->SetLastNavArea( area );
+			}
+
+			RETURN_META(MRES_SUPERCEDE);
 		}
 
 		float m_desiredSpeed = 0.0f;
@@ -7054,21 +7263,111 @@ public:
 		float s, c;
 		SinCos( RandomFloat( -M_PI, M_PI ), &s, &c );
 
-		initVelocity.x = c * tf_bot_npc_minion_init_vel.GetFloat();
-		initVelocity.y = s * tf_bot_npc_minion_init_vel.GetFloat();
+		initVelocity.x = c * tf_npc_flying_init_vel.GetFloat();
+		initVelocity.y = s * tf_npc_flying_init_vel.GetFloat();
 		initVelocity.z = 0.0f;
 
 		SetVelocity( initVelocity );
 	}
 
-	void MaintainAltitude( void )
+	float GetDesiredAltitude()
+	{
+		return getvars().m_desiredAltitude;
+	}
+
+	float GetDesiredAcceleration()
+	{
+		return getvars().accel;
+	}
+
+	void MaintainAltitude_eyeball_low_float( void )
+	{
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+
+		trace_t result;
+		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
+		filter.AddClassnameToIgnore( me->GetClassname() );
+
+		UTIL_TraceLine( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, -2000.0f ), MASK_PLAYERSOLID_BRUSHONLY, &filter, &result );
+
+		float groundZ = result.endpos.z;
+
+		float currentAltitude = me->GetAbsOrigin().z - groundZ;
+
+		float desiredAltitude = GetDesiredAltitude();
+
+		float error = desiredAltitude - currentAltitude;
+
+		float accelZ = clamp( error, -GetDesiredAcceleration(), GetDesiredAcceleration() );
+
+		getvars().m_acceleration.z += accelZ;
+	}
+
+	void MaintainAltitude_eyeball_high_float( void )
+	{
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+
+		if ( !me->IsAlive() )
+		{
+			getvars().m_acceleration.x = 0.0f;
+			getvars().m_acceleration.y = 0.0f;
+			getvars().m_acceleration.z = -300.0f;
+
+			return;
+		}
+
+		trace_t result;
+		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
+		filter.AddClassnameToIgnore( me->GetClassname() );
+
+		// find ceiling
+		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, 1000.0f ), 
+				   me->WorldAlignMins(), me->WorldAlignMaxs(), 
+				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
+
+		float ceiling = result.endpos.z - me->GetAbsOrigin().z;
+
+		Vector aheadXY;
+		
+		if ( IsAttemptingToMove() )
+		{
+			aheadXY.x = getvars().m_forward.x;
+			aheadXY.y = getvars().m_forward.y;
+			aheadXY.z = 0.0f;
+			aheadXY.NormalizeInPlace();
+		}
+		else
+		{
+			aheadXY = vec3_origin;
+		}
+
+		TraceHull( me->GetAbsOrigin() + Vector( 0, 0, ceiling ) + aheadXY * 50.0f,
+				   me->GetAbsOrigin() + Vector( 0, 0, -2000.0f ) + aheadXY * 50.0f,
+				   Vector( 1.25f * me->WorldAlignMins().x, 1.25f * me->WorldAlignMins().y, me->WorldAlignMins().z ), 
+				   Vector( 1.25f * me->WorldAlignMaxs().x, 1.25f * me->WorldAlignMaxs().y, me->WorldAlignMaxs().z ), 
+				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
+
+		float groundZ = result.endpos.z;
+
+		float currentAltitude = me->GetAbsOrigin().z - groundZ;
+
+		float desiredAltitude = GetDesiredAltitude();
+
+		float error = desiredAltitude - currentAltitude;
+
+		float accelZ = clamp( error, -GetDesiredAcceleration(), GetDesiredAcceleration() );
+
+		getvars().m_acceleration.z += accelZ;
+	}
+
+	void MaintainAltitude_minion( void )
 	{
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 
 		trace_t result;
 		//CTraceFilterSimple filter( me, COLLISION_GROUP_NONE );
 		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
-		filter.AddClassnameToIgnore( "bot_npc_minion" );
+		filter.AddClassnameToIgnore( me->GetClassname() );
 
 		// find ceiling
 		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, 1000.0f ), 
@@ -7087,10 +7386,25 @@ public:
 		float groundZ = result.endpos.z;
 
 		float currentAltitude = me->GetAbsOrigin().z - groundZ;
-		float error = getvars().m_desiredAltitude - currentAltitude;
-		float accelZ = clamp( error, -getvars().accel, getvars().accel );
+		float error = GetDesiredAltitude() - currentAltitude;
+		float accelZ = clamp( error, -GetDesiredAcceleration(), GetDesiredAcceleration() );
 
 		getvars().m_acceleration.z += accelZ;
+	}
+
+	void MaintainAltitude( void )
+	{
+		switch(tf_npc_flying_algo.GetInt()) {
+			case 0: {
+				MaintainAltitude_eyeball_low_float();
+			} break;
+			case 1: {
+				MaintainAltitude_eyeball_high_float();
+			} break;
+			case 2: {
+				MaintainAltitude_minion();
+			} break;
+		}
 	}
 
 	void HookUpdate()
@@ -7116,9 +7430,8 @@ public:
 		Vector totalAccel = getvars().m_acceleration - getvars().m_velocity * damping;
 
 		// avoid other minions
-	#if 0
 		CBaseEntity *minion = NULL;
-		while( ( minion = gEntList.FindEntityByClassname( minion, "bot_npc_minion" ) ) != NULL )
+		while( ( minion = FindEntityByClassname( minion, me->GetClassname() ) ) != NULL )
 		{
 			if ( me == minion )
 				continue;
@@ -7127,12 +7440,11 @@ public:
 			toPeer.z = 0.0f;
 			float range = toPeer.NormalizeInPlace();
 
-			if ( range < tf_bot_npc_minion_avoid_range.GetFloat() )
+			if ( range < tf_npc_flying_avoid_range.GetFloat() )
 			{
-				totalAccel += -tf_bot_npc_minion_avoid_force.GetFloat() * toPeer;
+				totalAccel += -tf_npc_flying_avoid_force.GetFloat() * toPeer;
 			}
 		}
-	#endif
 
 		getvars().m_velocity += totalAccel * deltaT;
 		me->SetAbsVelocity( getvars().m_velocity );
@@ -7141,7 +7453,7 @@ public:
 
 		// check for collisions along move	
 		trace_t result;
-		CTraceFilterSkipClassname filter( me, "bot_npc_minion", COLLISION_GROUP_NONE );
+		CTraceFilterSkipClassname filter( me, me->GetClassname(), COLLISION_GROUP_NONE );
 		Vector from = me->GetAbsOrigin();
 		Vector to = pos;
 		Vector desiredGoal = to;
@@ -7238,6 +7550,9 @@ public:
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 
 		Vector toTarget = target - me->WorldSpaceCenter();
+		if(g_bFlyingLocomotionIgnorePitch) {
+			toTarget.z = 0.0f;
+		}
 
 		const float deltaT = GetUpdateInterval();
 	
@@ -7279,7 +7594,7 @@ public:
 
 		trace_t result;
 		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
-		filter.AddClassnameToIgnore( "bot_npc_minion" );
+		filter.AddClassnameToIgnore( me->GetClassname() );
 
 		feet = me->GetAbsOrigin();
 
@@ -7300,6 +7615,15 @@ public:
 		return getvars().pitch;
 	}
 
+	void HookDeflected( CBaseEntity *pDeflectedBy, Vector &vecDir )
+	{
+		if(pDeflectedBy) {
+			Deflect(pDeflectedBy);
+		}
+
+		RETURN_META(MRES_HANDLED);
+	}
+
 	void Deflect( CBaseEntity *deflector )
 	{
 		if ( deflector )
@@ -7307,9 +7631,9 @@ public:
 			Vector fromDeflector = GetBot()->GetEntity()->WorldSpaceCenter() - deflector->EyePosition();
 			float range = fromDeflector.NormalizeInPlace();
 
-			if ( range < tf_bot_npc_minion_deflect_range.GetFloat() )
+			if ( range < tf_npc_flying_deflect_range.GetFloat() )
 			{
-				getvars().m_velocity += ( 1.0f - ( range / tf_bot_npc_minion_deflect_range.GetFloat() ) ) * tf_bot_npc_minion_deflect_force.GetFloat() * fromDeflector;
+				getvars().m_velocity += ( 1.0f - ( range / tf_npc_flying_deflect_range.GetFloat() ) ) * tf_npc_flying_deflect_force.GetFloat() * fromDeflector;
 			}
 		}
 	}
@@ -7740,47 +8064,6 @@ public:
 				pEntity->RestartSequence();
 			}
 		}
-
-		ILocomotion *locomotion = bot->GetLocomotionInterface();
-
-		float playback_rate = 1.0f;
-
-		if(locomotion->IsOnGround()) {
-			float anim_speed = pEntity->GetGroundSpeed();
-			if(anim_speed < 0.1f) {
-				if(IsActivity(ACT_RUN) || IsActivity(ACT_WALK)) {
-					if(locomotion->IsRunning()) {
-						auto it{data.find("run_anim_speed"s)};
-						if(it != data.cend()) {
-							anim_speed = sp_ctof(it->second[0]);
-						}
-					} else {
-						auto it{data.find("walk_anim_speed"s)};
-						if(it != data.cend()) {
-							anim_speed = sp_ctof(it->second[0]);
-						}
-					}
-				}
-			}
-
-			float ground_speed = locomotion->GetGroundSpeed();
-
-			if(ground_speed > 0.1f && anim_speed > 0.1f) {
-				playback_rate = (ground_speed / anim_speed);
-			}
-		}
-
-		if(playback_rate > 2.0f) {
-			playback_rate = 2.0f;
-		}
-
-		if(playback_rate < -4.0f) {
-			playback_rate = -4.0f;
-		} else if(playback_rate > 12.0f) {
-			playback_rate = 12.0f;
-		}
-
-		pEntity->SetPlaybackRate(playback_rate);
 
 		pEntity->StudioFrameAdvance();
 		pEntity->DispatchAnimEvents();
@@ -8585,15 +8868,27 @@ bool CGameTrace::DidHitNonWorldEntity() const
 class PathFollower : public Path
 {
 public:
-	static PathFollower *create()
+	static size_t size()
 	{
-		PathFollower *bytes = (PathFollower *)calloc(1, sizeof(PathFollower));
+		return sizeof(PathFollower);
+	}
+
+	static PathFollower *create(size_t extra_size)
+	{
+		PathFollower *bytes = (PathFollower *)calloc(1, sizeof(PathFollower) + extra_size);
 		call_mfunc<void>(bytes, PathFollowerCTOR);
 		return bytes;
 	}
 	
 	virtual void Update( INextBot *bot ) = 0;			// move bot along path
-	
+
+	void CallUpdate(INextBot *bot)
+	{
+		g_bFlyingLocomotionIgnorePitch = true;
+		Update(bot);
+		g_bFlyingLocomotionIgnorePitch = false;
+	}
+
 	virtual void SetMinLookAheadDistance( float value ) = 0;		// minimum range movement goal must be along path
 	
 	virtual CBaseEntity *GetHindrance( void ) const = 0;			// returns entity that is hindering our progress along the path
@@ -8775,8 +9070,10 @@ void PathFollower::Update( INextBot *bot )
 	if(vtableindex == -1) {
 		vtableindex = vfunc_index(&PathFollower::Update);
 	}
-	
+
+	g_bFlyingLocomotionIgnorePitch = true;
 	call_vfunc<void, PathFollower, INextBot *>(this, vtableindex, bot);
+	g_bFlyingLocomotionIgnorePitch = false;
 }
 
 SH_DECL_HOOK0_void(Path, Invalidate, SH_NOATTRIB, 0);
@@ -9178,10 +9475,15 @@ public:
 			}
 		}
 	}
-	
-	static ChasePath *create(SubjectChaseType chaseHow)
+
+	static size_t size()
 	{
-		ChasePath *bytes = (ChasePath *)calloc(1, sizeof(ChasePath) + sizeof(vars_t));
+		return (sizeof(ChasePath) + sizeof(vars_t));
+	}
+	
+	static ChasePath *create(size_t extra_size, SubjectChaseType chaseHow)
+	{
+		ChasePath *bytes = (ChasePath *)calloc(1, sizeof(ChasePath) + sizeof(vars_t) + extra_size);
 		call_mfunc<void>(bytes, PathFollowerCTOR);
 		new (bytes->vars_ptr()) vars_t();
 		bytes->ctor(chaseHow);
@@ -9216,7 +9518,7 @@ public:
 		RefreshPath( bot, subject, cost, pPredictedSubjectPos );
 
 		// move along the path towards the subject
-		PathFollower::Update( bot );
+		PathFollower::CallUpdate( bot );
 	}
 };
 
@@ -9232,9 +9534,9 @@ public:
 		SH_REMOVE_HOOK(Path, ComputeAreaCrossing, this, SH_MEMBER(this, &DirectChasePath::HookComputeAreaCrossing), false);
 	}
 	
-	static DirectChasePath *create(SubjectChaseType chaseHow)
+	static DirectChasePath *create(size_t extra_size, SubjectChaseType chaseHow)
 	{
-		DirectChasePath *bytes = (DirectChasePath *)ChasePath::create(chaseHow);
+		DirectChasePath *bytes = (DirectChasePath *)ChasePath::create(extra_size, chaseHow);
 		SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &DirectChasePath::HookComputeAreaCrossing), false);
 		bytes->getvars().pIsRepathNeeded = func_to_func<IsRepathNeeded_t>(&DirectChasePath::IsRepathNeeded);
 		bytes->getvars().pUpdate = func_to_func<Update_t>(&DirectChasePath::Update);
@@ -9272,7 +9574,7 @@ public:
 		if ( !pBCCVictim )
 			return;
 		
-		//pBCCVictim->OnPursuedBy( me );
+		pBCCVictim->OnPursuedBy( me );
 	}
 	
 	bool DirectChase( bool *pPredictedPositionComputed, Vector *pPredictedPos, INextBot *me, CBaseEntity *victim )		// if there is nothing between us and our victim, run directly at them
@@ -9308,7 +9610,10 @@ public:
 		}
 
 		// the way is clear - move directly towards our victim
+		g_bFlyingLocomotionIgnorePitch = true;
 		mover->FaceTowards( leadVictimPos );
+		g_bFlyingLocomotionIgnorePitch = false;
+
 		mover->Approach( leadVictimPos );
 
 		me->GetBodyInterface()->AimHeadTowards( victim );
@@ -9339,9 +9644,9 @@ public:
 class InfectedChasePath : public DirectChasePath
 {
 public:
-	static InfectedChasePath *create(SubjectChaseType chaseHow)
+	static InfectedChasePath *create(size_t extra_size, SubjectChaseType chaseHow)
 	{
-		InfectedChasePath *bytes = (InfectedChasePath *)DirectChasePath::create(chaseHow);
+		InfectedChasePath *bytes = (InfectedChasePath *)DirectChasePath::create(extra_size, chaseHow);
 		bytes->getvars().pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&InfectedChasePath::DoComputeAreaCrossing);
 		return bytes;
 	}
@@ -9780,10 +10085,25 @@ public:
 		RETURN_META(MRES_HANDLED);
 	}
 	
+	void ctor()
+	{
+		new (&m_throttleTimer) CountdownTimer();
+		new (&m_pathThreat) EHANDLE();
+		new (&m_pathThreatPos) Vector();
+		
+		m_throttleTimer.Invalidate();
+		m_pathThreat = NULL;
+		m_pathThreatPos = vec3_origin;
+	}
+
 	void dtor()
 	{
 		getvars().~vars_t();
-		
+
+		m_throttleTimer.~CountdownTimer();
+		m_pathThreat.~EHANDLE();
+		m_pathThreatPos.~Vector();
+
 		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &RetreatPath::dtor), false);
 		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &RetreatPath::HookInvalidate), true);
 		
@@ -9812,7 +10132,7 @@ public:
 		RefreshPath( bot, threat );
 
 		// move along the path towards the threat
-		PathFollower::Update( bot );
+		PathFollower::CallUpdate( bot );
 	}
 	
 	void RefreshPath( INextBot *bot, CBaseEntity *threat )
@@ -9886,11 +10206,17 @@ public:
 	{
 		return getvars().maxlen;
 	}
-	
-	static RetreatPath *create()
+
+	static size_t size()
 	{
-		RetreatPath *bytes = (RetreatPath *)calloc(1, sizeof(RetreatPath) + sizeof(vars_t));
+		return (sizeof(RetreatPath) + sizeof(vars_t));
+	}
+	
+	static RetreatPath *create(size_t extra_size)
+	{
+		RetreatPath *bytes = (RetreatPath *)calloc(1, sizeof(RetreatPath) + sizeof(vars_t) + extra_size);
 		call_mfunc<void>(bytes, PathFollowerCTOR);
+		bytes->ctor();
 		new (bytes->vars_ptr()) vars_t();
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &RetreatPath::dtor), false);
 		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), true);
@@ -9902,9 +10228,14 @@ public:
 class CTFPathFollower : public PathFollower
 {
 public:
-	static CTFPathFollower *create()
+	static size_t size()
 	{
-		CTFPathFollower *bytes = (CTFPathFollower *)calloc(1, sizeof(CTFPathFollower));
+		return sizeof(CTFPathFollower);
+	}
+
+	static CTFPathFollower *create(size_t extra_size)
+	{
+		CTFPathFollower *bytes = (CTFPathFollower *)calloc(1, sizeof(CTFPathFollower) + extra_size);
 		call_mfunc<void>(bytes, CTFPathFollowerCTOR);
 		return bytes;
 	}
@@ -9931,16 +10262,60 @@ HandleType_t RetreatPathHandleType = 0;
 HandleType_t InfectedChasePathHandleType = 0;
 #endif
 
+static std::unordered_map<PathFollower *, Handle_t> pathfollower_hndl_map;
+
+template <typename T>
+class SPPathFollower : public T
+{
+public:
+	static_assert(std::is_base_of_v<PathFollower, T>);
+
+	struct vars_t
+	{
+		Handle_t hndl{BAD_HANDLE};
+	};
+
+	unsigned char *vars_ptr()
+	{ return (((unsigned char *)this) + T::size()); }
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+
+	template <typename ...Args>
+	static SPPathFollower<T> *create(Args &&... args)
+	{
+		SPPathFollower<T> *bytes = reinterpret_cast<SPPathFollower<T> *>(T::create(sizeof(vars_t), args...));
+		new (bytes->vars_ptr()) vars_t{};
+		return bytes;
+	}
+
+	void set_handle(Handle_t hndl)
+	{
+		pathfollower_hndl_map.emplace(static_cast<PathFollower *>(this), hndl);
+		getvars().hndl = hndl;
+	}
+
+	void handle_destroyed()
+	{
+		auto it{pathfollower_hndl_map.find(static_cast<PathFollower *>(this))};
+		if(it != pathfollower_hndl_map.cend()) {
+			pathfollower_hndl_map.erase(it);
+		}
+	}
+};
+
 cell_t PathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
 	Path *obj = Path::create();
-	return handlesys->CreateHandle(PathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	Handle_t hndl = handlesys->CreateHandle(PathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	return hndl;
 }
 
 cell_t PathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
 {
-	PathFollower *obj = PathFollower::create();
-	return handlesys->CreateHandle(PathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	SPPathFollower<PathFollower> *obj = SPPathFollower<PathFollower>::create();
+	Handle_t hndl = handlesys->CreateHandle(PathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->set_handle(hndl);
+	return hndl;
 }
 
 class SPPathCost : public IPathCost
@@ -10046,7 +10421,7 @@ cell_t PathFollowerUpdateNative(IPluginContext *pContext, const cell_t *params)
 	
 	INextBot *bot = (INextBot *)params[2];
 	
-	obj->Update(bot);
+	obj->CallUpdate(bot);
 	return 0;
 }
 
@@ -10681,38 +11056,65 @@ cell_t INextBotBodyInterfaceget(IPluginContext *pContext, const cell_t *params)
 	return (cell_t)bot->GetBodyInterface();
 }
 
+cell_t INextBotCurrentPathget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+
+	PathFollower *path = bot->GetCurrentPath();
+	if(!path) {
+		return BAD_HANDLE;
+	}
+
+	auto it{pathfollower_hndl_map.find(path)};
+	if(it == pathfollower_hndl_map.cend()) {
+		return BAD_HANDLE;
+	}
+
+	return it->second;
+}
+
 #if SOURCE_ENGINE == SE_TF2
 cell_t CTFPathFollowerCTORNative(IPluginContext *pContext, const cell_t *params)
 {
-	CTFPathFollower *obj = CTFPathFollower::create();
-	return handlesys->CreateHandle(CTFPathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	SPPathFollower<CTFPathFollower> *obj = SPPathFollower<CTFPathFollower>::create();
+	Handle_t hndl = handlesys->CreateHandle(CTFPathFollowerHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->set_handle(hndl);
+	return hndl;
 }
 #endif
 
 cell_t ChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
-	ChasePath *obj = ChasePath::create((ChasePath::SubjectChaseType)params[1]);
-	return handlesys->CreateHandle(ChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	SPPathFollower<ChasePath> *obj = SPPathFollower<ChasePath>::create((ChasePath::SubjectChaseType)params[1]);
+	Handle_t hndl = handlesys->CreateHandle(ChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->set_handle(hndl);
+	return hndl;
 }
 
 cell_t DirectChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
-	DirectChasePath *obj = DirectChasePath::create((ChasePath::SubjectChaseType)params[1]);
-	return handlesys->CreateHandle(DirectChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	SPPathFollower<DirectChasePath> *obj = SPPathFollower<DirectChasePath>::create((ChasePath::SubjectChaseType)params[1]);
+	Handle_t hndl = handlesys->CreateHandle(DirectChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->set_handle(hndl);
+	return hndl;
 }
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 cell_t InfectedChasePathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
-	InfectedChasePath *obj = InfectedChasePath::create((ChasePath::SubjectChaseType)params[1]);
-	return handlesys->CreateHandle(InfectedChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	SPPathFollower<InfectedChasePath> *obj = SPPathFollower<InfectedChasePath>::create((ChasePath::SubjectChaseType)params[1]);
+	Handle_t hndl = handlesys->CreateHandle(InfectedChasePathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->set_handle(hndl);
+	return hndl;
 }
 #endif
 
 cell_t RetreatPathCTORNative(IPluginContext *pContext, const cell_t *params)
 {
-	RetreatPath *obj = RetreatPath::create();
-	return handlesys->CreateHandle(RetreatPathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	SPPathFollower<RetreatPath> *obj = SPPathFollower<RetreatPath>::create();
+	Handle_t hndl = handlesys->CreateHandle(RetreatPathHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
+	obj->set_handle(hndl);
+	return hndl;
 }
 
 cell_t INextBotEntityget(IPluginContext *pContext, const cell_t *params)
@@ -14436,6 +14838,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
 	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
+	{"INextBot.CurrentPath.get", INextBotCurrentPathget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateFlyingLocomotion", INextBotAllocateFlyingLocomotion},
 	{"INextBot.AllocateCustomBody", INextBotAllocateCustomBody},
@@ -14750,6 +15153,7 @@ bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool l
 #if SOURCE_ENGINE == SE_TF2
 	tf_nav_combat_decay_rate = g_pCVar->FindVar("tf_nav_combat_decay_rate");
 #endif
+	nb_last_area_update_tolerance = g_pCVar->FindVar("nb_last_area_update_tolerance");
 	NextBotStop = g_pCVar->FindVar("nb_stop");
 	NextBotDebugHistory = g_pCVar->FindVar("nb_debug_history");
 	developer = g_pCVar->FindVar("developer");
@@ -14763,30 +15167,36 @@ void Sample::OnHandleDestroy(HandleType_t type, void *object)
 		Path *obj = (Path *)object;
 		delete obj;
 	} else if(type == PathFollowerHandleType) {
-		PathFollower *obj = (PathFollower *)object;
+		SPPathFollower<PathFollower> *obj = (SPPathFollower<PathFollower> *)object;
+		obj->handle_destroyed();
 		delete obj;
 	}
 #if SOURCE_ENGINE == SE_TF2
 	else if(type == CTFPathFollowerHandleType) {
-		CTFPathFollower *obj = (CTFPathFollower *)object;
+		SPPathFollower<CTFPathFollower> *obj = (SPPathFollower<CTFPathFollower> *)object;
+		obj->handle_destroyed();
 		delete obj;
 	}
 #endif
 	else if(type == ChasePathHandleType) {
-		ChasePath *obj = (ChasePath *)object;
+		SPPathFollower<ChasePath> *obj = (SPPathFollower<ChasePath> *)object;
+		obj->handle_destroyed();
 		delete obj;
 	} else if(type == DirectChasePathHandleType) {
-		DirectChasePath *obj = (DirectChasePath *)object;
+		SPPathFollower<DirectChasePath> *obj = (SPPathFollower<DirectChasePath> *)object;
+		obj->handle_destroyed();
 		delete obj;
 	}
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	else if(type == InfectedChasePathHandleType) {
-		InfectedChasePath *obj = (InfectedChasePath *)object;
+		SPPathFollower<InfectedChasePath *obj> = (SPPathFollower<InfectedChasePath> *)object;
+		obj->handle_destroyed();
 		delete obj;
 	}
 #endif
 	else if(type == RetreatPathHandleType) {
-		RetreatPath *obj = (RetreatPath *)object;
+		SPPathFollower<RetreatPath> *obj = (SPPathFollower<RetreatPath> *)object;
+		obj->handle_destroyed();
 		delete obj;
 	} else if(type == BehaviorEntryHandleType) {
 		SPActionEntry *obj = (SPActionEntry *)object;
@@ -16226,13 +16636,19 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::PerformCustomPhysics", &offset);
 	SH_MANUALHOOK_RECONFIGURE(PerformCustomPhysics, offset, 0, 0);
 	
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsAreaTraversable", &offset);
-	SH_MANUALHOOK_RECONFIGURE(IsAreaTraversable, offset, 0, 0);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsAreaTraversable", &CBaseCombatCharacterIsAreaTraversable);
+	SH_MANUALHOOK_RECONFIGURE(IsAreaTraversable, CBaseCombatCharacterIsAreaTraversable, 0, 0);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::ClearLastKnownArea", &CBaseCombatCharacterClearLastKnownArea);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::OnNavAreaChanged", &CBaseCombatCharacterOnNavAreaChanged);
 	
 	g_pGameConf->GetOffset("CBaseEntity::Spawn", &CBaseEntitySpawn);
 	SH_MANUALHOOK_RECONFIGURE(Spawn, CBaseEntitySpawn, 0, 0);
 	
 	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
+
+	g_pGameConf->GetOffset("CBaseEntity::Deflected", &offset);
+	SH_MANUALHOOK_RECONFIGURE(Deflected, offset, 0, 0);
 
 	g_pGameConf->GetOffset("CBaseEntity::UpdateOnRemove", &offset);
 	SH_MANUALHOOK_RECONFIGURE(UpdateOnRemove, offset, 0, 0);
@@ -16283,7 +16699,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
 	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
+
 	g_pGameConf->GetOffset("CBaseCombatCharacter::UpdateLastKnownArea", &CBaseCombatCharacterUpdateLastKnownArea);
+	SH_MANUALHOOK_RECONFIGURE(UpdateLastKnownArea, CBaseCombatCharacterUpdateLastKnownArea, 0, 0);
 
 	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(Vector)", &CBaseCombatCharacterIsHiddenByFogVec);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(CBaseEntity)", &CBaseCombatCharacterIsHiddenByFogEnt);
@@ -16316,6 +16734,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 
 	g_pGameConf->GetOffset("CBaseCombatCharacter::CheckTraceHullAttack(float)", &CBaseCombatCharacterCheckTraceHullAttackRange);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::CheckTraceHullAttack(Vector)", &CBaseCombatCharacterCheckTraceHullAttackEndPoint);
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IRelationType", &CBaseCombatCharacterIRelationType);
+	g_pGameConf->GetOffset("CBaseCombatCharacter::OnPursuedBy", &CBaseCombatCharacterOnPursuedBy);
 
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);
@@ -16368,7 +16789,26 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_hGroundEntity", &info);
 	m_hGroundEntityOffset = info.actual_offset;
-	
+
+	gamehelpers->FindSendPropInfo("CBaseCombatCharacter", "m_hActiveWeapon", &info);
+
+	struct lastnavarea_pad_t
+	{
+		IntervalTimer m_aliveTimer;
+		unsigned int m_hasBeenInjured;
+		enum { MAX_DAMAGE_TEAMS = 4 };
+		struct DamageHistory
+		{
+			int team;
+			IntervalTimer interval;
+		};
+		DamageHistory m_damageHistory[ MAX_DAMAGE_TEAMS ];
+	};
+
+	m_lastNavAreaOffset = info.actual_offset + sizeof(lastnavarea_pad_t);
+	m_NavAreaUpdateMonitorOffset = m_lastNavAreaOffset + sizeof(CNavArea *);
+	m_registeredNavTeamOffset = m_NavAreaUpdateMonitorOffset + sizeof(CAI_MoveMonitor);
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	gamehelpers->FindSendPropInfo("CTerrorPlayer", "m_isGhost", &info);
 	m_isGhostOffset = info.actual_offset;

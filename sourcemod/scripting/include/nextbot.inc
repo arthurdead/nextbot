@@ -1779,6 +1779,11 @@ methodmap INextBot < INextBotEventResponder
 		public native get();
 	}
 
+	property PathFollower CurrentPath
+	{
+		public native get();
+	}
+
 	public native bool BeginUpdate();
 	public native void Update();
 	public native void EndUpdate();
@@ -2563,9 +2568,14 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 
 	if(flags & cost_flags_mod) {
 		int timeMod = (RoundToFloor(GetGameTime() / 10.0) + 1);
+	#if 0
 		int uniqueID = (view_as<int>(area) >> 7);
 		int nRandomCost = ((entity * uniqueID * timeMod) % 293);
 		cost += (1.0 + float(nRandomCost));
+	#else
+		float preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
+		cost += (preference * dist);
+	#endif
 	}
 
 #if defined GAME_TF2
