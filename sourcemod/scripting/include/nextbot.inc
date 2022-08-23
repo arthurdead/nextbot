@@ -2339,23 +2339,27 @@ stock CustomDatamap register_infected_factory(const char[] classname, cosnt char
 
 enum baseline_cost_flags
 {
-	cost_flags_none = 0,
-	cost_flags_mod = (1 << 0),
-	cost_flags_safest = (1 << 1),
-	cost_flags_discrete = (1 << 2),
+	cost_flags_none =      0,
+	cost_flags_mod_heavy = (1 << 0),
+	cost_flags_safest =    (1 << 1),
+	cost_flags_discrete =  (1 << 2),
 	cost_flags_nojumping = (1 << 3),
 	cost_flags_noladders = (1 << 4),
-	cost_flags_nocrouch = (1 << 5),
-	cost_flags_nospawn = (1 << 6),
-	cost_flags_nowater = (1 << 7),
-	cost_flags_fastest = (1 << 8)
+	cost_flags_nocrouch =  (1 << 5),
+	cost_flags_nospawn =   (1 << 6),
+	cost_flags_nowater =   (1 << 7),
+	cost_flags_fastest =   (1 << 8),
+	cost_flags_mod_small = (1 << 9),
 };
 
 #define cost_flags_onlywalk (cost_flags_nojumping| \
 							cost_flags_noladders| \
 							cost_flags_nocrouch)
+
 #define cost_flags_nostance (cost_flags_nojumping| \
 							cost_flags_nocrouch)
+
+#define NB_PATHCOST_MOD_PERIOD 10.0
 
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, baseline_cost_flags flags)
 {
@@ -2566,16 +2570,15 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 	#endif
 	}
 
-	if(flags & cost_flags_mod) {
-		int timeMod = (RoundToFloor(GetGameTime() / 10.0) + 1);
-	#if 0
+	if(flags & cost_flags_mod_small) {
+		int timeMod = (RoundToFloor(GetGameTime() / NB_PATHCOST_MOD_PERIOD) + 1);
 		int uniqueID = (view_as<int>(area) >> 7);
 		int nRandomCost = ((entity * uniqueID * timeMod) % 293);
 		cost += (1.0 + float(nRandomCost));
-	#else
+	} else if(flags & cost_flags_mod_heavy) {
+		int timeMod = (RoundToFloor(GetGameTime() / NB_PATHCOST_MOD_PERIOD) + 1);
 		float preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
 		cost += (preference * dist);
-	#endif
 	}
 
 #if defined GAME_TF2
