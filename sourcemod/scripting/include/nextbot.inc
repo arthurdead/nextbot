@@ -224,7 +224,7 @@ enum Disposition_t
 	D_NU		// Neutral
 };
 
-//native Disposition_t CombatCharacterDisposition(int entity, int target);
+native Disposition_t CombatCharacterDisposition(int entity, int target);
 
 enum NavAttributeType
 {

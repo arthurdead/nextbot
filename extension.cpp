@@ -166,17 +166,17 @@ enum MRESReturn
 	MRES_Supercede				// skip real function; use my return value
 };
 
+static_assert(sizeof(MRESReturn) == sizeof(cell_t));
+
 META_RES mres_to_meta_res(MRESReturn res)
 {
 	switch(res) {
-		case MRES_ChangedHandled:
-		return MRES_HANDLED;
-		case MRES_ChangedOverride:
-		return MRES_OVERRIDE;
 		case MRES_Ignored:
 		return MRES_IGNORED;
+		case MRES_ChangedHandled:
 		case MRES_Handled:
 		return MRES_HANDLED;
+		case MRES_ChangedOverride:
 		case MRES_Override:
 		return MRES_OVERRIDE;
 		case MRES_Supercede:
@@ -6599,10 +6599,10 @@ public:
 		climbladdr->PushCell((cell_t)loc);
 		climbladdr->PushCell((cell_t)ladder);
 		climbladdr->PushCell((cell_t)area);
-		cell_t res = 0;
-		climbladdr->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		climbladdr->Execute((cell_t *)&res);
 
-		RETURN_META(mres_to_meta_res((MRESReturn)res));
+		RETURN_META(mres_to_meta_res(res));
 	}
 	
 	void HookDescendLadder(const CNavLadder *ladder, const CNavArea *area)
@@ -6616,10 +6616,10 @@ public:
 		desceladdr->PushCell((cell_t)loc);
 		desceladdr->PushCell((cell_t)ladder);
 		desceladdr->PushCell((cell_t)area);
-		cell_t res = 0;
-		desceladdr->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		desceladdr->Execute((cell_t *)&res);
 		
-		RETURN_META(mres_to_meta_res((MRESReturn)res));
+		RETURN_META(mres_to_meta_res(res));
 	}
 	
 	bool HookClimbUpToLedge( const Vector &landingGoal, const Vector &landingForward, CBaseEntity *obstacle )
@@ -6638,10 +6638,10 @@ public:
 		climbledge->PushCell(gamehelpers->EntityToBCompatRef(obstacle));
 		cell_t should = 0;
 		climbledge->PushCellByRef(&should);
-		cell_t res = 0;
-		climbledge->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		climbledge->Execute((cell_t *)&res);
 
-		RETURN_META_VALUE(mres_to_meta_res((MRESReturn)res), should);
+		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
 
 	bool HookShouldCollideWith( CBaseEntity *object )
@@ -6656,10 +6656,10 @@ public:
 		collidewith->PushCell(gamehelpers->EntityToBCompatRef(object));
 		cell_t should = 0;
 		collidewith->PushCellByRef(&should);
-		cell_t res = 0;
-		collidewith->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		collidewith->Execute((cell_t *)&res);
 
-		RETURN_META_VALUE(mres_to_meta_res((MRESReturn)res), should);
+		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
 
 	bool HookIsEntityTraversable( CBaseEntity *obstacle, TraverseWhenType when )
@@ -6675,10 +6675,10 @@ public:
 		entitytaver->PushCell(when);
 		cell_t should = 0;
 		entitytaver->PushCellByRef(&should);
-		cell_t res = 0;
-		entitytaver->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		entitytaver->Execute((cell_t *)&res);
 
-		RETURN_META_VALUE(mres_to_meta_res((MRESReturn)res), should);
+		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
 	
 	virtual bool set_function(std::string_view name, IPluginFunction *func) override
@@ -6917,12 +6917,12 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		travladdr->PushCell((cell_t)loc);
 		cell_t should = 0;
 		travladdr->PushCellByRef(&should);
-		cell_t res = 0;
-		travladdr->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		travladdr->Execute((cell_t *)&res);
 
 		result = should;
 
-		return mres_to_meta_res((MRESReturn)res);
+		return mres_to_meta_res(res);
 	}
 	
 	virtual bool set_function(std::string_view name, IPluginFunction *func) override
@@ -13926,10 +13926,10 @@ public:
 		ableblock->PushCell((cell_t)bot);
 		cell_t should = 0;
 		ableblock->PushCellByRef(&should);
-		cell_t res = 0;
-		ableblock->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		ableblock->Execute((cell_t *)&res);
 
-		RETURN_META_VALUE(mres_to_meta_res((MRESReturn)res), should);
+		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
 	
 	bool HookShouldTouch(CBaseEntity *bot)
@@ -13945,10 +13945,10 @@ public:
 		shouldtouch->PushCell(gamehelpers->EntityToBCompatRef(bot));
 		cell_t should = 0;
 		shouldtouch->PushCellByRef(&should);
-		cell_t res = 0;
-		shouldtouch->Execute(&res);
+		MRESReturn res = MRES_Ignored;
+		shouldtouch->Execute((cell_t *)&res);
 
-		RETURN_META_VALUE(mres_to_meta_res((MRESReturn)res), should);
+		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
 	
 	void dtor()
@@ -14688,6 +14688,23 @@ cell_t CombatCharacterHullAttackEndPoint(IPluginContext *pContext, const cell_t 
 	return pHit ? gamehelpers->EntityToBCompatRef(pHit) : -1;
 }
 
+cell_t CombatCharacterDisposition(IPluginContext *pContext, const cell_t *params)
+{
+	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
+	}
+
+	CBaseCombatCharacter *pTarget = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[2]);
+	if(!pTarget)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return pSubject->IRelationType(pTarget);
+}
+
 sp_nativeinfo_t natives[] =
 {
 	{"Path.Path", PathCTORNative},
@@ -15137,6 +15154,7 @@ sp_nativeinfo_t natives[] =
 	{"CombatCharacterIsAbleToSeeEnt", CombatCharacterIsAbleToSeeEnt},
 	{"CombatCharacterHullAttackRange", CombatCharacterHullAttackRange},
 	{"CombatCharacterHullAttackEndPoint", CombatCharacterHullAttackEndPoint},
+	{"CombatCharacterDisposition", CombatCharacterDisposition},
 	{NULL, NULL}
 };
 
