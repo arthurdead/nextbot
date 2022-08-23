@@ -7569,18 +7569,20 @@ public:
 			angles.y += yawAngleDiff;
 		}
 
-		float desiredPitch = UTIL_VecToPitch( toTarget );
-		float pitchAngleDiff = UTIL_AngleDiff( desiredPitch, angles.x );
-		float deltaPitch = GetMaxPitchRate() * deltaT;
-		if (pitchAngleDiff < -deltaPitch) {
-			angles.x -= deltaPitch;
-		} else if (pitchAngleDiff > deltaPitch) {
-			angles.x += deltaPitch;
-		} else {
-			angles.x += pitchAngleDiff;
-		}
+		if(!g_bFlyingLocomotionIgnorePitch) {
+			float desiredPitch = UTIL_VecToPitch( toTarget );
+			float pitchAngleDiff = UTIL_AngleDiff( desiredPitch, angles.x );
+			float deltaPitch = GetMaxPitchRate() * deltaT;
+			if (pitchAngleDiff < -deltaPitch) {
+				angles.x -= deltaPitch;
+			} else if (pitchAngleDiff > deltaPitch) {
+				angles.x += deltaPitch;
+			} else {
+				angles.x += pitchAngleDiff;
+			}
 
-		//TODO!!! limit pitch
+			//TODO!!! limit pitch
+		}
 
 		me->SetLocalAngles( angles );
 
