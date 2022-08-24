@@ -2361,6 +2361,17 @@ enum baseline_cost_flags
 
 #define NB_PATHCOST_MOD_PERIOD 10.0
 
+stock float TransientlyConsistentRandomValue(int entity, float period = 10.0, int seedValue = 0)
+{
+	CNavArea area = GetEntityLastKnownArea(entity);
+	if(area == CNavArea_Null) {
+		return 0.0;
+	}
+
+	int timeMod = (RoundToFloor(GetGameTime() / period) + 1);
+	return FloatAbs(Cosine(float(seedValue + (entity * area.ID * timeMod))));
+}
+
 stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, CNavLadder ladder, Address elevator, float length, baseline_cost_flags flags)
 {
 	if(fromArea == CNavArea_Null) {

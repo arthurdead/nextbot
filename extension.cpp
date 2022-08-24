@@ -1017,7 +1017,7 @@ public:
 			m_iParentAttachmentOffset = info.actual_offset;
 		}
 
-		return *(unsigned char *)(((unsigned char *)this) + m_vecAbsVelocityOffset);
+		return *(unsigned char *)(((unsigned char *)this) + m_iParentAttachmentOffset);
 	}
 
 	void InvalidatePhysicsRecursive( int nChangeFlags )
