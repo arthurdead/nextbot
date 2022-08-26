@@ -13889,11 +13889,11 @@ public:
 	int ref = -1;
 	
 	INextBotCustom(INextBot *pNextBot, IdentityToken_t *id)
-		: IPluginNextBotComponent(id), ref{gamehelpers->EntityToBCompatRef(pNextBot->GetEntity())}
+		: IPluginNextBotComponent(id), ref{gamehelpers->EntityToReference(pNextBot->GetEntity())}
 	{
 		bot = pNextBot;
 
-		nbcustomap[ref] = this;
+		nbcustomap.emplace(ref, this);
 		
 		SH_ADD_MANUALHOOK(GenericDtor, bot, SH_MEMBER(this, &INextBotCustom::dtor), false);
 		
@@ -14011,7 +14011,7 @@ cell_t INextBotMakeCustom(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *pNextBot = (INextBot *)params[1];
 
-	int ref{gamehelpers->EntityToBCompatRef(pNextBot->GetEntity())};
+	int ref{gamehelpers->EntityToReference(pNextBot->GetEntity())};
 
 	INextBotCustom *pcustom = nullptr;
 	
