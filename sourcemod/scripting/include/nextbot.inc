@@ -65,8 +65,10 @@ methodmap BehaviorActionEntry < Handle
 {
 	public native BehaviorActionEntry(const char[] name);
 	
-	public native void set_function(const char[] name, nextbot_functions func);
-	
+	public native void set_function(const char[] name, Function func);
+	public native Function get_function(const char[] name);
+	public native bool has_function(const char[] name);
+
 	public native BehaviorAction create();
 };
 
@@ -83,6 +85,10 @@ methodmap BehaviorAction
 	
 	public native void set_data_array(const char[] name, any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
+
+	public native void set_function(const char[] name, Function func);
+	public native Function get_function(const char[] name);
+	public native bool has_function(const char[] name);
 };
 
 enum struct BehaviorResult
@@ -105,7 +111,7 @@ enum struct BehaviorResult
 #define GameVisionCustom ZombieBotVisionCustom
 #endif
 
-typeset nextbot_functions
+typeset nb_funcs_t
 {
 	//INextBotCustom.IsAbleToBlockMovementOf
 	function MRESReturn (INextBotCustom custom, INextBot bot, INextBot other, bool &result);
@@ -712,7 +718,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 		public native set(float height);
 	}
 
-	public native void set_function(const char[] name, nextbot_functions func);
+	public native void set_function(const char[] name, Function func);
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -865,7 +871,7 @@ methodmap GameLocomotionCustom < GameLocomotion
 		public native set(float height);
 	}
 
-	public native void set_function(const char[] name, nextbot_functions func);
+	public native void set_function(const char[] name, Function func);
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -1161,7 +1167,7 @@ methodmap AnyLocomotion < ILocomotion
 		}
 	}
 
-	public void set_function(const char[] name, nextbot_functions func)
+	public void set_function(const char[] name, Function func)
 	{
 		LocomotionType type = this.Type;
 
@@ -1518,7 +1524,7 @@ methodmap GameVisionCustom < GameVision
 		public native set(float height);
 	}
 	
-	public native void set_function(const char[] name, nextbot_functions func);
+	public native void set_function(const char[] name, Function func);
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -1680,7 +1686,7 @@ methodmap IBodyCustom < IBody
 		public native get();
 	}
 
-	public native void set_function(const char[] name, nextbot_functions func);
+	public native void set_function(const char[] name, Function func);
 
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -1723,7 +1729,7 @@ methodmap IIntentionCustom < IIntention
 	
 	public native void set_name(const char[] name);
 	
-	public native void set_function(const char[] name, nextbot_functions func);
+	public native void set_function(const char[] name, Function func);
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -1960,7 +1966,7 @@ methodmap INextBotCustom
 		public native get();
 	}
 
-	public native void set_function(const char[] name, nextbot_functions func);
+	public native void set_function(const char[] name, Function func);
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);

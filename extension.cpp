@@ -4593,15 +4593,8 @@ using SPBehavior = Behavior<SPActor>;
 
 class SPAction;
 
-struct SPActionEntry
+struct SPActionEntryFuncs
 {
-	SPActionEntry(std::string &&name_, IdentityToken_t *id)
-		: name{std::move(name_)}, pId{id}
-	{
-	}
-	
-	std::string name;
-	
 	IPluginFunction *onstart = nullptr;
 	IPluginFunction *onupdate = nullptr;
 	IPluginFunction *onsus = nullptr;
@@ -4641,9 +4634,50 @@ struct SPActionEntry
 	IPluginFunction *wepfired = nullptr;
 	IPluginFunction *actemote = nullptr;
 	IPluginFunction *pickup = nullptr;
-	
-	IdentityToken_t *pId = nullptr;
-	
+
+	void plugin_unloaded()
+	{
+		onstart = nullptr;
+		onupdate = nullptr;
+		onsus = nullptr;
+		onresume = nullptr;
+		onend = nullptr;
+		intialact = nullptr;
+		
+		leavegrnd = nullptr;
+		landgrnd = nullptr;
+		oncontact = nullptr;
+		animcompl = nullptr;
+		animinter = nullptr;
+		animevent = nullptr;
+		otherkilled = nullptr;
+		onsight = nullptr;
+		onlosesight = nullptr;
+		shoved = nullptr;
+		blinded = nullptr;
+		terrcontest = nullptr;
+		terrcap = nullptr;
+		terrlost = nullptr;
+		threachngd = nullptr;
+		hitvom = nullptr;
+		drop = nullptr;
+		movesucc = nullptr;
+		stuck = nullptr;
+		unstuck = nullptr;
+		ignite = nullptr;
+		injured = nullptr;
+		killed = nullptr;
+		win = nullptr;
+		lose = nullptr;
+		enterspit = nullptr;
+		mdlchnd = nullptr;
+		movefail = nullptr;
+		sound = nullptr;
+		wepfired = nullptr;
+		actemote = nullptr;
+		pickup = nullptr;
+	}
+
 	bool set_function(std::string_view name, IPluginFunction *func)
 	{
 		if(name == "OnStart"sv) {
@@ -4657,9 +4691,6 @@ struct SPActionEntry
 			return true;
 		} else if(name == "OnResume"sv) {
 			onresume = func;
-			return true;
-		} else if(name == "OnEnd"sv) {
-			onend = func;
 			return true;
 		} else if(name == "OnEnd"sv) {
 			onend = func;
@@ -4764,6 +4795,217 @@ struct SPActionEntry
 		
 		return false;
 	}
+
+	bool get_function(std::string_view name, funcid_t &func)
+	{
+		if(name == "OnStart"sv) {
+			func = onstart->GetFunctionID();
+			return true;
+		} else if(name == "Update"sv) {
+			func = onupdate->GetFunctionID();
+			return true;
+		} else if(name == "OnSuspend"sv) {
+			func = onsus->GetFunctionID();
+			return true;
+		} else if(name == "OnResume"sv) {
+			func = onresume->GetFunctionID();
+			return true;
+		} else if(name == "OnEnd"sv) {
+			func = onend->GetFunctionID();
+			return true;
+		} else if(name == "InitialContainedAction"sv) {
+			func = intialact->GetFunctionID();
+			return true;
+		} else if(name == "OnLandOnGround"sv) {
+			func = landgrnd->GetFunctionID();
+			return true;
+		} else if(name == "OnContact"sv) {
+			func = oncontact->GetFunctionID();
+			return true;
+		} else if(name == "OnAnimationActivityComplete"sv) {
+			func = animcompl->GetFunctionID();
+			return true;
+		} else if(name == "OnAnimationActivityInterrupted"sv) {
+			func = animinter->GetFunctionID();
+			return true;
+		} else if(name == "OnAnimationEvent"sv) {
+			func = animevent->GetFunctionID();
+			return true;
+		} else if(name == "OnOtherKilled"sv) {
+			func = otherkilled->GetFunctionID();
+			return true;
+		} else if(name == "OnSight"sv) {
+			func = onsight->GetFunctionID();
+			return true;
+		} else if(name == "OnLostSight"sv) {
+			func = onlosesight->GetFunctionID();
+			return true;
+		} else if(name == "OnShoved"sv) {
+			func = shoved->GetFunctionID();
+			return true;
+		} else if(name == "OnBlinded"sv) {
+			func = blinded->GetFunctionID();
+			return true;
+		} else if(name == "OnTerritoryContested"sv) {
+			func = terrcontest->GetFunctionID();
+			return true;
+		} else if(name == "OnTerritoryCaptured"sv) {
+			func = terrcap->GetFunctionID();
+			return true;
+		} else if(name == "OnTerritoryLost"sv) {
+			func = terrlost->GetFunctionID();
+			return true;
+		} else if(name == "OnThreatChanged"sv) {
+			func = threachngd->GetFunctionID();
+			return true;
+		} else if(name == "OnHitByVomitJar"sv) {
+			func = hitvom->GetFunctionID();
+			return true;
+		} else if(name == "OnDrop"sv) {
+			func = drop->GetFunctionID();
+			return true;
+		} else if(name == "OnMoveToSuccess"sv) {
+			func = movesucc->GetFunctionID();
+			return true;
+		} else if(name == "OnStuck"sv) {
+			func = stuck->GetFunctionID();
+			return true;
+		} else if(name == "OnUnStuck"sv) {
+			func = unstuck->GetFunctionID();
+			return true;
+		} else if(name == "OnIgnite"sv) {
+			func = ignite->GetFunctionID();
+			return true;
+		} else if(name == "OnInjured"sv) {
+			func = injured->GetFunctionID();
+			return true;
+		} else if(name == "OnKilled"sv) {
+			func = killed->GetFunctionID();
+			return true;
+		} else if(name == "OnWin"sv) {
+			func = win->GetFunctionID();
+			return true;
+		} else if(name == "OnLose"sv) {
+			func = lose->GetFunctionID();
+			return true;
+		} else if(name == "OnEnteredSpit"sv) {
+			func = enterspit->GetFunctionID();
+			return true;
+		} else if(name == "OnModelChanged"sv) {
+			func = mdlchnd->GetFunctionID();
+			return true;
+		} else if(name == "OnMoveToFailure"sv) {
+			func = movefail->GetFunctionID();
+			return true;
+		} else if(name == "OnSound"sv) {
+			func = sound->GetFunctionID();
+			return true;
+		} else if(name == "OnWeaponFired"sv) {
+			func = wepfired->GetFunctionID();
+			return true;
+		} else if(name == "OnActorEmoted"sv) {
+			func = actemote->GetFunctionID();
+			return true;
+		} else if(name == "OnPickUp"sv) {
+			func = pickup->GetFunctionID();
+			return true;
+		}
+		
+		return false;
+	}
+
+	bool has_function(std::string_view name)
+	{
+		if(name == "OnStart"sv) {
+			return onstart;
+		} else if(name == "Update"sv) {
+			return onupdate;
+		} else if(name == "OnSuspend"sv) {
+			return onsus;
+		} else if(name == "OnResume"sv) {
+			return onresume;
+		} else if(name == "OnEnd"sv) {
+			return onend;
+		} else if(name == "InitialContainedAction"sv) {
+			return intialact;
+		} else if(name == "OnLandOnGround"sv) {
+			return landgrnd;
+		} else if(name == "OnContact"sv) {
+			return oncontact;
+		} else if(name == "OnAnimationActivityComplete"sv) {
+			return animcompl;
+		} else if(name == "OnAnimationActivityInterrupted"sv) {
+			return animinter;
+		} else if(name == "OnAnimationEvent"sv) {
+			return animevent;
+		} else if(name == "OnOtherKilled"sv) {
+			return otherkilled;
+		} else if(name == "OnSight"sv) {
+			return onsight;
+		} else if(name == "OnLostSight"sv) {
+			return onlosesight;
+		} else if(name == "OnShoved"sv) {
+			return shoved;
+		} else if(name == "OnBlinded"sv) {
+			return blinded;
+		} else if(name == "OnTerritoryContested"sv) {
+			return terrcontest;
+		} else if(name == "OnTerritoryCaptured"sv) {
+			return terrcap;
+		} else if(name == "OnTerritoryLost"sv) {
+			return terrlost;
+		} else if(name == "OnThreatChanged"sv) {
+			return threachngd;
+		} else if(name == "OnHitByVomitJar"sv) {
+			return hitvom;
+		} else if(name == "OnDrop"sv) {
+			return drop;
+		} else if(name == "OnMoveToSuccess"sv) {
+			return movesucc;
+		} else if(name == "OnStuck"sv) {
+			return stuck;
+		} else if(name == "OnUnStuck"sv) {
+			return unstuck;
+		} else if(name == "OnIgnite"sv) {
+			return ignite;
+		} else if(name == "OnInjured"sv) {
+			return injured;
+		} else if(name == "OnKilled"sv) {
+			return killed;
+		} else if(name == "OnWin"sv) {
+			return win;
+		} else if(name == "OnLose"sv) {
+			return lose;
+		} else if(name == "OnEnteredSpit"sv) {
+			return enterspit;
+		} else if(name == "OnModelChanged"sv) {
+			return mdlchnd;
+		} else if(name == "OnMoveToFailure"sv) {
+			return movefail;
+		} else if(name == "OnSound"sv) {
+			return sound;
+		} else if(name == "OnWeaponFired"sv) {
+			return wepfired;
+		} else if(name == "OnActorEmoted"sv) {
+			return actemote;
+		} else if(name == "OnPickUp"sv) {
+			return pickup;
+		}
+		
+		return false;
+	}
+};
+
+struct SPActionEntry : public SPActionEntryFuncs
+{
+	SPActionEntry(std::string &&name_, IdentityToken_t *id)
+		: name{std::move(name_)}, pId{id}
+	{
+	}
+	
+	std::string name;
+	
+	IdentityToken_t *pId = nullptr;
 	
 	Handle_t hndl = BAD_HANDLE;
 	IPluginContext *pContext = nullptr;
@@ -4799,11 +5041,187 @@ static_assert(sizeof(SPAction *) == sizeof(cell_t));
 #include <npcevent.h>
 
 using spvarmap_t = std::unordered_map<std::string, std::vector<cell_t>>;
+using spfncmap_t = std::unordered_map<std::string, IPluginFunction *>;
+
+class IPluginNextBotComponent;
+
+std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> spnbcomponents{};
+
+class IPluginNextBotComponent
+{
+public:
+	IPluginNextBotComponent(IdentityToken_t *id)
+		: pId{id}
+	{
+		auto it{spnbcomponents.find(id)};
+		if(it == spnbcomponents.cend()) {
+			it = spnbcomponents.emplace(id, std::vector<IPluginNextBotComponent *>{}).first;
+		}
+		it->second.emplace_back(this);
+	}
+	
+	virtual ~IPluginNextBotComponent()
+	{
+		auto it{spnbcomponents.find(pId)};
+		if(it != spnbcomponents.cend()) {
+			std::vector<IPluginNextBotComponent *> &vec{it->second};
+
+			auto it_vec = vec.begin();
+			while(it_vec != vec.end()) {
+				if(*it_vec == this) {
+					vec.erase(it_vec);
+					break;
+				}
+
+				++it_vec;
+			}
+
+			if(vec.empty()) {
+				spnbcomponents.erase(it);
+			}
+		}
+	}
+	
+	cell_t handle_set_function(IPluginContext *pContext, const cell_t *params)
+	{
+		if(pId != pContext->GetIdentity()) {
+			return pContext->ThrowNativeError("this plugin doenst own this component");
+		}
+		
+		char *name_ptr = nullptr;
+		pContext->LocalToString(params[2], &name_ptr);
+		std::string_view name{name_ptr};
+		
+		IPluginFunction *func = pContext->GetFunctionById(params[3]);
+		
+		if(!set_function(name, func)) {
+			return pContext->ThrowNativeError("invalid name %s", name_ptr);
+		}
+		
+		return 0;
+	}
+
+	cell_t handle_get_function(IPluginContext *pContext, const cell_t *params)
+	{
+		if(pId != pContext->GetIdentity()) {
+			return pContext->ThrowNativeError("this plugin doenst own this component");
+		}
+		
+		char *name_ptr = nullptr;
+		pContext->LocalToString(params[2], &name_ptr);
+		std::string_view name{name_ptr};
+		
+		funcid_t func{static_cast<funcid_t>(-1)};
+		
+		if(!get_function(name, func)) {
+			return pContext->ThrowNativeError("invalid name %s", name_ptr);
+		}
+		
+		return func;
+	}
+
+	cell_t handle_has_function(IPluginContext *pContext, const cell_t *params)
+	{
+		if(pId != pContext->GetIdentity()) {
+			return pContext->ThrowNativeError("this plugin doenst own this component");
+		}
+		
+		char *name_ptr = nullptr;
+		pContext->LocalToString(params[2], &name_ptr);
+		std::string_view name{name_ptr};
+		
+		return has_function(name);
+	}
+
+	virtual void plugin_unloaded()
+	{
+		pId = nullptr;
+	}
+	
+	virtual bool set_function(std::string_view name, IPluginFunction *func)
+	{
+		return false;
+	}
+
+	virtual bool get_function(std::string_view name, funcid_t &func)
+	{
+		return false;
+	}
+
+	virtual bool has_function(std::string_view name)
+	{
+		return false;
+	}
+
+	IdentityToken_t *pId{nullptr};
+
+	spvarmap_t &get_sp_data()
+	{ return data; }
+
+	spvarmap_t data{};
+};
+
+class SPActionPluginComponent : public IPluginNextBotComponent, public SPActionEntryFuncs
+{
+public:
+	using IPluginNextBotComponent::IPluginNextBotComponent;
+
+	void plugin_unloaded() override
+	{
+		IPluginNextBotComponent::plugin_unloaded();
+		SPActionEntryFuncs::plugin_unloaded();
+
+		fncs.clear();
+	}
+
+	bool set_function(std::string_view name, IPluginFunction *func) override
+	{
+		if(SPActionEntryFuncs::set_function(name, func)) {
+			return true;
+		}
+		std::string name_tmp{name};
+		auto it{fncs.find(name_tmp)};
+		if(it == fncs.cend()) {
+			it = fncs.emplace(std::move(name_tmp), func).first;
+		} else {
+			it->second = func;
+		}
+		return true;
+	}
+
+	bool get_function(std::string_view name, funcid_t &func) override
+	{
+		if(SPActionEntryFuncs::get_function(name, func)) {
+			return true;
+		}
+		std::string name_tmp{name};
+		auto it{fncs.find(name_tmp)};
+		if(it == fncs.cend()) {
+			return false;
+		}
+		func = it->second->GetFunctionID();
+		return true;
+	}
+
+	bool has_function(std::string_view name) override
+	{
+		if(SPActionEntryFuncs::has_function(name)) {
+			return true;
+		}
+		std::string name_tmp{name};
+		auto it{fncs.find(name_tmp)};
+		return (it != fncs.cend());
+	}
+
+	spfncmap_t fncs{};
+};
 
 class SPAction : public Action<SPActor>
 {
 public:
 	using BaseClass = Action<SPActor>;
+
+	SPAction() = delete;
 	
 	virtual const char *GetName( void ) const { return name.c_str(); }
 
@@ -4873,18 +5291,41 @@ public:
 			entry->on_destroyed(this);
 		}
 	}
-	
-	SPActionEntry *entry = nullptr;
-	spvarmap_t data{};
+
+	SPAction(IdentityToken_t *id)
+		: BaseClass{}, plugin{id}
+	{
+	}
+
+	SPActionEntry *entry{nullptr};
+	SPActionPluginComponent plugin;
 	std::string name{};
-	
+
+	cell_t handle_set_function(IPluginContext *pContext, const cell_t *params)
+	{ return plugin.handle_set_function(pContext, params); }
+	cell_t handle_get_function(IPluginContext *pContext, const cell_t *params)
+	{ return plugin.handle_get_function(pContext, params); }
+	cell_t handle_has_function(IPluginContext *pContext, const cell_t *params)
+	{ return plugin.handle_has_function(pContext, params); }
+	spvarmap_t &get_sp_data()
+	{ return plugin.get_sp_data(); }
+
+	IPluginFunction *get_entry_func(IPluginFunction *(SPActionEntryFuncs::*func))
+	{
+		if(plugin.*func) {
+			return plugin.*func;
+		} else {
+			return entry->*func;
+		}
+	}
+
 	virtual BaseClass *InitialContainedAction(SPActor *me)
 	{
 		if(!entry) {
 			return nullptr;
 		}
 		
-		IPluginFunction *func = entry->intialact;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::intialact);
 		
 		if(!func) {
 			return nullptr;
@@ -4905,7 +5346,7 @@ public:
 			return Done("missing entry");
 		}
 		
-		IPluginFunction *func = entry->onstart;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onstart);
 		
 		if(!func) {
 			return Continue();
@@ -4933,7 +5374,7 @@ public:
 			return Done("missing entry");
 		}
 		
-		IPluginFunction *func = entry->onupdate;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onupdate);
 		
 		if(!func) {
 			return Continue();
@@ -4961,7 +5402,7 @@ public:
 			return Done("missing entry");
 		}
 		
-		IPluginFunction *func = entry->onsus;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onsus);
 		
 		if(!func) {
 			return Continue();
@@ -4989,7 +5430,7 @@ public:
 			return Done("missing entry");
 		}
 		
-		IPluginFunction *func = entry->onresume;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onresume);
 		
 		if(!func) {
 			return Continue();
@@ -5017,7 +5458,7 @@ public:
 			return;
 		}
 		
-		IPluginFunction *func = entry->onend;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onend);
 		
 		if(!func) {
 			return;
@@ -5036,7 +5477,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->leavegrnd;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::leavegrnd);
 		
 		if(!func) {
 			return TryContinue();
@@ -5063,7 +5504,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->landgrnd;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::landgrnd);
 		
 		if(!func) {
 			return TryContinue();
@@ -5090,7 +5531,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->oncontact;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::oncontact);
 		
 		if(!func) {
 			return TryContinue();
@@ -5117,7 +5558,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->movesucc;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::movesucc);
 		
 		if(!func) {
 			return TryContinue();
@@ -5143,7 +5584,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->movefail;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::movefail);
 		
 		if(!func) {
 			return TryContinue();
@@ -5170,7 +5611,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->stuck;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::stuck);
 		
 		if(!func) {
 			return TryContinue();
@@ -5196,7 +5637,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->unstuck;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::unstuck);
 		
 		if(!func) {
 			return TryContinue();
@@ -5223,7 +5664,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->animcompl;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::animcompl);
 		
 		if(!func) {
 			return TryContinue();
@@ -5250,7 +5691,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->animinter;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::animinter);
 		
 		if(!func) {
 			return TryContinue();
@@ -5277,7 +5718,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->animevent;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::animevent);
 		
 		if(!func) {
 			return TryContinue();
@@ -5308,7 +5749,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->ignite;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::ignite);
 		
 		if(!func) {
 			return TryContinue();
@@ -5334,7 +5775,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->injured;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::injured);
 		
 		if(!func) {
 			return TryContinue();
@@ -5374,7 +5815,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->killed;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::killed);
 		
 		if(!func) {
 			return TryContinue();
@@ -5414,7 +5855,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->otherkilled;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::otherkilled);
 		
 		if(!func) {
 			return TryContinue();
@@ -5455,7 +5896,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->onsight;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onsight);
 		
 		if(!func) {
 			return TryContinue();
@@ -5482,7 +5923,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->onlosesight;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::onlosesight);
 		
 		if(!func) {
 			return TryContinue();
@@ -5509,7 +5950,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->sound;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::sound);
 		
 		if(!func) {
 			return TryContinue();
@@ -5532,14 +5973,21 @@ public:
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnSpokeConcept(SPActor *me, CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response )	{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnSpokeConcept(SPActor *me, CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response )
+	{
+		if(!entry) {
+			return TryDone(RESULT_CRITICAL, "missing entry");
+		}
+
+		return TryContinue();
+	}
 	virtual SPEventDesiredResult::BaseClass OnWeaponFired(SPActor *me, CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon )
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->wepfired;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::wepfired);
 		
 		if(!func) {
 			return TryContinue();
@@ -5568,7 +6016,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->mdlchnd;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::mdlchnd);
 		
 		if(!func) {
 			return TryContinue();
@@ -5594,7 +6042,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->pickup;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::pickup);
 		
 		if(!func) {
 			return TryContinue();
@@ -5621,7 +6069,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->pickup;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::pickup);
 		
 		if(!func) {
 			return TryContinue();
@@ -5648,7 +6096,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->actemote;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::actemote);
 		
 		if(!func) {
 			return TryContinue();
@@ -5685,7 +6133,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->shoved;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::shoved);
 		
 		if(!func) {
 			return TryContinue();
@@ -5712,7 +6160,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->blinded;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::blinded);
 		
 		if(!func) {
 			return TryContinue();
@@ -5739,7 +6187,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->terrcontest;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::terrcontest);
 		
 		if(!func) {
 			return TryContinue();
@@ -5766,7 +6214,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->terrcap;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::terrcap);
 		
 		if(!func) {
 			return TryContinue();
@@ -5793,7 +6241,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->terrlost;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::terrlost);
 		
 		if(!func) {
 			return TryContinue();
@@ -5820,7 +6268,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->win;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::win);
 		
 		if(!func) {
 			return TryContinue();
@@ -5846,7 +6294,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->lose;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::lose);
 		
 		if(!func) {
 			return TryContinue();
@@ -5873,7 +6321,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->threachngd;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::threachngd);
 		
 		if(!func) {
 			return TryContinue();
@@ -5900,7 +6348,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->enterspit;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::enterspit);
 		
 		if(!func) {
 			return TryContinue();
@@ -5926,7 +6374,7 @@ public:
 			return TryDone(RESULT_CRITICAL, "missing entry");
 		}
 		
-		IPluginFunction *func = entry->hitvom;
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::hitvom);
 		
 		if(!func) {
 			return TryContinue();
@@ -5952,72 +6400,12 @@ public:
 
 SPAction *SPActionEntry::create()
 {
-	SPAction *action = new SPAction{};
+	SPAction *action = new SPAction{pId};
 	action->entry = this;
 	action->name = name;
 	actions.emplace_back(action);
 	return action;
 }
-
-class IPluginNextBotComponent;
-
-std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> spnbcomponents{};
-
-class IPluginNextBotComponent
-{
-public:
-	IPluginNextBotComponent(IdentityToken_t *id)
-		: pId{id}
-	{
-		spnbcomponents[pId].emplace_back(this);
-	}
-	
-	virtual ~IPluginNextBotComponent()
-	{
-		std::vector<IPluginNextBotComponent *> &vec = spnbcomponents[pId];
-		
-		auto it = vec.begin();
-		while(it != vec.end()) {
-			if(*it == this) {
-				vec.erase(it);
-				break;
-			}
-			
-			++it;
-		}
-	}
-	
-	cell_t handle_set_function(IPluginContext *pContext, const cell_t *params)
-	{
-		if(pId != pContext->GetIdentity()) {
-			return pContext->ThrowNativeError("this plugin doenst own this component");
-		}
-		
-		char *name_ptr = nullptr;
-		pContext->LocalToString(params[2], &name_ptr);
-		std::string_view name{name_ptr};
-		
-		IPluginFunction *func = pContext->GetFunctionById(params[3]);
-		
-		if(!set_function(name, func)) {
-			return pContext->ThrowNativeError("invalid name %s", name_ptr);
-		}
-		
-		return 0;
-	}
-	
-	virtual void plugin_unloaded()
-	{
-		pId = nullptr;
-	}
-	
-	virtual bool set_function(std::string_view name, IPluginFunction *func)
-	{ return false; }
-	
-	IdentityToken_t *pId = nullptr;
-	
-	spvarmap_t data{};
-};
 
 #define IS_ANY_HINDRANCE_POSSIBLE	( (CBaseEntity*)0xFFFFFFFF )
 
@@ -12771,6 +13159,22 @@ cell_t CustomComponentset_function(IPluginContext *pContext, const cell_t *param
 }
 
 template <typename T>
+cell_t CustomComponentget_function(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return vars.handle_get_function(pContext, params);
+}
+
+template <typename T>
+cell_t CustomComponenthas_function(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return vars.handle_has_function(pContext, params);
+}
+
+template <typename T>
 cell_t CustomComponentset_data(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
@@ -12812,6 +13216,10 @@ cell_t CustomComponentget_data_array(IPluginContext *pContext, const cell_t *par
 
 cell_t NextBotFlyingLocomotionset_function(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_function<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionget_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_function<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionhas_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponenthas_function<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionset_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionget_data(IPluginContext *pContext, const cell_t *params)
@@ -12825,6 +13233,10 @@ cell_t NextBotFlyingLocomotionget_data_array(IPluginContext *pContext, const cel
 
 cell_t GameLocomotionCustomset_function(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_function<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomget_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_function<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomhas_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponenthas_function<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomget_data(IPluginContext *pContext, const cell_t *params)
@@ -12838,6 +13250,10 @@ cell_t GameLocomotionCustomget_data_array(IPluginContext *pContext, const cell_t
 
 cell_t GameVisionCustomset_function(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_function<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomget_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentget_function<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomhas_function(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponenthas_function<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomget_data(IPluginContext *pContext, const cell_t *params)
@@ -14069,42 +14485,60 @@ cell_t Componentset_function(IPluginContext *pContext, const cell_t *params)
 }
 
 template <typename T>
+cell_t Componentget_function(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return locomotion->handle_get_function(pContext, params);
+}
+
+template <typename T>
+cell_t Componenthas_function(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return locomotion->handle_has_function(pContext, params);
+}
+
+template <typename T>
 cell_t Componentset_data(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
-	return handle_set_data(pContext, params, locomotion->data);
+	return handle_set_data(pContext, params, locomotion->get_sp_data());
 }
 
 template <typename T>
 cell_t Componentget_data(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
-	return handle_get_data(pContext, params, locomotion->data);
+	return handle_get_data(pContext, params, locomotion->get_sp_data());
 }
 
 template <typename T>
 cell_t Componenthas_data(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
-	return handle_has_data(pContext, params, locomotion->data);
+	return handle_has_data(pContext, params, locomotion->get_sp_data());
 }
 
 template <typename T>
 cell_t Componentset_data_array(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
-	return handle_set_data_array(pContext, params, locomotion->data);
+	return handle_set_data_array(pContext, params, locomotion->get_sp_data());
 }
 
 template <typename T>
 cell_t Componentget_data_array(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
-	return handle_get_data_array(pContext, params, locomotion->data);
+	return handle_get_data_array(pContext, params, locomotion->get_sp_data());
 }
 
 cell_t INextBotCustomset_function(IPluginContext *pContext, const cell_t *params)
 { return Componentset_function<INextBotCustom>(pContext, params); }
+cell_t INextBotCustomget_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_function<INextBotCustom>(pContext, params); }
+cell_t INextBotCustomhas_function(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_function<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomget_data(IPluginContext *pContext, const cell_t *params)
@@ -14157,6 +14591,56 @@ cell_t BehaviorActionEntryset_function(IPluginContext *pContext, const cell_t *p
 	}
 	
 	return 0;
+}
+
+cell_t BehaviorActionEntryget_function(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	SPActionEntry *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], BehaviorEntryHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	if(obj->pId != pContext->GetIdentity()) {
+		return pContext->ThrowNativeError("this plugin doenst own this entry");
+	}
+	
+	char *name_ptr = nullptr;
+	pContext->LocalToString(params[2], &name_ptr);
+	std::string_view name{name_ptr};
+	
+	funcid_t func{static_cast<funcid_t>(-1)};
+	
+	if(!obj->get_function(name, func)) {
+		return pContext->ThrowNativeError("invalid name %s", name_ptr);
+	}
+	
+	return func;
+}
+
+cell_t BehaviorActionEntryhas_function(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	SPActionEntry *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], BehaviorEntryHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	if(obj->pId != pContext->GetIdentity()) {
+		return pContext->ThrowNativeError("this plugin doenst own this entry");
+	}
+	
+	char *name_ptr = nullptr;
+	pContext->LocalToString(params[2], &name_ptr);
+	std::string_view name{name_ptr};
+	
+	return obj->has_function(name);
 }
 
 cell_t BehaviorActionEntrycreate(IPluginContext *pContext, const cell_t *params)
@@ -14216,9 +14700,19 @@ cell_t BehaviorActionset_data_array(IPluginContext *pContext, const cell_t *para
 { return Componentset_data_array<SPAction>(pContext, params); }
 cell_t BehaviorActionget_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data_array<SPAction>(pContext, params); }
+cell_t BehaviorActionset_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentset_function<SPAction>(pContext, params); }
+cell_t BehaviorActionget_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_function<SPAction>(pContext, params); }
+cell_t BehaviorActionhas_function(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_function<SPAction>(pContext, params); }
 
 cell_t IIntentionCustomset_function(IPluginContext *pContext, const cell_t *params)
 { return Componentset_function<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomget_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_function<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomhas_function(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_function<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomget_data(IPluginContext *pContext, const cell_t *params)
@@ -14232,6 +14726,10 @@ cell_t IIntentionCustomget_data_array(IPluginContext *pContext, const cell_t *pa
 
 cell_t IBodyCustomset_function(IPluginContext *pContext, const cell_t *params)
 { return Componentset_function<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomget_function(IPluginContext *pContext, const cell_t *params)
+{ return Componentget_function<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomhas_function(IPluginContext *pContext, const cell_t *params)
+{ return Componenthas_function<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomset_data(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomget_data(IPluginContext *pContext, const cell_t *params)
@@ -15121,6 +15619,8 @@ sp_nativeinfo_t natives[] =
 	{"MakeEntityNextBot", MakeEntityNextBot},
 	{"BehaviorActionEntry.BehaviorActionEntry", BehaviorActionEntryCTOR},
 	{"BehaviorActionEntry.set_function", BehaviorActionEntryset_function},
+	{"BehaviorActionEntry.get_function", BehaviorActionEntryget_function},
+	{"BehaviorActionEntry.has_function", BehaviorActionEntryhas_function},
 	{"BehaviorActionEntry.create", BehaviorActionEntrycreate},
 	{"BehaviorAction.Entry.get", BehaviorActionEntryget},
 	{"BehaviorAction.set_data", BehaviorActionset_data},
@@ -15128,6 +15628,9 @@ sp_nativeinfo_t natives[] =
 	{"BehaviorAction.has_data", BehaviorActionhas_data},
 	{"BehaviorAction.set_data_array", BehaviorActionset_data_array},
 	{"BehaviorAction.get_data_array", BehaviorActionget_data_array},
+	{"BehaviorAction.set_function", BehaviorActionset_function},
+	{"BehaviorAction.get_function", BehaviorActionget_function},
+	{"BehaviorAction.has_function", BehaviorActionhas_function},
 	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
 	{"IIntentionCustom.set_name", IIntentionCustomset_name},
 	{"GetNavAreaVectorCount", GetNavAreaVectorCount},
@@ -16877,14 +17380,10 @@ void Sample::OnPluginLoaded(IPlugin *plugin)
 void Sample::OnPluginUnloaded(IPlugin *plugin)
 {
 	auto it = spnbcomponents.find(plugin->GetIdentity());
-	if(it != spnbcomponents.end()) {
-		std::vector<IPluginNextBotComponent *> &vec = it->second;
-		
-		for(IPluginNextBotComponent *inte : vec) {
-			if(!inte) {
-				continue;
-			}
+	if(it != spnbcomponents.cend()) {
+		std::vector<IPluginNextBotComponent *> &vec{it->second};
 
+		for(IPluginNextBotComponent *inte : vec) {
 			inte->plugin_unloaded();
 		}
 
