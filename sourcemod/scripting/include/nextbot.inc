@@ -2278,13 +2278,13 @@ static Address datamaps_allocateinfectednextbot(int size_modifier, int data)
 { return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
 #endif
 
-stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] clientnet, entityalloc_func_t alloc, int size, any data, CustomSendtable &table = null)
+stock CustomDatamap __register_nb_factory_based(const char[] classname, const char[] name, const char[] clientnet, const char[] based, CustomSendtable &table = null, CustomEntityFactory &factory = null)
 {
 	char netname[64];
 	netname[0] = 'C';
 	strcopy(netname[1], sizeof(netname)-1, name);
 
-	CustomEntityFactory factory = EntityFactoryDictionary.register_function(classname, alloc, size, data);
+	factory = EntityFactoryDictionary.register_based_name(classname, based);
 	table = CustomSendtable.from_factory(factory);
 	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
 		table.override_with(clientnet);
@@ -2296,38 +2296,50 @@ stock CustomDatamap __register_nb_factory_func(const char[] classname, const cha
 	return datamap;
 }
 
-stock CustomDatamap __register_nb_factory_based(const char[] classname, const char[] name, const char[] clientnet, const char[] based, CustomSendtable &table = null)
+stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] clientnet, entityalloc_func_t alloc, int size, any data, CustomSendtable &table = null, CustomEntityFactory &factory = null)
 {
 	char netname[64];
 	netname[0] = 'C';
 	strcopy(netname[1], sizeof(netname)-1, name);
 
-	CustomEntityFactory factory = EntityFactoryDictionary.register_based_name(classname, based);
+	factory = EntityFactoryDictionary.register_function(classname, alloc, size, data);
 	table = CustomSendtable.from_factory(factory);
 	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
 		table.override_with(clientnet);
 	}
-	table.set_network_name(netname);
 	CustomDatamap datamap = CustomDatamap.from_factory(factory);
 	datamap.set_name(netname);
 
 	return datamap;
 }
 
-stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name, const char[] clientnet = NULL_STRING, CustomSendtable &table = null)
-{ return __register_nb_factory_func(classname, name, clientnet, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table); }
+stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name, const char[] clientnet = NULL_STRING, CustomSendtable &table = null, CustomEntityFactory &factory = null)
+{ return __register_nb_factory_func(classname, name, clientnet, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table, factory); }
 
 #if defined GAME_TF2
-stock CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name)
+stock CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name, CustomEntityFactory &factory = null)
 {
 	CustomSendtable table;
-	CustomDatamap datamap = register_nextbot_factory(classname, name, "CTFTankBoss", table);
+	CustomDatamap datamap = register_nextbot_factory(classname, name, "CTFTankBoss", table, factory);
+	table.set_name("DT_TFBaseBoss");
+	table.set_network_name("CTFBaseBoss");
 	table.add_prop_float("m_lastHealthPercentage", 0.0, 1.0, 11, SPROP_NOSCALE);
 	return datamap;
 }
 
-stock CustomDatamap register_robot_nextbot_factory(const char[] classname, const char[] name)
-{ return register_nextbot_factory(classname, name, "CTFRobotDestruction_Robot"); }
+stock CustomDatamap register_robot_nextbot_factory(const char[] classname, const char[] name, CustomEntityFactory &factory = null)
+{
+	int m_iHealth_offset = FindSendPropInfo("CTFRobotDestruction_Robot", "m_iHealth");
+	int m_iMaxHealth_offset = FindSendPropInfo("CTFRobotDestruction_Robot", "m_iMaxHealth");
+	CustomSendtable table;
+	CustomDatamap datamap = register_nextbot_factory(classname, name, "CTFRobotDestruction_Robot", table, factory);
+	table.set_name("DT_TFRobotDestruction_Robot");
+	table.set_network_name("CTFRobotDestruction_Robot");
+	table.add_prop_int("m_iHealth", 4, -1, SPROP_VARINT, m_iHealth_offset);
+	table.add_prop_int("m_iMaxHealth", 4, -1, SPROP_VARINT, m_iMaxHealth_offset);
+	table.add_prop_int("m_eType", 4, -1, SPROP_VARINT, -1);
+	return datamap;
+}
 #endif
 
 #if defined GAME_L4D2
