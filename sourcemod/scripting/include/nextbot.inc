@@ -2196,6 +2196,11 @@ methodmap PathFollower < Path
 		public native get();
 	}
 
+	property bool AllowFacing
+	{
+		public native set(bool value);
+	}
+
 	public native bool IsDiscontinuityAhead(INextBot bot, SegmentType type, float range = -1.0);
 
 	public native bool IsAtGoal(INextBot bot);

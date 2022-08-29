@@ -342,7 +342,6 @@ int m_CollisionGroupOffset = -1;
 int m_bSequenceFinishedOffset = -1;
 int m_flPlaybackRateOffset = -1;
 int m_nSequenceOffset = -1;
-int m_flAnimTimeOffset = -1;
 int m_flCycleOffset = -1;
 int m_flGroundSpeedOffset = -1;
 
@@ -1319,6 +1318,23 @@ inline bool FClassnameIs(CBaseEntity *pEntity, const char *szClassname)
 IAnimHelpers *g_pAnimHelpers = nullptr;
 #endif
 
+int m_bSequenceLoopsOffset = -1;
+
+const char *ActivityName(int activity)
+{
+#ifdef __HAS_ANIMHELPERS
+	if(g_pAnimHelpers) {
+		const char *name{g_pAnimHelpers->ActivityName(activity)};
+		if(!name) {
+			return "";
+		}
+		return name;
+	}
+#endif
+
+	return "";
+}
+
 class CBaseAnimating : public CBaseEntity
 {
 public:
@@ -1358,6 +1374,21 @@ public:
 	#endif
 	}
 
+	const char *SequenceName(int sequence)
+	{
+	#ifdef __HAS_ANIMHELPERS
+		if(g_pAnimHelpers) {
+			const char *name{g_pAnimHelpers->SequenceName(this, sequence)};
+			if(!name) {
+				return "";
+			}
+			return name;
+		}
+	#endif
+
+		return "";
+	}
+
 	bool GetSequeceFinished()
 	{
 		if(m_bSequenceFinishedOffset == -1) {
@@ -1368,6 +1399,18 @@ public:
 		}
 
 		return *(bool *)((unsigned char *)this + m_bSequenceFinishedOffset);
+	}
+
+	bool GetSequeceLoops()
+	{
+		if(m_bSequenceLoopsOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_bSequenceLoops", &info);
+			m_bSequenceLoopsOffset = info.actual_offset;
+		}
+
+		return *(bool *)((unsigned char *)this + m_bSequenceLoopsOffset);
 	}
 
 	void SetSequeceFinished(bool fin)
@@ -1420,19 +1463,6 @@ public:
 		SetEdictStateChanged(this, m_nSequenceOffset);
 	}
 
-	void SetAnimTime(float tim)
-	{
-		if(m_flAnimTimeOffset == -1) {
-			sm_datatable_info_t info{};
-			datamap_t *pMap = gamehelpers->GetDataMap(this);
-			gamehelpers->FindDataMapInfo(pMap, "m_flAnimTime", &info);
-			m_flAnimTimeOffset = info.actual_offset;
-		}
-
-		*(float *)((unsigned char *)this + m_flAnimTimeOffset) = tim;
-		SetEdictStateChanged(this, m_flAnimTimeOffset);
-	}
-
 	void SetCycle(float tim)
 	{
 		if(m_flCycleOffset == -1) {
@@ -1448,21 +1478,15 @@ public:
 
 	void ResetSequence(int seq)
 	{
+		if(!GetSequeceLoops()) {
+			SetCycle(0.0f);
+		}
 		int old = GetSequence();
 		bool changed = (old != seq);
 		SetSequence(seq);
-		if(changed) {
-			SetAnimTime(gpGlobals->curtime);
-			SetCycle(0.0f);
+		if(changed || !GetSequeceLoops()) {
 			ResetSequenceInfo();
 		}
-	}
-
-	void RestartSequence()
-	{
-		SetAnimTime(gpGlobals->curtime);
-		SetCycle(0.0f);
-		SetSequeceFinished(false);
 	}
 
 	float GetGroundSpeed()
@@ -6935,6 +6959,22 @@ LocomotionType g_nLocomotionType = Locomotion_None;
 static bool g_bHackDetectLocomotion = false;
 static LocomotionType g_nHackDetectLocomotion = Locomotion_None;
 
+LocomotionType get_locomotion_type(ILocomotion *loc)
+{
+	g_nHackDetectLocomotion = Locomotion_None;
+	g_bHackDetectLocomotion = true;
+	loc->GetSpeedLimit();
+	LocomotionType type = g_nHackDetectLocomotion;
+	g_bHackDetectLocomotion = false;
+	g_nHackDetectLocomotion = Locomotion_None;
+
+	if(type == Locomotion_None) {
+		type = Locomotion_Any;
+	}
+
+	return type;
+}
+
 struct customlocomotion_base_vars_t : IPluginNextBotComponent
 {
 public:
@@ -7276,7 +7316,9 @@ SH_DECL_HOOK0(ZombieBotLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
 #endif
 
 class GameLocomotionCustom;
-	
+
+static bool g_bFaceTowardsDisabled{false};
+
 struct customlocomotion_vars_t : customlocomotion_base_vars_t
 {
 	customlocomotion_vars_t(IdentityToken_t *id, LocomotionType type_)
@@ -7285,17 +7327,26 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 	float yaw = 250.0f;
 	
 	IPluginFunction *travladdr = nullptr;
-	
-	float HookGetMaxYawRate()
-	{ RETURN_META_VALUE(MRES_SUPERCEDE, yaw); }
-	
+
 	virtual void plugin_unloaded() override
 	{
 		customlocomotion_base_vars_t::plugin_unloaded();
 		
 		travladdr = nullptr;
 	}
-	
+
+	float HookGetMaxYawRate()
+	{ RETURN_META_VALUE(MRES_SUPERCEDE, yaw); }
+
+	void HookFaceTowards( const Vector &target )
+	{
+		if(g_bFaceTowardsDisabled) {
+			RETURN_META(MRES_SUPERCEDE);
+		}
+
+		RETURN_META(MRES_IGNORED);
+	}
+
 	META_RES TraverseLadder(GameLocomotionCustom *loc, bool &result)
 	{
 		if(!travladdr) {
@@ -7332,6 +7383,8 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		GameLocomotion *gameloc = (GameLocomotion *)loc;
 		
 		SH_REMOVE_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
+
+		SH_REMOVE_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowards), false);
 	}
 	
 	virtual void add_hooks(ILocomotion *loc, bool hook_update = true) override
@@ -7341,6 +7394,8 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		GameLocomotion *gameloc = (GameLocomotion *)loc;
 		
 		SH_ADD_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
+
+		SH_ADD_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowards), false);
 	}
 };
 
@@ -7425,7 +7480,7 @@ ConVar tf_npc_flying_init_vel( "tf_npc_flying_init_vel", "250" );
 ConVar tf_npc_flying_algo( "tf_npc_flying_algo", "0" );
 ConVar tf_npc_flying_loc_onground( "tf_npc_flying_loc_onground", "1" );
 
-static bool g_bFlyingLocomotionIgnorePitch{false};
+static bool g_bInPathFollowerFaceTowards{false};
 
 CBaseEntity *FindEntityByClassname( CBaseEntity *pStartEntity, const char *szName )
 {
@@ -7935,10 +7990,16 @@ public:
 
 	void HookFaceTowards( const Vector &target )
 	{
+		if(g_bFaceTowardsDisabled) {
+			RETURN_META(MRES_SUPERCEDE);
+		}
+
 		CBaseCombatCharacter *me = GetBot()->GetEntity();
 
+		bool ignore_pitch = g_bInPathFollowerFaceTowards;
+
 		Vector toTarget = target - me->WorldSpaceCenter();
-		if(g_bFlyingLocomotionIgnorePitch) {
+		if(ignore_pitch) {
 			toTarget.z = 0.0f;
 		}
 
@@ -7957,7 +8018,7 @@ public:
 			angles.y += yawAngleDiff;
 		}
 
-		if(!g_bFlyingLocomotionIgnorePitch) {
+		if(!ignore_pitch) {
 			float desiredPitch = UTIL_VecToPitch( toTarget );
 			float pitchAngleDiff = UTIL_AngleDiff( desiredPitch, angles.x );
 			float deltaPitch = GetMaxPitchRate() * deltaT;
@@ -8199,8 +8260,7 @@ public:
 		}
 
 		if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-			//TODO!!!! activity and sequence name
-			DevMsg("%s: IBodyCustom::SelectAnimationSequence([%i, %s]) = [%i, %s]\n", bot->GetDebugIdentifier(), act, "", seq, "");
+			DevMsg("%s: IBodyCustom::SelectAnimationSequence([%i, %s]) = [%i, %s]\n", bot->GetDebugIdentifier(), act, ActivityName(act), seq, pEntity->SequenceName(seq));
 		}
 
 		return seq;
@@ -8212,20 +8272,19 @@ public:
 
 		if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
 			//TODO!!!! activity name
-			DevMsg("%s: IBodyCustom::StartActivity([%i, %s], %i)\n", bot->GetDebugIdentifier(), act, "", flags);
+			DevMsg("%s: IBodyCustom::StartActivity([%i, %s], %i)\n", bot->GetDebugIdentifier(), act, ActivityName(act), flags);
 		}
 
 		if(act == ACT_INVALID) {
 			return false;
 		}
 
-		act = TranslateActivity(act);
-
-		if(act == ACT_INVALID) {
+		Activity real_act = TranslateActivity(act);
+		if(real_act == ACT_INVALID) {
 			return false;
 		}
 
-		int seq = SelectAnimationSequence(act);
+		int seq = SelectAnimationSequence(real_act);
 		if(seq == -1) {
 			return false;
 		}
@@ -8241,18 +8300,22 @@ public:
 
 		if(flags & ACTIVITY_TRANSITORY) {
 			flags &= ~ACTIVITY_TRANSITORY;
-			if(current_act[1].act != act) {
-				current_act[1].seq = seq;
-			}
-			current_act[1].act = act;
-			current_act[1].flags = flags;
 			current_flags |= ACTIVITY_TRANSITORY;
-		} else {
-			if(current_act[0].act != act) {
-				current_act[0].seq = seq;
-			}
-			current_act[0].act = act;
-			current_act[0].flags = flags;
+		}
+
+		act_info_t &act_info{get_act_info()};
+
+		bool changed{act_info.real_act != real_act};
+
+		act_info.seq = seq;
+		act_info.act = act;
+		act_info.real_act = real_act;
+		act_info.flags = flags;
+
+		CBaseCombatCharacter *pEntity = bot->GetEntity();
+
+		if(changed) {
+			pEntity->ResetSequence(seq);
 		}
 
 		return true;
@@ -8260,20 +8323,12 @@ public:
 
 	Activity GetActivity() const override
 	{
-		if(current_flags & ACTIVITY_TRANSITORY) {
-			return current_act[1].act;
-		} else {
-			return current_act[0].act;
-		}
+		return get_act_info().act;
 	}
 
 	int GetSequence()
 	{
-		if(current_flags & ACTIVITY_TRANSITORY) {
-			return current_act[1].seq;
-		} else {
-			return current_act[0].seq;
-		}
+		return get_act_info().seq;
 	}
 
 	bool HasActivityType( unsigned int flags ) const override
@@ -8286,11 +8341,7 @@ public:
 
 		flags &= ~(ACTIVITY_TRANSITORY|ACTIVITY_UNINTERRUPTIBLE);
 
-		if(current_flags & ACTIVITY_TRANSITORY) {
-			return !!(current_act[1].flags & flags);
-		} else {
-			return !!(current_act[0].flags & flags);
-		}
+		return !!(get_act_info().flags & flags);
 	}
 
 	void SetDesiredPosture( PostureType posture ) override
@@ -8318,16 +8369,36 @@ public:
 	struct act_info_t
 	{
 		Activity act = ACT_INVALID;
+		Activity real_act = ACT_INVALID;
 		int seq = -1;
 		unsigned int flags = 0;
 
 		void reset()
 		{
 			act = ACT_INVALID;
+			real_act = ACT_INVALID;
 			seq = -1;
 			flags = 0;
 		}
 	};
+
+	const act_info_t &get_act_info() const
+	{
+		if(current_flags & ACTIVITY_TRANSITORY) {
+			return current_act[1];
+		} else {
+			return current_act[0];
+		}
+	}
+
+	act_info_t &get_act_info()
+	{
+		if(current_flags & ACTIVITY_TRANSITORY) {
+			return current_act[1];
+		} else {
+			return current_act[0];
+		}
+	}
 
 	act_info_t current_act[2];
 	Activity last_activity = ACT_INVALID;
@@ -8359,8 +8430,7 @@ public:
 
 		if(last_activity != ACT_INVALID && !IsActivity(last_activity)) {
 			if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-				//TODO!!!! activity name
-				DevMsg("%s: IBodyCustom::OnAnimationActivityInterrupted([%i, %s])\n", bot->GetDebugIdentifier(), last_activity, "");
+				DevMsg("%s: IBodyCustom::OnAnimationActivityInterrupted([%i, %s])\n", bot->GetDebugIdentifier(), last_activity, ActivityName(last_activity));
 			}
 
 			bot->OnAnimationActivityInterrupted(last_activity);
@@ -8369,36 +8439,14 @@ public:
 		last_activity = GetActivity();
 
 		if(!!(current_flags & ACTIVITY_TRANSITORY)) {
-			if(current_act[1].seq == -1) {
-				if(current_act[1].act != ACT_INVALID) {
-					current_act[1].seq = SelectAnimationSequence(current_act[1].act);
-				}
-			}
-
-			if(current_act[1].seq != -1) {
-				pEntity->ResetSequence(current_act[1].seq);
-			}
-
 			if(pEntity->GetSequeceFinished()) {
-				current_act[1].seq = -1;
-
-				if(current_act[1].act != ACT_INVALID) {
-					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-						//TODO!!!! activity name
-						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[1].act, "");
-					}
-
-					bot->OnAnimationActivityComplete(current_act[1].act);
-				}
-
-				pEntity->RestartSequence();
-			}
-
-			if(current_act[1].seq == -1) {
 				Activity act = current_act[1].act;
 
-				current_flags &= ~ACTIVITY_TRANSITORY;
-				current_act[1].reset();
+				if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+					DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
+				}
+
+				bot->OnAnimationActivityComplete(act);
 
 				if(act == ACT_TRANSITION && current_posture != desired_posture) {
 					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
@@ -8409,6 +8457,9 @@ public:
 
 					bot->OnPostureChanged();
 				}
+
+				current_flags &= ~ACTIVITY_TRANSITORY;
+				current_act[1].reset();
 			}
 		} else {
 			if(current_posture != desired_posture) {
@@ -8425,33 +8476,17 @@ public:
 				}
 			}
 
-			if(current_act[0].seq == -1) {
-				if(current_act[0].act != ACT_INVALID) {
-					current_act[0].seq = SelectAnimationSequence(current_act[0].act);
-				}
-			}
-
-			if(current_act[0].seq != -1) {
-				pEntity->ResetSequence(current_act[0].seq);
-			}
-
 			if(pEntity->GetSequeceFinished()) {
-				if(current_act[0].act != ACT_INVALID) {
-					current_act[0].seq = SelectAnimationSequence(current_act[0].act);
+				Activity act = current_act[0].act;
 
-					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-						//TODO!!!! activity name
-						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), current_act[0].act, "");
-					}
-
-					bot->OnAnimationActivityComplete(current_act[0].act);
+				if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+					DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
 				}
 
-				if(current_act[0].seq != -1) {
-					pEntity->SetSequence(current_act[0].seq);
-				}
+				bot->OnAnimationActivityComplete(act);
 
-				pEntity->RestartSequence();
+				current_act[0].seq = SelectAnimationSequence(current_act[0].real_act);
+				pEntity->ResetSequence(current_act[0].seq);
 			}
 		}
 
@@ -9255,36 +9290,25 @@ bool CGameTrace::DidHitNonWorldEntity() const
 	return m_pEnt != NULL && !DidHitWorld();
 }
 
+struct pathfollower_vars_t
+{
+	virtual ~pathfollower_vars_t() {}
+
+	virtual void dtor(PathFollower *bytes) {}
+
+	bool allowfacing = true;
+};
+
+std::unordered_map<PathFollower *, unsigned char *> pathfollower_var_map{};
+
 class PathFollower : public Path
 {
 public:
-	static size_t size()
-	{
-		return sizeof(PathFollower);
-	}
-
-	static PathFollower *create(size_t extra_size)
-	{
-		PathFollower *bytes = (PathFollower *)calloc(1, sizeof(PathFollower) + extra_size);
-		call_mfunc<void>(bytes, PathFollowerCTOR);
-		return bytes;
-	}
-	
 	virtual void Update( INextBot *bot ) = 0;			// move bot along path
-
-	void CallUpdate(INextBot *bot)
-	{
-		g_bFlyingLocomotionIgnorePitch = true;
-		Update(bot);
-		g_bFlyingLocomotionIgnorePitch = false;
-	}
-
 	virtual void SetMinLookAheadDistance( float value ) = 0;		// minimum range movement goal must be along path
-	
 	virtual CBaseEntity *GetHindrance( void ) const = 0;			// returns entity that is hindering our progress along the path
-
 	virtual bool IsDiscontinuityAhead( INextBot *bot, Path::SegmentType type, float range = -1.0f ) const = 0;	// return true if there is a the given discontinuity ahead in the path within the given range (-1 = entire remaining path)
-	
+
 	const Path::Segment *m_goal;					// our current goal along the path
 	float m_minLookAheadRange;
 
@@ -9311,7 +9335,82 @@ public:
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	char pad1[16];
 #endif
-	
+
+	using vars_t = pathfollower_vars_t;
+
+	template <typename T = PathFollower>
+	static unsigned char *vars_ptr(PathFollower *ptr)
+	{ return (((unsigned char *)ptr) + sizeof(T)); }
+	template <typename C = PathFollower, typename T = vars_t>
+	static T &getvars(PathFollower *ptr)
+	{ return *(T *)vars_ptr<C>(ptr); }
+
+	unsigned char *vars_ptr()
+	{
+		auto it{pathfollower_var_map.find(this)};
+		if(it == pathfollower_var_map.end()) {
+			return nullptr;
+		}
+		return it->second;
+	}
+
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+
+	template <typename T>
+	static void call_dtor()
+	{
+		PathFollower *base = META_IFACEPTR(PathFollower);
+		T *bytes{(T *)base};
+
+		typename T::vars_t &vars{PathFollower::getvars<T, typename T::vars_t>(bytes)};
+
+		vars.dtor(bytes);
+
+		vars.~vars_t();
+
+		auto it{pathfollower_var_map.find(base)};
+		if(it != pathfollower_var_map.end()) {
+			pathfollower_var_map.erase(it);
+		}
+
+		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_STATIC(PathFollower::call_dtor<T>), false);
+
+		RETURN_META(MRES_HANDLED);
+	}
+
+	template <typename C = PathFollower, typename T = vars_t>
+	static C *create(void *ctor)
+	{
+		C *bytes = (C *)calloc(1, sizeof(C) + sizeof(T));
+		call_mfunc<void>(bytes, ctor);
+		pathfollower_var_map.emplace(bytes, vars_ptr<C>(bytes));
+		new (vars_ptr<C>(bytes)) T{};
+		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_STATIC(PathFollower::call_dtor<C>), false);
+		return bytes;
+	}
+
+	template <typename C = PathFollower, typename T = vars_t>
+	static C *create()
+	{
+		return create<C, T>(PathFollowerCTOR);
+	}
+
+	void CallUpdate(INextBot *bot)
+	{
+		g_bInPathFollowerFaceTowards = true;
+		ILocomotion *loc{bot->GetLocomotionInterface()};
+		bool disable_facing = !getvars().allowfacing;
+		if(disable_facing) {
+			g_bFaceTowardsDisabled = true;
+		}
+		Update(bot);
+		if(disable_facing) {
+			g_bFaceTowardsDisabled = false;
+		}
+		g_bInPathFollowerFaceTowards = false;
+	}
+
 #if SOURCE_ENGINE == SE_TF2
 	void SetGoalTolerance(float val)
 	{
@@ -9461,9 +9560,9 @@ void PathFollower::Update( INextBot *bot )
 		vtableindex = vfunc_index(&PathFollower::Update);
 	}
 
-	g_bFlyingLocomotionIgnorePitch = true;
+	g_bInPathFollowerFaceTowards = true;
 	call_vfunc<void, PathFollower, INextBot *>(this, vtableindex, bot);
-	g_bFlyingLocomotionIgnorePitch = false;
+	g_bInPathFollowerFaceTowards = false;
 }
 
 SH_DECL_HOOK0_void(Path, Invalidate, SH_NOATTRIB, 0);
@@ -9484,13 +9583,13 @@ public:
 	CountdownTimer m_lifetimeTimer;
 	EHANDLE m_lastPathSubject;							// the subject used to compute the current/last path
 	SubjectChaseType m_chaseHow;
+
+	struct vars_t;
+
+	using IsRepathNeeded_t = bool (ChasePath::*)( vars_t &, INextBot *, CBaseEntity * );
+	using Update_t = void (ChasePath::*)( vars_t &, INextBot *, CBaseEntity *, const IPathCost &, Vector * );
 	
-	using IsRepathNeeded_t = bool (ChasePath::*)( INextBot *, CBaseEntity * );
-	using Update_t = void (ChasePath::*)( INextBot *, CBaseEntity *, const IPathCost &, Vector * );
-	using ComputeAreaCrossing_t = void (DirectChasePath::*)( INextBot *bot, const CNavArea *, const Vector &, const CNavArea *, NavDirType, Vector * );
-	using RemoveHooks_t = void (ChasePath::*)();
-	
-	struct vars_t
+	struct vars_t : public PathFollower::vars_t
 	{
 		float radius = 500.0f;
 		float maxlen = 0.0f;
@@ -9501,22 +9600,18 @@ public:
 		
 		IsRepathNeeded_t pIsRepathNeeded = nullptr;
 		Update_t pUpdate = nullptr;
-		ComputeAreaCrossing_t pComputeAreaCrossing = nullptr;
-		RemoveHooks_t pRemoveHooks = nullptr;
+
+		void dtor(PathFollower *base) override
+		{
+			PathFollower::vars_t::dtor(base);
+
+			ChasePath *bytes{(ChasePath *)base};
+			bytes->dtor();
+		}
 	};
-	
-	unsigned char *vars_ptr()
-	{ return (((unsigned char *)this) + sizeof(ChasePath)); }
+
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
-	
-	void HookInvalidate()
-	{
-		m_throttleTimer.Invalidate();
-		m_lifetimeTimer.Invalidate();
-		
-		RETURN_META(MRES_HANDLED);
-	}
 	
 	void ctor(SubjectChaseType chaseHow)
 	{
@@ -9532,28 +9627,38 @@ public:
 		m_chaseHow = chaseHow;
 	}
 	
-	void RemoveHooks()
-	{
-		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &ChasePath::HookInvalidate), true);
-	}
-	
 	void dtor()
 	{
-		(this->*getvars().pRemoveHooks)();
+		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &ChasePath::HookInvalidate), true);
 		
 		m_failTimer.~CountdownTimer();
 		m_throttleTimer.~CountdownTimer();
 		m_lifetimeTimer.~CountdownTimer();
 		m_lastPathSubject.~EHANDLE();
-		
-		getvars().~vars_t();
-		
-		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &ChasePath::dtor), false);
+	}
+
+	template <typename C = ChasePath, typename T = vars_t>
+	static C *create(SubjectChaseType chaseHow)
+	{
+		static_assert(std::is_base_of_v<ChasePath, C>);
+		C *bytes = (C *)PathFollower::create<C, T>();
+		bytes->ctor(chaseHow);
+		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &C::HookInvalidate), true);
+		T &vars{PathFollower::getvars<C, T>(bytes)};
+		vars.pIsRepathNeeded = static_cast<IsRepathNeeded_t>(&C::IsRepathNeeded);
+		vars.pUpdate = static_cast<Update_t>(&C::Update);
+		return bytes;
+	}
+
+	void HookInvalidate()
+	{
+		m_throttleTimer.Invalidate();
+		m_lifetimeTimer.Invalidate();
 		
 		RETURN_META(MRES_HANDLED);
 	}
-	
-	Vector PredictSubjectPosition( INextBot *bot, CBaseEntity *subject )
+
+	Vector PredictSubjectPosition( vars_t &vars, INextBot *bot, CBaseEntity *subject )
 	{
 		ILocomotion *mover = bot->GetLocomotionInterface();
 
@@ -9564,7 +9669,7 @@ public:
 		float flRangeSq = to.LengthSqr();
 
 		// don't lead if subject is very far away
-		float flLeadRadiusSq = GetLeadRadius();
+		float flLeadRadiusSq = vars.radius;
 		flLeadRadiusSq *= flLeadRadiusSq;
 		if ( flRangeSq > flLeadRadiusSq )
 			return subjectPos;
@@ -9690,18 +9795,18 @@ public:
 		
 		return pathTarget;
 	}
-	
-	bool IsRepathNeeded( INextBot *bot, CBaseEntity *subject )
+
+	bool IsRepathNeeded( vars_t &vars, INextBot *bot, CBaseEntity *subject )
 	{
 		// the closer we get, the more accurate our path needs to be
 		Vector to = subject->GetAbsOrigin() - bot->GetPosition();
 
-		float tolerance = getvars().mintolerance + getvars().tolerancerate * to.Length();
+		float tolerance = vars.mintolerance + vars.tolerancerate * to.Length();
 
 		return ( subject->GetAbsOrigin() - GetEndPosition() ).IsLengthGreaterThan( tolerance );
 	}
-	
-	void RefreshPath( INextBot *bot, CBaseEntity *subject, const IPathCost &cost, Vector *pPredictedSubjectPos )
+
+	void RefreshPath( vars_t &vars, INextBot *bot, CBaseEntity *subject, const IPathCost &cost, Vector *pPredictedSubjectPos )
 	{
 		ILocomotion *mover = bot->GetLocomotionInterface();
 
@@ -9786,8 +9891,8 @@ public:
 			// this path's lifetime has elapsed
 			Invalidate();
 		}
-		
-		if ( !IsValid() || (this->*getvars().pIsRepathNeeded)( bot, subject ) )
+
+		if ( !IsValid() || (this->*vars.pIsRepathNeeded)( vars, bot, subject ) )
 		{
 			// the situation has changed - try a new path
 			bool isPath;
@@ -9795,16 +9900,16 @@ public:
 
 			if ( m_chaseHow == LEAD_SUBJECT )
 			{
-				pathTarget = pPredictedSubjectPos ? *pPredictedSubjectPos : PredictSubjectPosition( bot, subject );
-				isPath = Compute( bot, pathTarget, cost, GetMaxPathLength() );
+				pathTarget = pPredictedSubjectPos ? *pPredictedSubjectPos : PredictSubjectPosition( vars, bot, subject );
+				isPath = Compute( bot, pathTarget, cost, vars.maxlen );
 			}
 			else if ( subject->MyCombatCharacterPointer() && subject->MyCombatCharacterPointer()->GetLastKnownArea() )
 			{
-				isPath = Compute( bot, subject->MyCombatCharacterPointer(), cost, GetMaxPathLength() );
+				isPath = Compute( bot, subject->MyCombatCharacterPointer(), cost, vars.maxlen );
 			}
 			else
 			{
-				isPath = Compute( bot, pathTarget, cost, GetMaxPathLength() );
+				isPath = Compute( bot, pathTarget, cost, vars.maxlen );
 			}
 
 			if ( isPath )
@@ -9823,10 +9928,10 @@ public:
 
 				m_lastPathSubject = subject;
 
-				m_throttleTimer.Start( getvars().repathtime );
+				m_throttleTimer.Start( vars.repathtime );
 
 				// track the lifetime of this new path
-				float lifetime = GetLifetime();
+				float lifetime = vars.life;
 				if ( lifetime > 0.0f )
 				{
 					m_lifetimeTimer.Start( lifetime );
@@ -9865,25 +9970,6 @@ public:
 			}
 		}
 	}
-
-	static size_t size()
-	{
-		return (sizeof(ChasePath) + sizeof(vars_t));
-	}
-	
-	static ChasePath *create(size_t extra_size, SubjectChaseType chaseHow)
-	{
-		ChasePath *bytes = (ChasePath *)calloc(1, sizeof(ChasePath) + sizeof(vars_t) + extra_size);
-		call_mfunc<void>(bytes, PathFollowerCTOR);
-		new (bytes->vars_ptr()) vars_t();
-		bytes->ctor(chaseHow);
-		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &ChasePath::dtor), false);
-		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &ChasePath::HookInvalidate), true);
-		bytes->getvars().pIsRepathNeeded = &ChasePath::IsRepathNeeded;
-		bytes->getvars().pUpdate = &ChasePath::Update;
-		bytes->getvars().pRemoveHooks = &ChasePath::RemoveHooks;
-		return bytes;
-	}
 	
 	float GetLeadRadius( void ) 
 	{ 
@@ -9901,11 +9987,11 @@ public:
 		// infinite duration
 		return getvars().life;
 	}
-	
-	void Update( INextBot *bot, CBaseEntity *subject, const IPathCost &cost, Vector *pPredictedSubjectPos )
+
+	void Update( vars_t &vars, INextBot *bot, CBaseEntity *subject, const IPathCost &cost, Vector *pPredictedSubjectPos )
 	{
 		// maintain the path to the subject
-		RefreshPath( bot, subject, cost, pPredictedSubjectPos );
+		RefreshPath( vars, bot, subject, cost, pPredictedSubjectPos );
 
 		// move along the path towards the subject
 		PathFollower::CallUpdate( bot );
@@ -9917,40 +10003,55 @@ SH_DECL_HOOK6_void(Path, ComputeAreaCrossing, SH_NOATTRIB, 0, INextBot *, const 
 class DirectChasePath : public ChasePath
 {
 public:
-	void RemoveHooks()
+	using ComputeAreaCrossing_t = void (DirectChasePath::*)( INextBot *bot, const CNavArea *, const Vector &, const CNavArea *, NavDirType, Vector * );
+
+	struct vars_t : public ChasePath::vars_t
 	{
-		ChasePath::RemoveHooks();
-		
+		ComputeAreaCrossing_t pComputeAreaCrossing = nullptr;
+
+		void dtor(PathFollower *base) override
+		{
+			ChasePath::vars_t::dtor(base);
+
+			DirectChasePath *bytes{(DirectChasePath *)base};
+			bytes->dtor();
+		}
+	};
+
+	vars_t &getvars()
+	{ return *(vars_t *)vars_ptr(); }
+
+	void dtor()
+	{
 		SH_REMOVE_HOOK(Path, ComputeAreaCrossing, this, SH_MEMBER(this, &DirectChasePath::HookComputeAreaCrossing), false);
 	}
-	
-	static DirectChasePath *create(size_t extra_size, SubjectChaseType chaseHow)
+
+	template <typename C = DirectChasePath, typename T = vars_t>
+	static C *create(SubjectChaseType chaseHow)
 	{
-		DirectChasePath *bytes = (DirectChasePath *)ChasePath::create(extra_size, chaseHow);
-		SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &DirectChasePath::HookComputeAreaCrossing), false);
-		bytes->getvars().pIsRepathNeeded = func_to_func<IsRepathNeeded_t>(&DirectChasePath::IsRepathNeeded);
-		bytes->getvars().pUpdate = func_to_func<Update_t>(&DirectChasePath::Update);
-		bytes->getvars().pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&DirectChasePath::DoComputeAreaCrossing);
-		bytes->getvars().pRemoveHooks = func_to_func<RemoveHooks_t>(&DirectChasePath::RemoveHooks);
+		C *bytes = (C *)ChasePath::create<C, T>(chaseHow);
+		SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &C::HookComputeAreaCrossing), false);
+		T &vars{PathFollower::getvars<C, T>(bytes)};
+		vars.pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&C::DoComputeAreaCrossing);
 		return bytes;
 	}
-	
-	void Update( INextBot *me, CBaseEntity *victim, const IPathCost &pathCost, Vector *pPredictedSubjectPos = NULL )	// update path to chase target and move bot along path
+
+	void Update( ChasePath::vars_t &vars, INextBot *me, CBaseEntity *victim, const IPathCost &pathCost, Vector *pPredictedSubjectPos = NULL )	// update path to chase target and move bot along path
 	{
 		Assert( !pPredictedSubjectPos );
 		bool bComputedPredictedPosition;
 		Vector vecPredictedPosition;
-		if ( !DirectChase( &bComputedPredictedPosition, &vecPredictedPosition, me, victim ) )
+		if ( !DirectChase( vars, &bComputedPredictedPosition, &vecPredictedPosition, me, victim ) )
 		{
 			// path around obstacles to reach our victim
-			ChasePath::Update( me, victim, pathCost, bComputedPredictedPosition ? &vecPredictedPosition : NULL );
+			ChasePath::Update( vars, me, victim, pathCost, bComputedPredictedPosition ? &vecPredictedPosition : NULL );
 		}
 		NotifyVictim( me, victim );
 	}
-	
-	bool IsRepathNeeded( INextBot *bot, CBaseEntity *subject )			// return true if situation has changed enough to warrant recomputing the current path
+
+	bool IsRepathNeeded( ChasePath::vars_t &vars, INextBot *bot, CBaseEntity *subject )			// return true if situation has changed enough to warrant recomputing the current path
 	{
-		if ( ChasePath::IsRepathNeeded( bot, subject ) )
+		if ( ChasePath::IsRepathNeeded( vars, bot, subject ) )
 		{
 			return true;
 		}
@@ -9967,7 +10068,7 @@ public:
 		pBCCVictim->OnPursuedBy( me );
 	}
 	
-	bool DirectChase( bool *pPredictedPositionComputed, Vector *pPredictedPos, INextBot *me, CBaseEntity *victim )		// if there is nothing between us and our victim, run directly at them
+	bool DirectChase( ChasePath::vars_t &vars, bool *pPredictedPositionComputed, Vector *pPredictedPos, INextBot *me, CBaseEntity *victim )		// if there is nothing between us and our victim, run directly at them
 	{
 		*pPredictedPositionComputed = false;
 
@@ -9988,7 +10089,7 @@ public:
 			return false;
 		}
 
-		Vector leadVictimPos = PredictSubjectPosition( me, victim );
+		Vector leadVictimPos = PredictSubjectPosition( vars, me, victim );
 
 		// Don't want to have to compute the predicted position twice.
 		*pPredictedPositionComputed = true;
@@ -10000,9 +10101,12 @@ public:
 		}
 
 		// the way is clear - move directly towards our victim
-		g_bFlyingLocomotionIgnorePitch = true;
-		mover->FaceTowards( leadVictimPos );
-		g_bFlyingLocomotionIgnorePitch = false;
+		g_bInPathFollowerFaceTowards = true;
+		bool disable_facing = !vars.allowfacing;
+		if(!disable_facing) {
+			mover->FaceTowards( leadVictimPos );
+		}
+		g_bInPathFollowerFaceTowards = false;
 
 		mover->Approach( leadVictimPos );
 
@@ -10034,10 +10138,10 @@ public:
 class InfectedChasePath : public DirectChasePath
 {
 public:
-	static InfectedChasePath *create(size_t extra_size, SubjectChaseType chaseHow)
+	template <typename C = InfectedChasePath, typename T = vars_t>
+	static C *create(SubjectChaseType chaseHow)
 	{
-		InfectedChasePath *bytes = (InfectedChasePath *)DirectChasePath::create(extra_size, chaseHow);
-		bytes->getvars().pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&InfectedChasePath::DoComputeAreaCrossing);
+		C *bytes = (C *)DirectChasePath::create<C, T>(chaseHow);
 		return bytes;
 	}
 	
@@ -10454,16 +10558,22 @@ public:
 	EHANDLE m_pathThreat;								// the threat of our existing path
 	Vector m_pathThreatPos;								// where the threat was when the path was built
 	
-	struct vars_t
+	struct vars_t : public PathFollower::vars_t
 	{
+		void dtor(PathFollower *base) override
+		{
+			PathFollower::vars_t::dtor(base);
+
+			RetreatPath *bytes{(RetreatPath *)base};
+			bytes->dtor();
+		}
+
 		float maxlen = 1000.0f;
 		float tolerancerate = 0.33f;
 		float mintolerance = 0.0f;
 		float repathtime = 0.5f;
 	};
-	
-	unsigned char *vars_ptr()
-	{ return (((unsigned char *)this) + sizeof(RetreatPath)); }
+
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
@@ -10488,18 +10598,24 @@ public:
 
 	void dtor()
 	{
-		getvars().~vars_t();
-
 		m_throttleTimer.~CountdownTimer();
 		m_pathThreat.~EHANDLE();
 		m_pathThreatPos.~Vector();
 
-		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &RetreatPath::dtor), false);
 		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &RetreatPath::HookInvalidate), true);
 		
 		RETURN_META(MRES_HANDLED);
 	}
-	
+
+	template <typename C = RetreatPath, typename T = vars_t>
+	static C *create()
+	{
+		C *bytes = (C *)PathFollower::create<C, T>();
+		bytes->ctor();
+		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), true);
+		return bytes;
+	}
+
 	void Update( INextBot *bot, CBaseEntity *threat )
 	{
 		if ( threat == NULL )
@@ -10518,14 +10634,16 @@ public:
 			Invalidate();
 		}
 
+		vars_t &vars{getvars()};
+
 		// maintain the path away from the threat
-		RefreshPath( bot, threat );
+		RefreshPath( vars, bot, threat );
 
 		// move along the path towards the threat
 		PathFollower::CallUpdate( bot );
 	}
 	
-	void RefreshPath( INextBot *bot, CBaseEntity *threat )
+	void RefreshPath( vars_t &vars, INextBot *bot, CBaseEntity *threat )
 	{
 		if ( threat == NULL )
 		{
@@ -10550,8 +10668,8 @@ public:
 		// the closer we get, the more accurate our path needs to be
 		Vector to = threat->GetAbsOrigin() - bot->GetPosition();
 		
-		const float minTolerance = getvars().mintolerance;
-		const float toleranceRate = getvars().tolerancerate;
+		const float minTolerance = vars.mintolerance;
+		const float toleranceRate = vars.tolerancerate;
 		
 		float tolerance = minTolerance + toleranceRate * to.Length();
 
@@ -10571,7 +10689,7 @@ public:
 			m_pathThreat = threat;
 			m_pathThreatPos = threat->GetAbsOrigin();
 
-			RetreatPathBuilder retreat( bot, threat, GetMaxPathLength() );
+			RetreatPathBuilder retreat( bot, threat, vars.maxlen );
 
 			CNavArea *goalArea = retreat.ComputePath();
 
@@ -10587,7 +10705,7 @@ public:
 				BuildTrivialPath( bot, bot->GetPosition() - to );
 			}
 				
-			const float minRepathInterval = getvars().repathtime;
+			const float minRepathInterval = vars.repathtime;
 			m_throttleTimer.Start( minRepathInterval );
 		}
 	}
@@ -10596,42 +10714,28 @@ public:
 	{
 		return getvars().maxlen;
 	}
-
-	static size_t size()
-	{
-		return (sizeof(RetreatPath) + sizeof(vars_t));
-	}
-	
-	static RetreatPath *create(size_t extra_size)
-	{
-		RetreatPath *bytes = (RetreatPath *)calloc(1, sizeof(RetreatPath) + sizeof(vars_t) + extra_size);
-		call_mfunc<void>(bytes, PathFollowerCTOR);
-		bytes->ctor();
-		new (bytes->vars_ptr()) vars_t();
-		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &RetreatPath::dtor), false);
-		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), true);
-		return bytes;
-	}
 };
 
 #if SOURCE_ENGINE == SE_TF2
 class CTFPathFollower : public PathFollower
 {
 public:
-	static size_t size()
-	{
-		return sizeof(CTFPathFollower);
-	}
-
-	static CTFPathFollower *create(size_t extra_size)
-	{
-		CTFPathFollower *bytes = (CTFPathFollower *)calloc(1, sizeof(CTFPathFollower) + extra_size);
-		call_mfunc<void>(bytes, CTFPathFollowerCTOR);
-		return bytes;
-	}
-	
 	const Path::Segment *m_goal;					// our current goal along the path
 	float m_minLookAheadRange;
+
+	void ctor()
+	{
+		m_goal = NULL;
+		m_minLookAheadRange = 300.0f;
+	}
+
+	template <typename C = CTFPathFollower, typename T = vars_t>
+	static C *create()
+	{
+		C *bytes = (C *)PathFollower::create<C, T>(CTFPathFollowerCTOR);
+		bytes->ctor();
+		return bytes;
+	}
 	
 	float GetMinLookAheadDistance()
 	{
@@ -10660,21 +10764,18 @@ class SPPathFollower : public T
 public:
 	static_assert(std::is_base_of_v<PathFollower, T>);
 
-	struct vars_t
+	struct vars_t : T::vars_t
 	{
 		Handle_t hndl{BAD_HANDLE};
 	};
 
-	unsigned char *vars_ptr()
-	{ return (((unsigned char *)this) + T::size()); }
 	vars_t &getvars()
-	{ return *(vars_t *)vars_ptr(); }
+	{ return *(vars_t *)this->vars_ptr(); }
 
 	template <typename ...Args>
 	static SPPathFollower<T> *create(Args &&... args)
 	{
-		SPPathFollower<T> *bytes = reinterpret_cast<SPPathFollower<T> *>(T::create(sizeof(vars_t), args...));
-		new (bytes->vars_ptr()) vars_t{};
+		SPPathFollower<T> *bytes = reinterpret_cast<SPPathFollower<T> *>(T::template create<SPPathFollower<T>, vars_t>(args...));
 		return bytes;
 	}
 
@@ -10848,7 +10949,7 @@ cell_t ChasePathUpdateNative(IPluginContext *pContext, const cell_t *params)
 		pPredictedSubjectPos = &PredictedSubjectPos;
 	}
 	
-	(obj->*obj->getvars().pUpdate)(bot, pSubject, cost, pPredictedSubjectPos);
+	(obj->*obj->getvars().pUpdate)(obj->getvars(), bot, pSubject, cost, pPredictedSubjectPos);
 	
 	return 0;
 }
@@ -10872,7 +10973,7 @@ cell_t ChasePathPredictSubjectPosition(IPluginContext *pContext, const cell_t *p
 	
 	INextBot *bot = (INextBot *)params[2];
 	
-	Vector PredictedSubjectPos = obj->PredictSubjectPosition(bot, pSubject);
+	Vector PredictedSubjectPos = obj->PredictSubjectPosition(obj->getvars(), bot, pSubject);
 
 	cell_t *addr = nullptr;
 	pContext->LocalToPhysAddr(params[4], &addr);
@@ -10902,7 +11003,7 @@ cell_t ChasePathIsRepathNeeded(IPluginContext *pContext, const cell_t *params)
 	
 	INextBot *bot = (INextBot *)params[2];
 
-	return (obj->*(obj->getvars().pIsRepathNeeded))( bot, pSubject );
+	return (obj->*(obj->getvars().pIsRepathNeeded))( obj->getvars(), bot, pSubject );
 }
 
 cell_t ChasePathLeadRadiusset(IPluginContext *pContext, const cell_t *params)
@@ -12365,6 +12466,22 @@ cell_t PathFollowerGoalToleranceset(IPluginContext *pContext, const cell_t *para
 }
 #endif
 
+cell_t PathFollowerAllowFacingset(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	PathFollower *obj = nullptr;
+	HandleError err = handlesys->ReadHandle(params[1], PathFollowerHandleType, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+	
+	obj->getvars().allowfacing = params[2];
+	
+	return 0;
+}
+
 cell_t PathFollowerHindranceget(IPluginContext *pContext, const cell_t *params)
 {
 	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
@@ -12631,18 +12748,7 @@ cell_t ILocomotionTypeget(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
 
-	g_nHackDetectLocomotion = Locomotion_None;
-	g_bHackDetectLocomotion = true;
-	area->GetSpeedLimit();
-	LocomotionType type = g_nHackDetectLocomotion;
-	g_bHackDetectLocomotion = false;
-	g_nHackDetectLocomotion = Locomotion_None;
-
-	if(type == Locomotion_None) {
-		type = Locomotion_Any;
-	}
-
-	return type;
+	return get_locomotion_type(area);
 }
 
 cell_t ILocomotionDesiredSpeedset(IPluginContext *pContext, const cell_t *params)
@@ -15253,6 +15359,7 @@ sp_nativeinfo_t natives[] =
 	{"PathFollower.GoalTolerance.get", PathFollowerGoalToleranceget},
 	{"PathFollower.GoalTolerance.set", PathFollowerGoalToleranceset},
 #endif
+	{"PathFollower.AllowFacing.set", PathFollowerAllowFacingset},
 	{"PathFollower.IsDiscontinuityAhead", PathFollowerIsDiscontinuityAhead},
 	{"PathFollower.IsAtGoal", PathFollowerIsAtGoal},
 	{"PathFollower.Hindrance.get", PathFollowerHindranceget},
@@ -17051,7 +17158,7 @@ cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *par
 	}
 
 	CUtlVector<CNavArea *> nearbyAreaVector{};
-	CollectSurroundingAreas(&nearbyAreaVector, (CNavArea *)params[2], sp_ftoc(params[3]), sp_ftoc(params[4]), sp_ftoc(params[5]));
+	CollectSurroundingAreas(&nearbyAreaVector, (CNavArea *)params[2], sp_ctof(params[3]), sp_ctof(params[4]), sp_ctof(params[5]));
 
 	size_t len = nearbyAreaVector.Count();
 	obj->resize(len);
