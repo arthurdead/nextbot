@@ -250,7 +250,6 @@ void *INextBotIsDebuggingPtr = nullptr;
 void *InfectedChasePathComputeAreaCrossing = nullptr;
 void *EntityFactoryDictionaryPtr = nullptr;
 #endif
-void *CBaseCombatCharacterEvent_Killed = nullptr;
 void *CBaseEntityCalcAbsolutePosition = nullptr;
 void *CBaseCombatCharacterAllocateDefaultRelationships = nullptr;
 void *CBaseCombatCharacterSetDefaultRelationship = nullptr;
@@ -280,9 +279,6 @@ int CBaseCombatCharacterFInViewConeEnt = -1;
 
 int CBaseCombatCharacterFInAimConeVec = -1;
 int CBaseCombatCharacterFInAimConeEnt = -1;
-
-int CBaseCombatCharacterCheckTraceHullAttackRange = -1;
-int CBaseCombatCharacterCheckTraceHullAttackEndPoint = -1;
 
 int CBaseCombatCharacterIRelationType = -1;
 int CBaseCombatCharacterOnPursuedBy = -1;
@@ -1601,11 +1597,6 @@ public:
 	}
 #endif
 
-	void Event_Killed(const CTakeDamageInfo &info)
-	{
-		call_mfunc<void, CBaseCombatCharacter, const CTakeDamageInfo &>(this, CBaseCombatCharacterEvent_Killed, info);
-	}
-
 	void SetBloodColor(int color)
 	{
 		if(m_bloodColorOffset == -1) {
@@ -1728,16 +1719,6 @@ public:
 	bool IsAbleToSee( CBaseCombatCharacter *pBCC, FieldOfViewCheckType checkFOV )
 	{
 		return call_mfunc<bool, CBaseCombatCharacter, CBaseCombatCharacter *, FieldOfViewCheckType>(this, CBaseCombatCharacterIsAbleToSeeCC, pBCC, checkFOV);
-	}
-
-	CBaseEntity *CheckTraceHullAttack( float flDist, const Vector &mins, const Vector &maxs, int iDamage, int iDmgType, float forceScale, bool bDamageAnyNPC )
-	{
-		return call_vfunc<CBaseEntity *, CBaseCombatCharacter, float, const Vector &, const Vector &, int, int, float, bool>(this, CBaseCombatCharacterCheckTraceHullAttackRange, flDist, mins, maxs, iDamage, iDmgType, forceScale, bDamageAnyNPC);
-	}
-
-	CBaseEntity *CheckTraceHullAttack( const Vector &vStart, const Vector &vEnd, const Vector &mins, const Vector &maxs, int iDamage, int iDmgType, float flForceScale, bool bDamageAnyNPC )
-	{
-		return call_vfunc<CBaseEntity *, CBaseCombatCharacter, const Vector &, const Vector &, const Vector &, const Vector &, int, int, float, bool>(this, CBaseCombatCharacterCheckTraceHullAttackEndPoint, vStart, vEnd, mins, maxs, iDamage, iDmgType, flForceScale, bDamageAnyNPC);
 	}
 
 	void OnPursuedBy( INextBot *pPursuer )
@@ -14865,31 +14846,6 @@ cell_t GetNavAreaFromVector(IPluginContext *pContext, const cell_t *params)
 
 cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params);
 
-cell_t CombatCharacterEventKilled(IPluginContext *pContext, const cell_t *params)
-{
-	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
-	if(!pSubject)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
-	}
-	
-	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
-	if(!pCombat)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
-	}
-	
-	CTakeDamageInfo info{};
-#ifdef __HAS_DAMAGERULES
-	if(g_pDamageRules) {
-		g_pDamageRules->ParamToDamageInfo(pContext, params[2], info);
-	}
-#endif
-	pCombat->Event_Killed(info);
-
-	return 0;
-}
-
 cell_t DirectionBetweenEntityVector(IPluginContext *pContext, const cell_t *params)
 {
 	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[1]);
@@ -15240,58 +15196,6 @@ cell_t CombatCharacterIsAbleToSeeEnt(IPluginContext *pContext, const cell_t *par
 	}
 
 	return pSubject->IsAbleToSee(pTarget, (FieldOfViewCheckType)params[3]);
-}
-
-cell_t CombatCharacterHullAttackRange(IPluginContext *pContext, const cell_t *params)
-{
-	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
-	if(!pSubject)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
-	}
-
-	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[3], &addr);
-
-	Vector mins{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
-
-	pContext->LocalToPhysAddr(params[4], &addr);
-
-	Vector maxs{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
-
-	CBaseEntity *pHit = pSubject->CheckTraceHullAttack(sp_ctof(params[2]), mins, maxs, params[5], params[6], sp_ctof(params[7]), params[8]);
-
-	return pHit ? gamehelpers->EntityToBCompatRef(pHit) : -1;
-}
-
-cell_t CombatCharacterHullAttackEndPoint(IPluginContext *pContext, const cell_t *params)
-{
-	CBaseCombatCharacter *pSubject = (CBaseCombatCharacter *)gamehelpers->ReferenceToEntity(params[1]);
-	if(!pSubject)
-	{
-		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[1]);
-	}
-
-	cell_t *addr = nullptr;
-	pContext->LocalToPhysAddr(params[2], &addr);
-
-	Vector vStart{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
-
-	pContext->LocalToPhysAddr(params[3], &addr);
-
-	Vector vEnd{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
-
-	pContext->LocalToPhysAddr(params[4], &addr);
-
-	Vector mins{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
-
-	pContext->LocalToPhysAddr(params[5], &addr);
-
-	Vector maxs{sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2])};
-
-	CBaseEntity *pHit = pSubject->CheckTraceHullAttack(vStart, vEnd, mins, maxs, params[6], params[7], sp_ctof(params[8]), params[9]);
-
-	return pHit ? gamehelpers->EntityToBCompatRef(pHit) : -1;
 }
 
 cell_t CombatCharacterDisposition(IPluginContext *pContext, const cell_t *params)
@@ -15742,7 +15646,6 @@ sp_nativeinfo_t natives[] =
 	{"IIntentionCustom.set_name", IIntentionCustomset_name},
 	{"GetNavAreaVectorCount", GetNavAreaVectorCount},
 	{"GetNavAreaFromVector", GetNavAreaFromVector},
-	{"CombatCharacterEventKilled", CombatCharacterEventKilled},
 	{"DirectionBetweenEntityVector", DirectionBetweenEntityVector},
 	{"CollectSurroundingAreas", CollectSurroundingAreasNative},
 	{"EntityVisibleEnt", EntityVisibleEnt},
@@ -15764,8 +15667,6 @@ sp_nativeinfo_t natives[] =
 	{"CombatCharacterInAimConeVec", CombatCharacterInAimConeVec},
 	{"CombatCharacterInAimConeEnt", CombatCharacterInAimConeEnt},
 	{"CombatCharacterIsAbleToSeeEnt", CombatCharacterIsAbleToSeeEnt},
-	{"CombatCharacterHullAttackRange", CombatCharacterHullAttackRange},
-	{"CombatCharacterHullAttackEndPoint", CombatCharacterHullAttackEndPoint},
 	{"CombatCharacterDisposition", CombatCharacterDisposition},
 	{NULL, NULL}
 };
@@ -17249,7 +17150,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #else
 	dictionary = servertools->GetEntityFactoryDictionary();
 #endif
-	g_pGameConf->GetMemSig("CBaseCombatCharacter::Event_Killed", &CBaseCombatCharacterEvent_Killed);
 	
 	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
 	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
@@ -17361,9 +17261,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseEntity)", &CBaseCombatCharacterIsAbleToSeeEnt);
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter)", &CBaseCombatCharacterIsAbleToSeeCC);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::CheckTraceHullAttack(float)", &CBaseCombatCharacterCheckTraceHullAttackRange);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::CheckTraceHullAttack(Vector)", &CBaseCombatCharacterCheckTraceHullAttackEndPoint);
 
 	g_pGameConf->GetOffset("CBaseCombatCharacter::IRelationType", &CBaseCombatCharacterIRelationType);
 	g_pGameConf->GetOffset("CBaseCombatCharacter::OnPursuedBy", &CBaseCombatCharacterOnPursuedBy);

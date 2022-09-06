@@ -125,11 +125,6 @@
 				"library" "server"
 				"linux" "@_ZN13NDebugOverlay6CircleERK6VectorRK6QAnglefiiiibf"
 			}
-			"CBaseCombatCharacter::Event_Killed"
-			{
-				"library" "server"
-				"linux" "@_ZN20CBaseCombatCharacter12Event_KilledERK15CTakeDamageInfo"
-			}
 			"CBaseEntity::CalcAbsolutePosition"
 			{
 				"library" "server"
@@ -536,14 +531,6 @@
 			"CBaseCombatCharacter::FInAimCone(CBaseEntity)"
 			{
 				"linux" "236"
-			}
-			"CBaseCombatCharacter::CheckTraceHullAttack(float)"
-			{
-				"linux" "302"
-			}
-			"CBaseCombatCharacter::CheckTraceHullAttack(Vector)"
-			{
-				"linux" "303"
 			}
 			"CBaseCombatCharacter::IRelationType"
 			{
