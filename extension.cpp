@@ -4575,6 +4575,8 @@ HandleType_t BehaviorEntryHandleType = 0;
 
 using SPActor = NextBotCombatCharacter;
 
+static std::vector<std::string> reason_ptr_vec{};
+
 class SPActionResult : public ActionResult<SPActor>
 {
 public:
@@ -4582,7 +4584,13 @@ public:
 	
 	void set_reason(std::string &&reason_)
 	{
-		m_reason = std::move(reason_);
+		auto it{std::find(reason_ptr_vec.begin(), reason_ptr_vec.end(), reason_)};
+		if(it == reason_ptr_vec.end()) {
+			reason_ptr_vec.emplace_back(std::move(reason_));
+			it = (reason_ptr_vec.end()-1);
+		}
+
+		m_reason = it->c_str();
 	}
 };
 
@@ -5235,7 +5243,9 @@ public:
 		*vars = (cell_t)result.m_type;
 		++vars;
 
-		strncpy((char *)vars, result.m_reason.c_str(), result.m_reason.length()+1);
+		const char *reason{result.GetReason()};
+
+		strncpy((char *)vars, reason, strlen(reason)+1);
 		vars += RESVARS_REASON_SIZE_IN_CELL;
 	}
 
@@ -6498,13 +6508,13 @@ public:
 		return false;
 	}
 	
-	SPAction *initialaction(INextBot *bot)
+	Action<NextBotCombatCharacter> *initialaction(INextBot *bot)
 	{
 		if(!initact) {
 			return nullptr;
 		}
 		
-		SPAction *act = nullptr;
+		Action<NextBotCombatCharacter> *act = nullptr;
 		initact->PushCell(gamehelpers->EntityToBCompatRef(bot->GetEntity()));
 		initact->Execute((cell_t *)&act);
 		
@@ -15628,20 +15638,20 @@ sp_nativeinfo_t natives[] =
 	{"GetEntityLastKnownArea", GetEntityLastKnownArea},
 	{"UpdateEntityLastKnownArea", UpdateEntityLastKnownArea},
 	{"MakeEntityNextBot", MakeEntityNextBot},
-	{"BehaviorActionEntry.BehaviorActionEntry", BehaviorActionEntryCTOR},
-	{"BehaviorActionEntry.set_function", BehaviorActionEntryset_function},
-	{"BehaviorActionEntry.get_function", BehaviorActionEntryget_function},
-	{"BehaviorActionEntry.has_function", BehaviorActionEntryhas_function},
-	{"BehaviorActionEntry.create", BehaviorActionEntrycreate},
-	{"BehaviorAction.Entry.get", BehaviorActionEntryget},
-	{"BehaviorAction.set_data", BehaviorActionset_data},
-	{"BehaviorAction.get_data", BehaviorActionget_data},
-	{"BehaviorAction.has_data", BehaviorActionhas_data},
-	{"BehaviorAction.set_data_array", BehaviorActionset_data_array},
-	{"BehaviorAction.get_data_array", BehaviorActionget_data_array},
-	{"BehaviorAction.set_function", BehaviorActionset_function},
-	{"BehaviorAction.get_function", BehaviorActionget_function},
-	{"BehaviorAction.has_function", BehaviorActionhas_function},
+	{"CustomBehaviorActionEntry.CustomBehaviorActionEntry", BehaviorActionEntryCTOR},
+	{"CustomBehaviorActionEntry.set_function", BehaviorActionEntryset_function},
+	{"CustomBehaviorActionEntry.get_function", BehaviorActionEntryget_function},
+	{"CustomBehaviorActionEntry.has_function", BehaviorActionEntryhas_function},
+	{"CustomBehaviorActionEntry.create", BehaviorActionEntrycreate},
+	{"CustomBehaviorAction.Entry.get", BehaviorActionEntryget},
+	{"CustomBehaviorAction.set_data", BehaviorActionset_data},
+	{"CustomBehaviorAction.get_data", BehaviorActionget_data},
+	{"CustomBehaviorAction.has_data", BehaviorActionhas_data},
+	{"CustomBehaviorAction.set_data_array", BehaviorActionset_data_array},
+	{"CustomBehaviorAction.get_data_array", BehaviorActionget_data_array},
+	{"CustomBehaviorAction.set_function", BehaviorActionset_function},
+	{"CustomBehaviorAction.get_function", BehaviorActionget_function},
+	{"CustomBehaviorAction.has_function", BehaviorActionhas_function},
 	{"IIntentionCustom.ResetBehavior", IIntentionCustomResetBehavior},
 	{"IIntentionCustom.set_name", IIntentionCustomset_name},
 	{"GetNavAreaVectorCount", GetNavAreaVectorCount},
@@ -17342,6 +17352,15 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #endif
 	
 	g_pEntityList = reinterpret_cast<CBaseEntityList *>(gamehelpers->GetGlobalEntityList());
+
+#if SOURCE_ENGINE == SE_TF2 && 0
+	IGameConfig *game_actions_conf{nullptr};
+	gameconfs->LoadGameConfigFile("nextbot.actions.tf2", &game_actions_conf, error, maxlen);
+
+	
+
+	gameconfs->CloseGameConfigFile(game_actions_conf);
+#endif
 
 	HandleSystemHack::init();
 

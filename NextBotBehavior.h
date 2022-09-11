@@ -73,21 +73,10 @@ struct IActionResult
 	{
 		m_type = CONTINUE;
 		m_action = NULL;
-		m_reason.clear();
+		m_reason = nullptr;
 	}
 	
 	IActionResult( ActionResultType type, Action< Actor > *action, const char *reason )
-	{
-		m_type = type;
-		m_action = action;
-		if(reason) {
-			m_reason = reason;
-		} else {
-			m_reason.clear();
-		}
-	}
-	
-	IActionResult( ActionResultType type, Action< Actor > *action = NULL, std::string reason = {} )
 	{
 		m_type = type;
 		m_action = action;
@@ -142,17 +131,17 @@ struct IActionResult
 	
 	const char *GetReason() const
 	{
-		return m_reason.c_str();
+		return m_reason ? m_reason : "";
 	}
 	
 	bool HasReason() const
 	{
-		return !m_reason.empty();
+		return m_reason != nullptr;
 	}
 
 	ActionResultType m_type;
 	Action< Actor > *m_action;
-	std::string m_reason;
+	const char *m_reason;
 };
 
 
@@ -168,7 +157,6 @@ struct ActionResult : public IActionResult< Actor >
 	// this is derived from IActionResult to ensure that ActionResult and EventDesiredResult cannot be silently converted
 	ActionResult() : IActionResult< Actor >( )	{ }
 	ActionResult( ActionResultType type, Action< Actor > *action, const char *reason ) : IActionResult< Actor >( type, action, reason )	{ }
-	ActionResult( ActionResultType type, Action< Actor > *action = NULL, std::string reason = {} ) : IActionResult< Actor >( type, action, reason )	{ }
 };
 
 
