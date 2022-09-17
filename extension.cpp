@@ -598,7 +598,7 @@ public:
 			return nullptr;
 		}
 	}
-	
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	CBaseCombatCharacter *MyInfectedPointer()
 	{
@@ -16524,7 +16524,7 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 		//TODO!!!!!! move this to clsobj_hack
 		entity_vtabl[CBaseEntityBloodColor] = func_to_void(&EntityVTableHack::DetourBloodColor);
 	}
-	entity_vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::DetourIsNPC);
+	//entity_vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::DetourIsNPC);
 
 	if(pCC) {
 		switch(ntype) {
@@ -16581,8 +16581,8 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 				entity_vtabl[CBaseEntityPhysicsSolidMaskForEntity] = func_to_void(&CombatCharacterVTableHack::DetourPhysicsSolidMaskForEntity);
 			}
 		}
-		entity_vtabl[CBaseCombatCharacterHasHumanGibs] = func_to_void(&CombatCharacterVTableHack::DetourHasHumanGibs);
-		entity_vtabl[CBaseCombatCharacterHasAlienGibs] = func_to_void(&CombatCharacterVTableHack::DetourHasAlienGibs);
+		//entity_vtabl[CBaseCombatCharacterHasHumanGibs] = func_to_void(&CombatCharacterVTableHack::DetourHasHumanGibs);
+		//entity_vtabl[CBaseCombatCharacterHasAlienGibs] = func_to_void(&CombatCharacterVTableHack::DetourHasAlienGibs);
 		entity_vtabl[CBaseCombatCharacterGetBossType] = func_to_void(&CombatCharacterVTableHack::DetourGetBossType);
 	}
 
@@ -16596,6 +16596,7 @@ DETOUR_DECL_MEMBER0(MyNPCPointer, CAI_BaseNPC *)
 	CBaseEntity *pEntity = (CBaseEntity *)this;
 
 	if(pEntity->MyNextBotPointer() ||
+		pEntity->IsPlayer() ||
 		pEntity->IsBaseObject()) {
 		return nullptr;
 	}
