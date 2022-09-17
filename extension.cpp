@@ -16496,6 +16496,10 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 {
 	std::string classname{classname_ptr};
 
+	if(classname == "__hack_get_nb_vtable__"sv) {
+		return;
+	}
+
 	CBaseCombatCharacter *pCC = pEntity->MyCombatCharacterPointer();
 	npc_type ntype{entity_to_npc_type(pEntity, classname)};
 
@@ -17022,7 +17026,7 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 #endif
 
 	if(!nextbot_funcs_patched) {
-		NextBotCombatCharacter *pEntity = NextBotCombatCharacter::create(0);
+		NextBotCombatCharacter *pEntity = (NextBotCombatCharacter *)dictionary->FindFactory("simple_bot")->Create("__hack_get_nb_vtable__")->GetBaseEntity();
 
 		INextBot *bot = pEntity->MyNextBotPointer();
 		IBody *body = bot->GetBodyInterface();
