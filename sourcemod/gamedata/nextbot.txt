@@ -552,6 +552,10 @@
 			{
 				"linux" "157"
 			}
+			"CBaseEntity::PostConstructor"
+			{
+				"linux" "27"
+			}
 		}
 		"Signatures"
 		{

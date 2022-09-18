@@ -545,13 +545,20 @@ float UTIL_VecToPitch( const Vector &vec )
 
 int m_lifeStateOffset = -1;
 
+int CBaseEntityPostConstructor = -1;
+
 class CBaseEntity : public IServerEntity
 {
 public:
 	DECLARE_CLASS_NOBASE( CBaseEntity );
 	DECLARE_SERVERCLASS();
 	DECLARE_DATADESC();
-	
+
+	void PostConstructor(const char *classname)
+	{
+		call_vfunc<void, CBaseEntity, const char *>(this, CBaseEntityPostConstructor, classname);
+	}
+
 	int entindex()
 	{
 		return gamehelpers->EntityToBCompatRef(this);
@@ -17026,7 +17033,8 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 #endif
 
 	if(!nextbot_funcs_patched) {
-		NextBotCombatCharacter *pEntity = (NextBotCombatCharacter *)dictionary->FindFactory("simple_bot")->Create("__hack_get_nb_vtable__")->GetBaseEntity();
+		NextBotCombatCharacter *pEntity = NextBotCombatCharacter::create(0);
+		pEntity->PostConstructor("__hack_get_nb_vtable__");
 
 		INextBot *bot = pEntity->MyNextBotPointer();
 		IBody *body = bot->GetBodyInterface();
@@ -17165,7 +17173,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #else
 	dictionary = servertools->GetEntityFactoryDictionary();
 #endif
-	
+
+	g_pGameConf->GetOffset("CBaseEntity::PostConstructor", &CBaseEntityPostConstructor);
+
 	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
 	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
 	g_pGameConf->GetMemSig("NDebugOverlay::HorzArrow", &NDebugOverlayHorzArrow);
