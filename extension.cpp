@@ -15922,32 +15922,7 @@ public:
 		return DONT_BLEED;
 	}
 
-	bool DetourShouldCollide( int collisionGroup, int contentsMask )
-	{
-		if ( collisionGroup == COLLISION_GROUP_PLAYER_MOVEMENT )
-		{
-			switch( GetTeamNumber() )
-			{
-			case 2:
-				if ( !( contentsMask & CONTENTS_REDTEAM ) )
-					return false;
-				break;
-
-			case 3:
-				if ( !( contentsMask & CONTENTS_BLUETEAM ) )
-					return false;
-				break;
-			}
-		}
-
-		if ( GetCollisionGroup() == COLLISION_GROUP_DEBRIS )
-		{
-			if ( ! (contentsMask & CONTENTS_DEBRIS) )
-				return false;
-		}
-
-		return true;
-	}
+	bool DetourShouldCollide( int collisionGroup, int contentsMask );
 };
 
 enum HalloweenBossType
@@ -16006,18 +15981,7 @@ public:
 		return HALLOWEEN_BOSS_INVALID;
 	}
 
-	unsigned int DetourPhysicsSolidMaskForEntity()
-	{
-		int teamContents = 0;
-
-		int team = GetTeamNumber();
-		switch(team) {
-			case 2: teamContents |= CONTENTS_BLUETEAM; break;
-			case 3: teamContents |= CONTENTS_REDTEAM; break;
-		}
-
-		return MASK_NPCSOLID | teamContents;
-	}
+	unsigned int DetourPhysicsSolidMaskForEntity();
 };
 
 class ZombieVTableHack : public CombatCharacterVTableHack
@@ -16068,26 +16032,77 @@ public:
 class BodyVTableHack : public IBody
 {
 public:
-	unsigned int DetourGetSolidMask()
-	{
-		CBaseCombatCharacter *pEntity = GetBot()->GetEntity();
-
-		int teamContents = 0;
-
-		int team = pEntity->GetTeamNumber();
-		switch(team) {
-			case 2: teamContents |= CONTENTS_BLUETEAM; break;
-			case 3: teamContents |= CONTENTS_REDTEAM; break;
-		}
-
-		return MASK_NPCSOLID | teamContents;
-	}
+	unsigned int DetourGetSolidMask();
 
 	unsigned int DetourGetCollisionGroup()
 	{
 		return COLLISION_GROUP_NPC;
 	}
 };
+
+#define TF_TEAM_RED 2
+#define TF_TEAM_BLUE 3
+#define TF_TEAM_HALLOWEEN 5
+
+unsigned int BodyVTableHack::DetourGetSolidMask()
+{
+	CBaseCombatCharacter *pEntity = GetBot()->GetEntity();
+
+	int contentsMask = MASK_NPCSOLID;
+
+	switch(pEntity->GetTeamNumber()) {
+	case TF_TEAM_RED:
+		contentsMask |= CONTENTS_BLUETEAM;
+		break;
+	case TF_TEAM_BLUE:
+		contentsMask |= CONTENTS_REDTEAM;
+		break;
+	}
+
+	return contentsMask;
+}
+
+unsigned int CombatCharacterVTableHack::DetourPhysicsSolidMaskForEntity()
+{
+	int contentsMask = MASK_NPCSOLID;
+
+	switch(GetTeamNumber()) {
+	case TF_TEAM_RED:
+		contentsMask |= CONTENTS_BLUETEAM;
+		break;
+	case TF_TEAM_BLUE:
+		contentsMask |= CONTENTS_REDTEAM;
+		break;
+	}
+
+	return contentsMask;
+}
+
+bool EntityVTableHack::DetourShouldCollide(int collisionGroup, int contentsMask)
+{
+	if(collisionGroup == COLLISION_GROUP_PLAYER_MOVEMENT) {
+		switch(GetTeamNumber()) {
+		case TF_TEAM_RED:
+			if(!(contentsMask & CONTENTS_REDTEAM)) {
+				return false;
+			}
+			break;
+		case TF_TEAM_BLUE:
+			if(!(contentsMask & CONTENTS_BLUETEAM)) {
+				return false;
+			}
+			break;
+		}
+	}
+
+	if(GetCollisionGroup() == COLLISION_GROUP_DEBRIS) {
+		if(!(contentsMask & CONTENTS_DEBRIS)) {
+			return false;
+		}
+	}
+
+	return true;
+}
 
 class GroundLocomotionVTableHack : public NextBotGroundLocomotion
 {
@@ -16443,58 +16458,19 @@ DETOUR_DECL_MEMBER0(UpdateGroundConstraint, void)
 class MerasmusBodyVTableHack : public BodyVTableHack
 {
 public:
-	unsigned int DetourGetSolidMask()
-	{
-		CBaseCombatCharacter *pEntity = GetBot()->GetEntity();
-
-		int teamContents = 0;
-
-		int team = pEntity->GetTeamNumber();
-		switch(team) {
-			case 2: teamContents |= CONTENTS_BLUETEAM; break;
-			case 3: teamContents |= CONTENTS_REDTEAM; break;
-		}
-
-		return MASK_NPCSOLID | CONTENTS_PLAYERCLIP | teamContents;
-	}
+	
 };
 
 class HatmanBodyVTableHack : public BodyVTableHack
 {
 public:
-	unsigned int DetourGetSolidMask()
-	{
-		CBaseCombatCharacter *pEntity = GetBot()->GetEntity();
-
-		int teamContents = 0;
-
-		int team = pEntity->GetTeamNumber();
-		switch(team) {
-			case 2: teamContents |= CONTENTS_BLUETEAM; break;
-			case 3: teamContents |= CONTENTS_REDTEAM; break;
-		}
-
-		return MASK_NPCSOLID | CONTENTS_PLAYERCLIP | teamContents;
-	}
+	
 };
 
 class TankBodyVTableHack : public BodyVTableHack
 {
 public:
-	unsigned int DetourGetSolidMask()
-	{
-		CBaseCombatCharacter *pEntity = GetBot()->GetEntity();
-
-		int teamContents = 0;
-
-		int team = pEntity->GetTeamNumber();
-		switch(team) {
-			case 2: teamContents |= CONTENTS_BLUETEAM; break;
-			case 3: teamContents |= CONTENTS_REDTEAM; break;
-		}
-
-		return MASK_NPCSOLID | teamContents;
-	}
+	
 };
 
 static std::vector<std::string> vtables_already_set{};

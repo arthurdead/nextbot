@@ -2369,16 +2369,16 @@ stock CustomDatamap register_infected_factory(const char[] classname, cosnt char
 enum baseline_cost_flags
 {
 	cost_flags_none =      0,
-	cost_flags_mod_heavy = (1 << 0),
-	cost_flags_safest =    (1 << 1),
-	cost_flags_discrete =  (1 << 2),
-	cost_flags_nojumping = (1 << 3),
-	cost_flags_noladders = (1 << 4),
-	cost_flags_nocrouch =  (1 << 5),
-	cost_flags_nospawn =   (1 << 6),
-	cost_flags_nowater =   (1 << 7),
-	cost_flags_fastest =   (1 << 8),
-	cost_flags_mod_small = (1 << 9),
+	cost_flags_mod_heavy =    (1 << 0),
+	cost_flags_safest =       (1 << 1),
+	cost_flags_discrete =     (1 << 2),
+	cost_flags_nojumping =    (1 << 3),
+	cost_flags_noladders =    (1 << 4),
+	cost_flags_nocrouch =     (1 << 5),
+	cost_flags_noenemyspawn = (1 << 6),
+	cost_flags_nowater =      (1 << 7),
+	cost_flags_fastest =      (1 << 8),
+	cost_flags_mod_small =    (1 << 9),
 };
 
 #define cost_flags_onlywalk (cost_flags_nojumping| \
@@ -2417,7 +2417,7 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 	
 	int team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
 	
-	if(flags & cost_flags_nospawn) {
+	if(flags & cost_flags_noenemyspawn) {
 #if defined GAME_TF2
 		CTFNavArea tfarea = view_as<CTFNavArea>(area);
 		switch(team) {
@@ -2428,6 +2428,12 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 			}
 			case 3: {
 				if(tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_RED)) {
+					return -1.0;
+				}
+			}
+			case 0, 5: {
+				if(tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_RED) ||
+					tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_BLUE)) {
 					return -1.0;
 				}
 			}
@@ -2526,12 +2532,6 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 	}
 
 	if(flags & cost_flags_safest) {
-		int enemy_team = 0;
-		switch(team) {
-			case 2: { enemy_team = 3; }
-			case 3: { enemy_team = 2; }
-		}
-
 		static const float dangerCost = 100.0;
 		cost += (dist + (dist * (dangerCost * area.GetDanger(team))));
 
@@ -2554,12 +2554,52 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 					cost += (enemySentryDangerCost * dist);
 				}
 			}
+			case 0, 5: {
+				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER) ||
+					tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+					cost += (enemySentryDangerCost * dist);
+				}
+			}
 		}
 
 		int obj = -1;
 		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
 			int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
-			if(obj_team == enemy_team) {
+
+			bool enemy = false;
+
+			switch(team) {
+				case 2: {
+					switch(obj_team) {
+						case 0: enemy = true;
+						case 3: enemy = true;
+						case 5: enemy = true;
+					}
+				}
+				case 3: {
+					switch(obj_team) {
+						case 0: enemy = true;
+						case 2: enemy = true;
+						case 5: enemy = true;
+					}
+				}
+				case 5: {
+					switch(obj_team) {
+						case 0: enemy = true;
+						case 2: enemy = true;
+						case 3: enemy = true;
+					}
+				}
+				case 0: {
+					switch(obj_team) {
+						case 5: enemy = true;
+						case 2: enemy = true;
+						case 3: enemy = true;
+					}
+				}
+			}
+
+			if(enemy) {
 				UpdateEntityLastKnownArea(obj);
 
 				if(GetEntityLastKnownArea(obj) == area) {
