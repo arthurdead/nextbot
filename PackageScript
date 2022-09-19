@@ -9,6 +9,7 @@ builder.SetBuildFolder('package')
 folder_list = [
   'addons/sourcemod/extensions',
   'addons/sourcemod/scripting/include',
+  'addons/sourcemod/scripting',
   'addons/sourcemod/gamedata',
   #'addons/sourcemod/configs',
 ]
@@ -31,6 +32,10 @@ def CopyFiles(src, dest, files):
 # Include files 
 CopyFiles('sourcemod/scripting/include', 'addons/sourcemod/scripting/include',
   [ 'nextbot.inc', ]
+)
+
+CopyFiles('sourcemod/scripting', 'addons/sourcemod/scripting',
+  [ 'nextbot.sp', ]
 )
 
 # GameData files
