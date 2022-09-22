@@ -225,6 +225,9 @@ typeset nb_funcs_t
 	//BehaviorAction.OnOtherKilled
 	function BehaviorResultType (CustomBehaviorAction action, INextBot bot, int entity, int victim, const CTakeDamageInfo info, BehaviorResult result);
 #endif
+
+	//NextBotFlyingLocomotion.LimitPitch
+	function void (NextBotFlyingLocomotion locomotion, float &pitch);
 };
 
 enum Disposition_t 
@@ -722,6 +725,11 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 	property float TraversableSlopeLimit
 	{
 		public native set(float height);
+	}
+
+	property bool AllowFacing
+	{
+		public native set(bool value);
 	}
 
 	public native void set_function(const char[] name, Function func);

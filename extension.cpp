@@ -7495,6 +7495,25 @@ public:
 		vars_t(IdentityToken_t *id)
 			: customlocomotion_base_vars_t{id, Locomotion_FlyingCustom} {}
 
+		IPluginFunction *limitpitch = nullptr;
+
+		virtual void plugin_unloaded() override
+		{
+			customlocomotion_base_vars_t::plugin_unloaded();
+			
+			limitpitch = nullptr;
+		}
+
+		virtual bool set_function(std::string_view name, IPluginFunction *func) override
+		{
+			if(name == "LimitPitch"sv) {
+				limitpitch = func;
+				return true;
+			}
+			
+			return customlocomotion_base_vars_t::set_function(name, func);
+		}
+
 		virtual void add_hooks(ILocomotion *bytes, bool hook_update = false) override
 		{
 			customlocomotion_base_vars_t::add_hooks(bytes, false);
@@ -7654,6 +7673,8 @@ public:
 
 		float yaw = 250.0f;
 		float pitch = 250.0f;
+
+		bool allowfacing = true;
 	};
 
 	unsigned char *vars_ptr()
@@ -7988,7 +8009,9 @@ public:
 
 	void HookFaceTowards( const Vector &target )
 	{
-		if(g_bFaceTowardsDisabled) {
+		vars_t &vars{getvars()};
+
+		if(!vars.allowfacing || g_bFaceTowardsDisabled) {
 			RETURN_META(MRES_SUPERCEDE);
 		}
 
@@ -8018,6 +8041,14 @@ public:
 
 		if(!ignore_pitch) {
 			float desiredPitch = UTIL_VecToPitch( toTarget );
+
+			IPluginFunction *limitpitch = vars.limitpitch;
+			if(limitpitch) {
+				limitpitch->PushCell((cell_t)this);
+				limitpitch->PushFloatByRef(&desiredPitch);
+				limitpitch->Execute(nullptr);
+			}
+
 			float pitchAngleDiff = UTIL_AngleDiff( desiredPitch, angles.x );
 			float deltaPitch = GetMaxPitchRate() * deltaT;
 			if (pitchAngleDiff < -deltaPitch) {
@@ -8027,8 +8058,6 @@ public:
 			} else {
 				angles.x += pitchAngleDiff;
 			}
-
-			//TODO!!! limit pitch
 		}
 
 		me->SetLocalAngles( angles );
@@ -12480,6 +12509,15 @@ cell_t PathFollowerAllowFacingset(IPluginContext *pContext, const cell_t *params
 	return 0;
 }
 
+cell_t NextBotFlyingLocomotionAllowFacingset(IPluginContext *pContext, const cell_t *params)
+{
+	CNextBotFlyingLocomotion *obj = (CNextBotFlyingLocomotion *)params[1];
+	
+	obj->getvars().allowfacing = params[2];
+	
+	return 0;
+}
+
 cell_t PathFollowerHindranceget(IPluginContext *pContext, const cell_t *params)
 {
 	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
@@ -15281,6 +15319,7 @@ sp_nativeinfo_t natives[] =
 	{"PathFollower.GoalTolerance.set", PathFollowerGoalToleranceset},
 #endif
 	{"PathFollower.AllowFacing.set", PathFollowerAllowFacingset},
+	{"NextBotFlyingLocomotion.AllowFacing.set", NextBotFlyingLocomotionAllowFacingset},
 	{"PathFollower.IsDiscontinuityAhead", PathFollowerIsDiscontinuityAhead},
 	{"PathFollower.IsAtGoal", PathFollowerIsAtGoal},
 	{"PathFollower.Hindrance.get", PathFollowerHindranceget},
