@@ -596,13 +596,23 @@ public:
 		return call_vfunc<Vector>(this, CBaseEntityEyePosition);
 	}
 
-	CBasePlayer *IsPlayer()
+	CBasePlayer *GetPlayer()
 	{
 		int idx = gamehelpers->EntityToBCompatRef(this);
-		if(idx >= 1 && idx <= playerhelpers->GetNumPlayers()) {
+		if(idx >= 1 && idx <= playerhelpers->GetMaxClients()) {
 			return (CBasePlayer *)this;
 		} else {
 			return nullptr;
+		}
+	}
+
+	bool IsPlayer()
+	{
+		int idx = gamehelpers->EntityToBCompatRef(this);
+		if(idx >= 1 && idx <= playerhelpers->GetMaxClients()) {
+			return true;
+		} else {
+			return false;
 		}
 	}
 
@@ -9296,7 +9306,7 @@ public:
 			CBaseEntity *entity = EntityFromEntityHandle( pServerEntity );
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-			CBasePlayer *player = entity->IsPlayer();
+			CBasePlayer *player = entity->GetPlayer();
 			if ( player && player->IsGhost() )
 				return false;
 #endif
@@ -15883,9 +15893,13 @@ static npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classn
 		return npc_wizard;
 	} else if(classname == "tank_boss"sv) {
 		return npc_tank;
+	} else if(classname == "tf_bot"sv) {
+		return npc_none;
 #else
 	#error
 #endif
+	} else if(classname == "player"sv) {
+		return npc_none;
 	} else if(!pEntity->IsPlayer() && pEntity->MyNextBotPointer()) {
 		return npc_custom;
 	}
