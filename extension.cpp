@@ -17052,7 +17052,7 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	if(!infectedvtable) {
-		IServerNetworkable *network = dictionary->Create("infected");
+		IServerNetworkable *network = dictionary->Create("__hack_get_infected_vtable__");
 		CBaseEntity *pEntity = network->GetBaseEntity();
 		
 		infectedvtable = *(void ***)pEntity;
@@ -17063,6 +17063,7 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 
 	if(!nextbot_funcs_patched) {
 		NextBotCombatCharacter *pEntity = NextBotCombatCharacter::create(0);
+		pEntity->AddIEFlags(EFL_SERVER_ONLY);
 		pEntity->PostConstructor("__hack_get_nb_vtable__");
 
 		INextBot *bot = pEntity->MyNextBotPointer();
