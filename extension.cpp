@@ -6930,6 +6930,7 @@ SH_DECL_HOOK0(ILocomotion, GetVelocity, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK1_void(ILocomotion, FaceTowards, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, GetFeet, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, IsOnGround, SH_NOATTRIB, 0, bool);
+SH_DECL_HOOK0(ILocomotion, IsAbleToClimb, SH_NOATTRIB, 0, bool);
 
 SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
@@ -6994,6 +6995,7 @@ public:
 	LocomotionType type = Locomotion_AnyCustom;
 
 	bool update_hooked = false;
+	bool climbledge_hooked = false;
 
 	float step = 18.0f;
 	float jump = 180.0f;
@@ -7154,6 +7156,9 @@ public:
 		if(update_hooked) {
 			SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
 		}
+		if(climbledge_hooked) {
+			SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
+		}
 
 		SH_REMOVE_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
 		SH_REMOVE_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false);
@@ -7169,18 +7174,22 @@ public:
 		
 		SH_REMOVE_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false);
 		SH_REMOVE_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false);
-		SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
 		SH_REMOVE_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false);
 		SH_REMOVE_HOOK(ILocomotion, IsEntityTraversable, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookIsEntityTraversable), false);
 	}
 
-	virtual void add_hooks(ILocomotion *bytes, bool hook_update = true)
+	virtual void add_hooks(ILocomotion *bytes, bool hook_update = true, bool hook_climbledge = true)
 	{
 		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
 
 		if(hook_update) {
 			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
 			update_hooked = true;
+		}
+
+		if(hook_climbledge) {
+			SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
+			climbledge_hooked = true;
 		}
 
 		SH_ADD_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
@@ -7197,7 +7206,6 @@ public:
 		
 		SH_ADD_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false);
 		SH_ADD_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false);
-		SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
 		SH_ADD_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false);
 		SH_ADD_HOOK(ILocomotion, IsEntityTraversable, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookIsEntityTraversable), false);
 	}
@@ -7395,9 +7403,9 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		SH_REMOVE_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowards), false);
 	}
 	
-	virtual void add_hooks(ILocomotion *loc, bool hook_update = true) override
+	virtual void add_hooks(ILocomotion *loc, bool hook_update = true, bool hook_climbledge = true) override
 	{
-		customlocomotion_base_vars_t::add_hooks(loc, hook_update);
+		customlocomotion_base_vars_t::add_hooks(loc, hook_update, hook_climbledge);
 		
 		GameLocomotion *gameloc = (GameLocomotion *)loc;
 		
@@ -7420,9 +7428,9 @@ public:
 		vars_t(IdentityToken_t *id)
 			: customlocomotion_vars_t{id, Locomotion_GroundCustom} {}
 
-		virtual void add_hooks(ILocomotion *bytes, bool hook_update = true) override
+		virtual void add_hooks(ILocomotion *bytes, bool hook_update = true, bool hook_climbledge = true) override
 		{
-			customlocomotion_vars_t::add_hooks(bytes, hook_update);
+			customlocomotion_vars_t::add_hooks(bytes, hook_update, hook_climbledge);
 
 			NextBotGroundLocomotion *loc{(NextBotGroundLocomotion *)bytes};
 
@@ -7524,14 +7532,15 @@ public:
 			return customlocomotion_base_vars_t::set_function(name, func);
 		}
 
-		virtual void add_hooks(ILocomotion *bytes, bool hook_update = false) override
+		virtual void add_hooks(ILocomotion *bytes, bool hook_update = false, bool hook_climbledge = false) override
 		{
-			customlocomotion_base_vars_t::add_hooks(bytes, false);
+			customlocomotion_base_vars_t::add_hooks(bytes, false, false);
 
 			CNextBotFlyingLocomotion *loc{(CNextBotFlyingLocomotion *)bytes};
 
 			SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
 			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
+			SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &vars_t::HookClimbUpToLedge), false);
 			SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), true);
 			SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
 			SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
@@ -7540,6 +7549,7 @@ public:
 			SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
 			SH_ADD_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
+			SH_ADD_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false);
 
 			CBaseEntity *pEntity = bytes->GetBot()->GetEntity();
 
@@ -7568,6 +7578,44 @@ public:
 			SH_REMOVE_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_REMOVE_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
 			SH_REMOVE_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
+			SH_REMOVE_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false);
+			SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &vars_t::HookClimbUpToLedge), false);
+		}
+
+		bool HookClimbUpToLedge( const Vector &landingGoal, const Vector &landingForward, CBaseEntity *obstacle )
+		{
+			CNextBotFlyingLocomotion *loc = META_IFACEPTR(CNextBotFlyingLocomotion);
+
+			bool ret = false;
+
+			if(climbledge) {
+				climbledge->PushCell((cell_t)loc);
+				cell_t goalarr[3] = {sp_ftoc(landingGoal.x), sp_ftoc(landingGoal.y), sp_ftoc(landingGoal.z)};
+				climbledge->PushArray(goalarr, 3);
+				cell_t landarr[3] = {sp_ftoc(landingForward.x), sp_ftoc(landingForward.y), sp_ftoc(landingForward.z)};
+				climbledge->PushArray(landarr, 3);
+				climbledge->PushCell(gamehelpers->EntityToBCompatRef(obstacle));
+				cell_t should = 0;
+				climbledge->PushCellByRef(&should);
+				MRESReturn res = MRES_Ignored;
+				climbledge->Execute((cell_t *)&res);
+
+				switch(mres_to_meta_res(res)) {
+					case MRES_IGNORED:
+					break;
+					case MRES_HANDLED:
+					break;
+					case MRES_OVERRIDE:
+					ret = should;
+					break;
+					case MRES_SUPERCEDE:
+					RETURN_META_VALUE(MRES_SUPERCEDE, should);
+				}
+			}
+
+			//TODO!!! implement
+
+			RETURN_META_VALUE(MRES_SUPERCEDE, ret);
 		}
 
 		void HookUpdateOnRemove()
@@ -7609,6 +7657,11 @@ public:
 		const Vector &HookGetVelocity( void )
 		{
 			RETURN_META_VALUE(MRES_SUPERCEDE, m_velocity);
+		}
+
+		bool HookIsAbleToClimb()
+		{
+			RETURN_META_VALUE(MRES_SUPERCEDE, false);
 		}
 
 		bool HookIsOnGround()
@@ -17068,11 +17121,9 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 
 		INextBot *bot = pEntity->MyNextBotPointer();
 		IBody *body = bot->GetBodyInterface();
-		ILocomotion *locomotion = bot->GetLocomotionInterface();
 
 		void **entity_vtabl = *(void ***)pEntity;
 		void **body_vtabl = *(void ***)body;
-		void **locomotion_vtabl = *(void ***)locomotion;
 
 		RemoveEntity(pEntity);
 
@@ -17085,6 +17136,16 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 		SourceHook::SetMemAccess(body_vtabl, (GetCollisionGroupOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 		body_vtabl[GetSolidMaskOffset] = func_to_void(&BodyVTableHack::DetourGetSolidMask);
 		body_vtabl[GetCollisionGroupOffset] = func_to_void(&BodyVTableHack::DetourGetCollisionGroup);
+
+		IServerNetworkable *network = dictionary->FindFactory("simple_bot")->Create("__hack_get_groundloc_vtable__");
+		pEntity = (NextBotCombatCharacter *)network->GetBaseEntity();
+
+		bot = pEntity->MyNextBotPointer();
+		ILocomotion *locomotion = bot->GetLocomotionInterface();
+
+		void **locomotion_vtabl = *(void ***)locomotion;
+
+		RemoveEntity(pEntity);
 
 		int ResetOffset = vfunc_index(&NextBotGroundLocomotion::Reset);
 		int GetFeetOffset = vfunc_index(&NextBotGroundLocomotion::GetFeet);

@@ -40,7 +40,7 @@
 /* Basic information exposed publicly */
 #define SMEXT_CONF_NAME			"Nextbot"
 #define SMEXT_CONF_DESCRIPTION	""
-#define SMEXT_CONF_VERSION		"0.1.0.2"
+#define SMEXT_CONF_VERSION		"0.1.0.3"
 #define SMEXT_CONF_AUTHOR		"Arthurdead"
 #define SMEXT_CONF_URL			""
 #define SMEXT_CONF_LOGTAG		"NEXTBOT"
