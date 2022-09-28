@@ -546,6 +546,7 @@ float UTIL_VecToPitch( const Vector &vec )
 int m_lifeStateOffset = -1;
 
 int CBaseEntityPostConstructor = -1;
+int CBaseEntityPhysicsSolidMaskForEntity = -1;
 
 class CBaseEntity : public IServerEntity
 {
@@ -1260,6 +1261,11 @@ public:
 		return *(char *)(((unsigned char *)this) + m_lifeStateOffset) == LIFE_ALIVE;
 	}
 
+	unsigned int PhysicsSolidMaskForEntity( void )
+	{
+		return call_vfunc<unsigned int, CBaseEntity>(this, CBaseEntityPhysicsSolidMaskForEntity);
+	}
+
 	//GARBAGE
 	int GetHealth() { return 0; }
 	int m_takedamage;
@@ -1576,6 +1582,28 @@ struct CAI_MoveMonitor
 		return false;
 	}
 
+	bool TargetMoved2D( CBaseEntity *pEntity )
+	{
+		if ( IsMarkSet() && pEntity != NULL )
+		{
+			float distance = ( m_vMark - pEntity->GetAbsOrigin() ).Length2D();
+			if ( distance > m_flMarkTolerance )
+				return true;
+		}
+		return false;
+	}
+
+	bool TargetMoved( const Vector &feet )
+	{
+		if ( IsMarkSet() )
+		{
+			float distance = ( m_vMark - feet ).Length();
+			if ( distance > m_flMarkTolerance )
+				return true;
+		}
+		return false;
+	}
+
 	void SetMark( CBaseEntity *pEntity, float tolerance )
 	{
 		if ( pEntity )
@@ -1583,6 +1611,12 @@ struct CAI_MoveMonitor
 			m_vMark = pEntity->GetAbsOrigin();
 			m_flMarkTolerance = tolerance;
 		}
+	}
+
+	void SetMark( const Vector &feet, float tolerance )
+	{
+		m_vMark = feet;
+		m_flMarkTolerance = tolerance;
 	}
 
 	enum
@@ -6931,6 +6965,8 @@ SH_DECL_HOOK1_void(ILocomotion, FaceTowards, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, GetFeet, SH_NOATTRIB, 0, const Vector &);
 SH_DECL_HOOK0(ILocomotion, IsOnGround, SH_NOATTRIB, 0, bool);
 SH_DECL_HOOK0(ILocomotion, IsAbleToClimb, SH_NOATTRIB, 0, bool);
+SH_DECL_HOOK0(ILocomotion, IsAbleToJumpAcrossGaps, SH_NOATTRIB, 0, bool);
+SH_DECL_HOOK0(ILocomotion, IsRunning, SH_NOATTRIB, 0, bool);
 
 SH_DECL_HOOK0(ILocomotion, GetMaxJumpHeight, SH_NOATTRIB, 0, float);
 SH_DECL_HOOK0(ILocomotion, GetStepHeight, SH_NOATTRIB, 0, float);
@@ -7505,6 +7541,105 @@ CBaseEntity *FindEntityByClassname( CBaseEntity *pStartEntity, const char *szNam
 
 SH_DECL_MANUALHOOK2_void(Deflected, 0, 0, 0, CBaseEntity *, Vector &);
 
+class CNavMeshHack : public CNavMesh
+{
+public:
+	CNavArea *GetNavArea( CBaseEntity *pEntity, const Vector &feet, int nFlags, float flBeneathLimit = 120.0f ) const
+	{
+		if ( !m_grid.Count() )
+			return NULL;
+
+		Vector testPos = feet;
+
+		float flStepHeight = 1e-3;
+		CBaseCombatCharacter *pBCC = pEntity->MyCombatCharacterPointer();
+		if ( pBCC )
+		{
+			// Check if we're still in the last area
+			CNavArea *pLastNavArea = pBCC->GetLastKnownArea();
+			if ( pLastNavArea && pLastNavArea->IsOverlapping( testPos ) )
+			{
+				float flZ = pLastNavArea->GetZ( testPos );
+				if ( ( flZ <= testPos.z + StepHeight ) && ( flZ >= testPos.z - StepHeight ) )
+					return pLastNavArea;
+			}
+			flStepHeight = StepHeight;
+		}
+
+		// get list in cell that contains position
+		int x = WorldToGridX( testPos.x );
+		int y = WorldToGridY( testPos.y );
+		NavAreaVector *areaVector = &m_grid[ x + y*m_gridSizeX ];
+
+		// search cell list to find correct area
+		CNavArea *use = NULL;
+		float useZ = -99999999.9f;
+
+		bool bSkipBlockedAreas = ( ( nFlags & GETNAVAREA_ALLOW_BLOCKED_AREAS ) == 0 );
+		FOR_EACH_VEC( (*areaVector), it )
+		{
+			CNavArea *pArea = (*areaVector)[ it ];
+
+			// check if position is within 2D boundaries of this area
+			if ( !pArea->IsOverlapping( testPos ) )
+				continue;
+
+			// don't consider blocked areas
+			if ( bSkipBlockedAreas && pArea->IsBlocked( pEntity->GetTeamNumber() ) )
+				continue;
+
+			// project position onto area to get Z
+			float z = pArea->GetZ( testPos );
+
+			// if area is above us, skip it
+			if ( z > testPos.z + flStepHeight )
+				continue;
+
+			// if area is too far below us, skip it
+			if ( z < testPos.z - flBeneathLimit )
+				continue;
+
+			// if area is lower than the one we have, skip it
+			if ( z <= useZ )
+				continue;
+
+			use = pArea;
+			useZ = z;
+		}
+
+		// Check LOS if necessary
+		if ( use && ( nFlags & GETNAVAREA_CHECK_LOS ) && ( useZ < testPos.z - flStepHeight ) )
+		{
+			// trace directly down to see if it's below us and unobstructed
+			trace_t result;
+			UTIL_TraceLine( testPos, Vector( testPos.x, testPos.y, useZ ), MASK_NPCSOLID_BRUSHONLY, NULL, COLLISION_GROUP_NONE, &result );
+			if ( ( result.fraction != 1.0f ) && ( fabs( result.endpos.z - useZ ) > flStepHeight ) )
+				return NULL;
+		}
+		return use;
+	}
+
+	CNavArea *GetNearestNavArea( CBaseEntity *pEntity, int nFlags, float maxDist ) const
+	{
+		return CNavMesh::GetNearestNavArea( pEntity, nFlags, maxDist );
+	}
+
+	CNavArea *GetNearestNavArea( CBaseEntity *pEntity, const Vector &feet, int nFlags, float maxDist ) const
+	{
+		if ( !m_grid.Count() )
+			return NULL;
+
+		// quick check
+		CNavArea *pClose = GetNavArea( pEntity, feet, nFlags );
+		if ( pClose )
+			return pClose;
+
+		bool bCheckLOS = ( nFlags & GETNAVAREA_CHECK_LOS ) != 0;
+		bool bCheckGround = ( nFlags & GETNAVAREA_CHECK_GROUND ) != 0;
+		return CNavMesh::GetNearestNavArea( feet, false, maxDist, bCheckLOS, bCheckGround, pEntity->GetTeamNumber() );
+	}
+};
+
 class CNextBotFlyingLocomotion : public ILocomotion
 {
 public:
@@ -7550,6 +7685,8 @@ public:
 			SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
 			SH_ADD_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
 			SH_ADD_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false);
+			SH_ADD_HOOK(ILocomotion, IsAbleToJumpAcrossGaps, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToJumpAcrossGaps), false);
+			SH_ADD_HOOK(ILocomotion, IsRunning, bytes, SH_MEMBER(this, &vars_t::HookIsRunning), false);
 
 			CBaseEntity *pEntity = bytes->GetBot()->GetEntity();
 
@@ -7578,7 +7715,9 @@ public:
 			SH_REMOVE_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
 			SH_REMOVE_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
 			SH_REMOVE_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
+			SH_REMOVE_HOOK(ILocomotion, IsRunning, bytes, SH_MEMBER(this, &vars_t::HookIsRunning), false);
 			SH_REMOVE_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false);
+			SH_REMOVE_HOOK(ILocomotion, IsAbleToJumpAcrossGaps, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToJumpAcrossGaps), false);
 			SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &vars_t::HookClimbUpToLedge), false);
 		}
 
@@ -7664,6 +7803,16 @@ public:
 			RETURN_META_VALUE(MRES_SUPERCEDE, false);
 		}
 
+		bool HookIsAbleToJumpAcrossGaps()
+		{
+			RETURN_META_VALUE(MRES_SUPERCEDE, false);
+		}
+
+		bool HookIsRunning()
+		{
+			RETURN_META_VALUE(MRES_SUPERCEDE, true);
+		}
+
 		bool HookIsOnGround()
 		{
 			RETURN_META_VALUE(MRES_SUPERCEDE, tf_npc_flying_loc_onground.GetBool());
@@ -7679,28 +7828,34 @@ public:
 				return;
 			}
 
-		#if 1
+			const Vector &feet{pThis->MyNextBotPointer()->GetLocomotionInterface()->GetFeet()};
+
 			if ( nb_last_area_update_tolerance->GetFloat() > 0.0f )
 			{
 				// skip this test if we're not standing on the world (ie: elevators that move us)
 				if ( pThis->GetGroundEntity() == NULL || pThis->GetGroundEntity()->IsWorld() )
 				{
-					if ( pThis->GetLastNavArea() && pThis->GetNavAreaUpdateMonitor().IsMarkSet() && !pThis->GetNavAreaUpdateMonitor().TargetMoved( pThis ) )
+					if ( pThis->GetLastNavArea() && pThis->GetNavAreaUpdateMonitor().IsMarkSet() && !pThis->GetNavAreaUpdateMonitor().TargetMoved( feet ) ) {
 						return;
+					}
 
-					pThis->GetNavAreaUpdateMonitor().SetMark( pThis, nb_last_area_update_tolerance->GetFloat() );
+					pThis->GetNavAreaUpdateMonitor().SetMark( feet, nb_last_area_update_tolerance->GetFloat() );
 				}
 			}
-		#endif
 
 			// find the area we are directly standing in
-			CNavArea *area = TheNavMesh->GetNearestNavArea( pThis, GETNAVAREA_CHECK_LOS, 500.0f );
-			if ( !area )
-				return;
+			CNavArea *area = ((CNavMeshHack *)TheNavMesh)->GetNearestNavArea( pThis, feet, GETNAVAREA_CHECK_GROUND | GETNAVAREA_CHECK_LOS, 50.0f );
+			if ( !area ) {
+				area = TheNavMesh->GetNearestNavArea( pThis, GETNAVAREA_CHECK_LOS, 500.0f );
+				if(!area) {
+					return;
+				}
+			}
 
 			// make sure we can actually use this area - if not, consider ourselves off the mesh
-			if ( !pThis->IsAreaTraversable( area ) )
+			if ( !pThis->IsAreaTraversable( area ) ) {
 				return;
+			}
 
 			if ( area != pThis->GetLastNavArea() )
 			{
@@ -7813,7 +7968,7 @@ public:
 		CTraceFilterSimpleClassnameList filter( me, COLLISION_GROUP_NONE );
 		filter.AddClassnameToIgnore( me->GetClassname() );
 
-		UTIL_TraceLine( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, -2000.0f ), MASK_PLAYERSOLID_BRUSHONLY, &filter, &result );
+		UTIL_TraceLine( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, -MAX_TRACE_LENGTH ), MASK_NPCSOLID_BRUSHONLY, &filter, &result );
 
 		float groundZ = result.endpos.z;
 
@@ -7846,7 +8001,7 @@ public:
 		filter.AddClassnameToIgnore( me->GetClassname() );
 
 		// find ceiling
-		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, 1000.0f ), 
+		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, MAX_TRACE_LENGTH ), 
 				   me->WorldAlignMins(), me->WorldAlignMaxs(), 
 				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
 
@@ -7867,7 +8022,7 @@ public:
 		}
 
 		TraceHull( me->GetAbsOrigin() + Vector( 0, 0, ceiling ) + aheadXY * 50.0f,
-				   me->GetAbsOrigin() + Vector( 0, 0, -2000.0f ) + aheadXY * 50.0f,
+				   me->GetAbsOrigin() + Vector( 0, 0, -MAX_TRACE_LENGTH ) + aheadXY * 50.0f,
 				   Vector( 1.25f * me->WorldAlignMins().x, 1.25f * me->WorldAlignMins().y, me->WorldAlignMins().z ), 
 				   Vector( 1.25f * me->WorldAlignMaxs().x, 1.25f * me->WorldAlignMaxs().y, me->WorldAlignMaxs().z ), 
 				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
@@ -7895,7 +8050,7 @@ public:
 		filter.AddClassnameToIgnore( me->GetClassname() );
 
 		// find ceiling
-		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, 1000.0f ), 
+		TraceHull( me->GetAbsOrigin(), me->GetAbsOrigin() + Vector( 0, 0, MAX_TRACE_LENGTH ), 
 				   me->WorldAlignMins(), me->WorldAlignMaxs(), 
 				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
 
@@ -7903,12 +8058,26 @@ public:
 
 		// trace wider hull to account for nearby ledges we want to float over
 		TraceHull( me->GetAbsOrigin() + Vector( 0, 0, ceiling ),
-				   me->GetAbsOrigin() + Vector( 0, 0, -1000.0f ), 
+				   me->GetAbsOrigin() + Vector( 0, 0, -MAX_TRACE_LENGTH ), 
 				   Vector( 2.0f * me->WorldAlignMins().x, 2.0f * me->WorldAlignMins().y, me->WorldAlignMins().z ), 
 				   Vector( 2.0f * me->WorldAlignMaxs().x, 2.0f * me->WorldAlignMaxs().y, me->WorldAlignMaxs().z ), 
 				   GetBot()->GetBodyInterface()->GetSolidMask(), &filter, &result );
 
 		float groundZ = result.endpos.z;
+
+		float currentAltitude = me->GetAbsOrigin().z - groundZ;
+		float error = GetDesiredAltitude() - currentAltitude;
+		float accelZ = clamp( error, -GetDesiredAcceleration(), GetDesiredAcceleration() );
+
+		getvars().m_acceleration.z += accelZ;
+	}
+
+	void MaintainAltitude_merasmus( void )
+	{
+		CBaseCombatCharacter *me = GetBot()->GetEntity();
+
+		float groundZ;
+		TheNavMesh->GetSimpleGroundHeight( me->GetAbsOrigin(), &groundZ );
 
 		float currentAltitude = me->GetAbsOrigin().z - groundZ;
 		float error = GetDesiredAltitude() - currentAltitude;
@@ -7928,6 +8097,9 @@ public:
 			} break;
 			case 2: {
 				MaintainAltitude_minion();
+			} break;
+			case 3: {
+				MaintainAltitude_merasmus();
 			} break;
 		}
 	}
@@ -8139,7 +8311,7 @@ public:
 
 		feet = me->GetAbsOrigin();
 
-		UTIL_TraceLine( feet, feet + Vector( 0, 0, -2000.0f ), MASK_PLAYERSOLID_BRUSHONLY, &filter, &result );
+		UTIL_TraceLine( feet, feet + Vector( 0, 0, -MAX_TRACE_LENGTH ), MASK_NPCSOLID_BRUSHONLY, &filter, &result );
 
 		feet.z = result.endpos.z;
 
@@ -8606,7 +8778,12 @@ public:
 	}
 
 	virtual const char *GetDebugString() const { return "IBodyCustom"; }
-	
+
+	mutable Vector hullMins;
+	mutable Vector hullMaxs;
+	mutable Vector eyePos;
+	mutable Vector viewVector;
+
 	float HullWidth = 26.0f;
 
 	float LieHullHeight = 16.0f;
@@ -8617,17 +8794,61 @@ public:
 #if SOURCE_ENGINE == SE_TF2
 	int CollisionGroup = COLLISION_GROUP_NPC;
 #endif
-	
-	float GetHullWidth( void ) override { return HullWidth; }							// width of bot's collision hull in XY plane
-	float GetStandHullHeight( void ) override { return StandHullHeight; }						// height of bot's collision hull when standing
-	float GetCrouchHullHeight( void ) override { return CrouchHullHeight; }					// height of bot's collision hull when crouched
+
+	float GetHullWidth( void ) override
+	{
+		return HullWidth;
+	}
+
+	float GetStandHullHeight( void ) override
+	{
+		return StandHullHeight;
+	}
+
+	float GetCrouchHullHeight( void ) override
+	{
+		return CrouchHullHeight;
+	}
+
+	float GetLieHullHeight( void )
+	{
+		return LieHullHeight;
+	}
+
+	const Vector &GetHullMins( void ) override
+	{
+		hullMins.x = -GetHullWidth()/2.0f;
+		hullMins.y = hullMins.x;
+		hullMins.z = 0.0f;
+		return hullMins;
+	}
+
+	const Vector &GetHullMaxs( void ) override
+	{
+		hullMaxs.x = GetHullWidth()/2.0f;
+		hullMaxs.y = hullMaxs.x;
+		hullMaxs.z = GetHullHeight();
+		return hullMaxs;
+	}
+
+	unsigned int GetSolidMask( void ) override
+	{
+		return SolidMask;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	unsigned int GetCollisionGroup( void ) override
+	{
+		return CollisionGroup;
+	}
+#endif
 
 	float GetHullHeight( void ) override
 	{
 		switch( GetActualPosture() )
 		{
 		case LIE:
-			return LieHullHeight;
+			return GetLieHullHeight();
 
 		case SIT:
 		case CROUCH:
@@ -8639,32 +8860,17 @@ public:
 		}
 	}
 
-	const Vector &GetHullMins( void ) override
+	const Vector &GetEyePosition( void ) override
 	{
-		static Vector hullMins;
-
-		hullMins.x = -GetHullWidth()/2.0f;
-		hullMins.y = hullMins.x;
-		hullMins.z = 0.0f;
-
-		return hullMins;
+		eyePos = GetBot()->GetEntity()->WorldSpaceCenter();
+		return eyePos;
 	}
 
-	const Vector &GetHullMaxs( void ) override
+	const Vector &GetViewVector( void ) override
 	{
-		static Vector hullMaxs;
-
-		hullMaxs.x = GetHullWidth()/2.0f;
-		hullMaxs.y = hullMaxs.x;
-		hullMaxs.z = GetHullHeight();
-
-		return hullMaxs;
+		AngleVectors(GetBot()->GetEntity()->EyeAngles(), &viewVector);
+		return viewVector;
 	}
-
-	unsigned int GetSolidMask( void ) override { return SolidMask; }					// return the bot's collision mask (hack until we get a general hull trace abstraction here or in the locomotion interface)
-#if SOURCE_ENGINE == SE_TF2
-	unsigned int GetCollisionGroup( void ) override { return CollisionGroup; }
-#endif
 
 	static IBodyCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
 	{
@@ -15995,7 +16201,6 @@ static obj_type entity_to_obj_type(CBaseEntity *pEntity, std::string_view classn
 #endif
 
 int CBaseEntityBloodColor = -1;
-int CBaseEntityPhysicsSolidMaskForEntity = -1;
 int CBaseEntityShouldCollide = -1;
 int CBaseCombatCharacterHasHumanGibs = -1;
 int CBaseCombatCharacterHasAlienGibs = -1;
@@ -17384,8 +17589,11 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);
 #endif
-	
-	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMesh);
+
+	void **TheNavMeshPtr;
+	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMeshPtr);
+	TheNavMesh = *(CNavMesh **)TheNavMeshPtr;
+
 	g_pGameConf->GetMemSig("TheNavAreas", (void **)&TheNavAreas);
 
 	g_pGameConf->GetMemSig("CNavArea::m_masterMarker", (void **)&CNavArea::m_masterMarker);
@@ -17448,7 +17656,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 		DamageHistory m_damageHistory[ MAX_DAMAGE_TEAMS ];
 	};
 
-	m_lastNavAreaOffset = info.actual_offset + sizeof(lastnavarea_pad_t);
+	m_lastNavAreaOffset = info.actual_offset + sizeof(EHANDLE) + sizeof(lastnavarea_pad_t);
 	m_NavAreaUpdateMonitorOffset = m_lastNavAreaOffset + sizeof(CNavArea *);
 	m_registeredNavTeamOffset = m_NavAreaUpdateMonitorOffset + sizeof(CAI_MoveMonitor);
 
