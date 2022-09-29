@@ -1,6 +1,7 @@
 #include <sourcemod>
 #include <nextbot>
 #include <teammanager>
+#include <rulestools>
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int length)
 {
@@ -32,25 +33,53 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 	int entity = bot.Entity;
 	
 	int team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
-	
+
+	bool mvm = IsMannVsMachineMode();
+
+	if(area.IsBlocked(team)) {
+		return -1.0;
+	}
+
+	if(mvm) {
+		switch(team) {
+			case TF_TEAM_PVE_INVADERS: {
+				if(area.IsBlocked(TF_TEAM_PVE_INVADERS_GIANTS)) {
+					return -1.0;
+				}
+			}
+			case TF_TEAM_PVE_INVADERS_GIANTS: {
+				if(area.IsBlocked(TF_TEAM_PVE_INVADERS)) {
+					return -1.0;
+				}
+			}
+		}
+	}
+
 	if(flags & cost_flags_noenemyspawn) {
 #if defined GAME_TF2
 		CTFNavArea tfarea = view_as<CTFNavArea>(area);
 		switch(team) {
-			case 2: {
+			case TF_TEAM_RED: {
 				if(tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_BLUE)) {
 					return -1.0;
 				}
 			}
-			case 3: {
+			case TF_TEAM_BLUE: {
 				if(tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_RED)) {
 					return -1.0;
 				}
 			}
-			case 0, 5: {
+			case TEAM_UNASSIGNED, TF_TEAM_HALLOWEEN: {
 				if(tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_RED) ||
 					tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_BLUE)) {
 					return -1.0;
+				}
+			}
+			case TF_TEAM_PVE_INVADERS_GIANTS: {
+				if(mvm) {
+					if(tfarea.HasAttributeTF(TF_NAV_SPAWN_ROOM_RED)) {
+						return -1.0;
+					}
 				}
 			}
 		}
@@ -159,34 +188,43 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 		}
 
 		static const float enemySentryDangerCost = 5.0;
-		switch(team) {
-			case 2: {
-				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-					cost += (enemySentryDangerCost * dist);
+		if(!TeamManager_IsTruceActive()) {
+			switch(team) {
+				case TF_TEAM_RED: {
+					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+						cost += (enemySentryDangerCost * dist);
+					}
+				}
+				case TF_TEAM_BLUE: {
+					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+						cost += (enemySentryDangerCost * dist);
+					}
+				}
+				case TEAM_UNASSIGNED, TF_TEAM_HALLOWEEN: {
+					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER) ||
+						tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+						cost += (enemySentryDangerCost * dist);
+					}
+				}
+				case TF_TEAM_PVE_INVADERS_GIANTS: {
+					if(mvm) {
+						if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+							cost += (enemySentryDangerCost * dist);
+						}
+					}
 				}
 			}
-			case 3: {
-				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-					cost += (enemySentryDangerCost * dist);
-				}
-			}
-			case 0, 5: {
-				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER) ||
-					tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-					cost += (enemySentryDangerCost * dist);
-				}
-			}
-		}
 
-		int obj = -1;
-		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-			int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
-			if(TeamManager_AreTeamsEnemies(team, obj_team)) {
-				UpdateEntityLastKnownArea(obj);
+			int obj = -1;
+			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
+				int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
+				if(TeamManager_AreTeamsEnemies(team, obj_team)) {
+					UpdateEntityLastKnownArea(obj);
 
-				if(GetEntityLastKnownArea(obj) == area) {
-					static const float enemyBuildingCost = 10.0;
-					cost += (enemyBuildingCost * dist);
+					if(GetEntityLastKnownArea(obj) == area) {
+						static const float enemyBuildingCost = 10.0;
+						cost += (enemyBuildingCost * dist);
+					}
 				}
 			}
 		}
@@ -204,23 +242,49 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 		CTFNavArea tfarea = view_as<CTFNavArea>(area);
 
 		static const float friendlySentryDangerCost = 2.5;
-		switch(team) {
-			case 3: {
-				if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-					cost += (friendlySentryDangerCost * dist);
+		if(!TeamManager_IsTruceActive()) {
+			switch(team) {
+				case TF_TEAM_BLUE: {
+					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+						cost += (friendlySentryDangerCost * dist);
+					}
+				}
+				case TF_TEAM_RED: {
+					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+						cost += (friendlySentryDangerCost * dist);
+					}
+				}
+				case TF_TEAM_PVE_INVADERS_GIANTS: {
+					if(mvm) {
+						if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+							cost += (friendlySentryDangerCost * dist);
+						}
+					}
 				}
 			}
-			case 2: {
-				if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-					cost += (friendlySentryDangerCost * dist);
-				}
-			}
-		}
 
-		int obj = -1;
-		while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-			int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
-			if(TeamManager_AreTeamsFriends(team, obj_team)) {
+			int obj = -1;
+			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
+				int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
+				if(TeamManager_AreTeamsFriends(team, obj_team)) {
+					UpdateEntityLastKnownArea(obj);
+
+					if(GetEntityLastKnownArea(obj) == area) {
+						static const float friendlyBuildingCost = 5.0;
+						cost += (friendlyBuildingCost * dist);
+					}
+				}
+			}
+		} else {
+			if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
+				cost += (friendlySentryDangerCost * dist);
+			}
+			if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
+				cost += (friendlySentryDangerCost * dist);
+			}
+
+			int obj = -1;
+			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
 				UpdateEntityLastKnownArea(obj);
 
 				if(GetEntityLastKnownArea(obj) == area) {

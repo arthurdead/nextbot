@@ -11702,6 +11702,12 @@ cell_t CNavAreaGetClosestPointOnArea(IPluginContext *pContext, const cell_t *par
 	return 0;
 }
 
+cell_t CNavAreaIsBlocked(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsBlocked(params[2], params[3]);
+}
+
 cell_t ILocomotionIsAreaTraversable(IPluginContext *pContext, const cell_t *params)
 {
 	ILocomotion *area = (ILocomotion *)params[1];
@@ -15635,6 +15641,7 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.IsPotentiallyVisibleToTeam", CNavAreaIsPotentiallyVisibleToTeam},
 	{"CNavArea.GetZ", CNavAreaGetZ},
 	{"CNavArea.GetClosestPointOnArea", CNavAreaGetClosestPointOnArea},
+	{"CNavArea.IsBlocked", CNavAreaIsBlocked},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},

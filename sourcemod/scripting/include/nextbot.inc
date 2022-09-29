@@ -327,6 +327,8 @@ methodmap CNavArea
 	public native float GetZ(float x, float y);
 
 	public native void GetClosestPointOnArea(const float pos[3], float close[3]);
+
+	public native bool IsBlocked(int teamID, bool ignoreNavBlockers = false);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
