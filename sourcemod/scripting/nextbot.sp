@@ -3,6 +3,15 @@
 #include <teammanager>
 #include <rulestools>
 
+public Plugin myinfo = 
+{
+	name = "nextbot",
+	author = "Arthurdead",
+	description = "",
+	version = "0.1.1.5",
+	url = ""
+};
+
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int length)
 {
 	RegPluginLibrary("nextbot");

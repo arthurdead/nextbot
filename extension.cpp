@@ -3992,13 +3992,15 @@ public:
 	{
 	}
 
-	virtual const char *GetDebugString() const { return "IIntentionStub"; }
-	
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	virtual const char *GetDebugString() const override { return "IIntentionStub"; }
+#endif
+
 	IIntentionStub( INextBot *bot, bool reg ) : IIntention( bot, reg ) {
 
 	}
 	
-	static IIntentionStub *create(INextBot *bot, bool reg, IdentityToken_t *)
+	static IIntentionStub *create(INextBot *bot, bool reg)
 	{
 		return new IIntentionStub(bot, reg);
 	}
@@ -4657,422 +4659,305 @@ using SPBehavior = Behavior<SPActor>;
 
 class SPAction;
 
+struct spfunc_t
+{
+	spfunc_t() = default;
+
+	spfunc_t(IPluginFunction *func_, IPluginContext *ctx_)
+		: func{func_}, ctx{ctx_}
+	{
+	}
+
+	spfunc_t(std::nullptr_t)
+	{
+	}
+
+	spfunc_t(const spfunc_t &other)
+	{ operator=(other); }
+
+	spfunc_t &operator=(IPluginFunction *) = delete;
+
+	spfunc_t(spfunc_t &&other)
+	{ operator=(std::move(other)); }
+
+	spfunc_t &operator=(const spfunc_t &other)
+	{
+		func = other.func;
+		ctx = other.ctx;
+		return *this;
+	}
+
+	spfunc_t &operator=(spfunc_t &&other)
+	{
+		func = other.func;
+		ctx = other.ctx;
+		other.func = nullptr;
+		other.ctx = nullptr;
+		return *this;
+	}
+
+	IPluginFunction *func = nullptr;
+	IPluginContext *ctx = nullptr;
+
+	bool operator==(IdentityToken_t *ident_) const
+	{ return ctx->GetIdentity() == ident_; }
+	bool operator!=(IdentityToken_t *ident_) const
+	{ return ctx->GetIdentity() != ident_; }
+
+	bool operator==(std::nullptr_t) const
+	{ return func == nullptr; }
+	bool operator!=(std::nullptr_t) const
+	{ return func != nullptr; }
+
+	operator bool() const
+	{ return func; }
+	bool operator!() const
+	{ return !func; }
+
+	spfunc_t &operator=(std::nullptr_t)
+	{
+		func = nullptr;
+		ctx = nullptr;
+		return *this;
+	}
+
+	Handle_t plhandle()
+	{
+		IPlugin *pl{ctx ? plsys->FindPluginByContext(ctx->GetContext()) : nullptr};
+		return pl ? pl->GetMyHandle() : BAD_HANDLE;
+	}
+
+	IPluginFunction *operator->() const
+	{ return func; }
+	IPluginFunction *operator*() const
+	{ return func; }
+	operator IPluginFunction *&()
+	{ return func; }
+	operator IdentityToken_t *() const
+	{ return ctx ? ctx->GetIdentity() : nullptr; }
+	operator IPluginContext *() const
+	{ return ctx; }
+	operator funcid_t() const
+	{ return func ? func->GetFunctionID() : static_cast<funcid_t>(-1); }
+	operator IPlugin *() const
+	{ return ctx ? plsys->FindPluginByContext(ctx->GetContext()) : nullptr; }
+};
+
+void cleanup_func(spfunc_t &func, IdentityToken_t *pId)
+{
+	if(func && func == pId) {
+		func = nullptr;
+	}
+}
+
+#define PLUGINNB_GETSET_FUNCS_NOBASE \
+	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) { \
+		member_func_t member{get_function_member(name)}; \
+		if(!member) { \
+			return false; \
+		} \
+		(this->*member) = spfunc_t{func, pContext}; \
+		return true; \
+	} \
+	bool get_function(std::string_view name, spfunc_t &func) { \
+		member_func_t member{get_function_member(name)}; \
+		if(!member) { \
+			return false; \
+		} \
+		func = (this->*member); \
+		return true; \
+	} \
+	bool has_function(std::string_view name) { \
+		member_func_t member{get_function_member(name)}; \
+		if(!member) { \
+			return false; \
+		} \
+		return (this->*member) != nullptr; \
+	}
+
 struct SPActionEntryFuncs
 {
-	IPluginFunction *onstart = nullptr;
-	IPluginFunction *onupdate = nullptr;
-	IPluginFunction *onsus = nullptr;
-	IPluginFunction *onresume = nullptr;
-	IPluginFunction *onend = nullptr;
-	IPluginFunction *intialact = nullptr;
+	using this_t = SPActionEntryFuncs;
+
+	spfunc_t onstart = nullptr;
+	spfunc_t onupdate = nullptr;
+	spfunc_t onsus = nullptr;
+	spfunc_t onresume = nullptr;
+	spfunc_t onend = nullptr;
+	spfunc_t intialact = nullptr;
 	
-	IPluginFunction *leavegrnd = nullptr;
-	IPluginFunction *landgrnd = nullptr;
-	IPluginFunction *oncontact = nullptr;
-	IPluginFunction *animcompl = nullptr;
-	IPluginFunction *animinter = nullptr;
-	IPluginFunction *animevent = nullptr;
-	IPluginFunction *otherkilled = nullptr;
-	IPluginFunction *onsight = nullptr;
-	IPluginFunction *onlosesight = nullptr;
-	IPluginFunction *shoved = nullptr;
-	IPluginFunction *blinded = nullptr;
-	IPluginFunction *terrcontest = nullptr;
-	IPluginFunction *terrcap = nullptr;
-	IPluginFunction *terrlost = nullptr;
-	IPluginFunction *threachngd = nullptr;
-	IPluginFunction *hitvom = nullptr;
-	IPluginFunction *drop = nullptr;
-	IPluginFunction *movesucc = nullptr;
-	IPluginFunction *stuck = nullptr;
-	IPluginFunction *unstuck = nullptr;
-	IPluginFunction *ignite = nullptr;
-	IPluginFunction *injured = nullptr;
-	IPluginFunction *killed = nullptr;
-	IPluginFunction *win = nullptr;
-	IPluginFunction *lose = nullptr;
-	IPluginFunction *enterspit = nullptr;
-	IPluginFunction *mdlchnd = nullptr;
-	IPluginFunction *movefail = nullptr;
-	IPluginFunction *sound = nullptr;
-	IPluginFunction *wepfired = nullptr;
-	IPluginFunction *actemote = nullptr;
-	IPluginFunction *pickup = nullptr;
+	spfunc_t leavegrnd = nullptr;
+	spfunc_t landgrnd = nullptr;
+	spfunc_t oncontact = nullptr;
+	spfunc_t animcompl = nullptr;
+	spfunc_t animinter = nullptr;
+	spfunc_t animevent = nullptr;
+	spfunc_t otherkilled = nullptr;
+	spfunc_t onsight = nullptr;
+	spfunc_t onlosesight = nullptr;
+	spfunc_t shoved = nullptr;
+	spfunc_t blinded = nullptr;
+	spfunc_t terrcontest = nullptr;
+	spfunc_t terrcap = nullptr;
+	spfunc_t terrlost = nullptr;
+	spfunc_t threachngd = nullptr;
+	spfunc_t hitvom = nullptr;
+	spfunc_t drop = nullptr;
+	spfunc_t movesucc = nullptr;
+	spfunc_t stuck = nullptr;
+	spfunc_t unstuck = nullptr;
+	spfunc_t ignite = nullptr;
+	spfunc_t injured = nullptr;
+	spfunc_t killed = nullptr;
+	spfunc_t win = nullptr;
+	spfunc_t lose = nullptr;
+	spfunc_t enterspit = nullptr;
+	spfunc_t mdlchnd = nullptr;
+	spfunc_t movefail = nullptr;
+	spfunc_t sound = nullptr;
+	spfunc_t wepfired = nullptr;
+	spfunc_t actemote = nullptr;
+	spfunc_t pickup = nullptr;
 
-	void plugin_unloaded()
+	void plugin_unloaded(IdentityToken_t *pId)
 	{
-		onstart = nullptr;
-		onupdate = nullptr;
-		onsus = nullptr;
-		onresume = nullptr;
-		onend = nullptr;
-		intialact = nullptr;
+		cleanup_func(onstart, pId);
+		cleanup_func(onupdate, pId);
+		cleanup_func(onsus, pId);
+		cleanup_func(onresume, pId);
+		cleanup_func(onend, pId);
+		cleanup_func(intialact, pId);
 		
-		leavegrnd = nullptr;
-		landgrnd = nullptr;
-		oncontact = nullptr;
-		animcompl = nullptr;
-		animinter = nullptr;
-		animevent = nullptr;
-		otherkilled = nullptr;
-		onsight = nullptr;
-		onlosesight = nullptr;
-		shoved = nullptr;
-		blinded = nullptr;
-		terrcontest = nullptr;
-		terrcap = nullptr;
-		terrlost = nullptr;
-		threachngd = nullptr;
-		hitvom = nullptr;
-		drop = nullptr;
-		movesucc = nullptr;
-		stuck = nullptr;
-		unstuck = nullptr;
-		ignite = nullptr;
-		injured = nullptr;
-		killed = nullptr;
-		win = nullptr;
-		lose = nullptr;
-		enterspit = nullptr;
-		mdlchnd = nullptr;
-		movefail = nullptr;
-		sound = nullptr;
-		wepfired = nullptr;
-		actemote = nullptr;
-		pickup = nullptr;
+		cleanup_func(leavegrnd, pId);
+		cleanup_func(landgrnd, pId);
+		cleanup_func(oncontact, pId);
+		cleanup_func(animcompl, pId);
+		cleanup_func(animinter, pId);
+		cleanup_func(animevent, pId);
+		cleanup_func(otherkilled, pId);
+		cleanup_func(onsight, pId);
+		cleanup_func(onlosesight, pId);
+		cleanup_func(shoved, pId);
+		cleanup_func(blinded, pId);
+		cleanup_func(terrcontest, pId);
+		cleanup_func(terrcap, pId);
+		cleanup_func(terrlost, pId);
+		cleanup_func(threachngd, pId);
+		cleanup_func(hitvom, pId);
+		cleanup_func(drop, pId);
+		cleanup_func(movesucc, pId);
+		cleanup_func(stuck, pId);
+		cleanup_func(unstuck, pId);
+		cleanup_func(ignite, pId);
+		cleanup_func(injured, pId);
+		cleanup_func(killed, pId);
+		cleanup_func(win, pId);
+		cleanup_func(lose, pId);
+		cleanup_func(enterspit, pId);
+		cleanup_func(mdlchnd, pId);
+		cleanup_func(movefail, pId);
+		cleanup_func(sound, pId);
+		cleanup_func(wepfired, pId);
+		cleanup_func(actemote, pId);
+		cleanup_func(pickup, pId);
 	}
 
-	bool set_function(std::string_view name, IPluginFunction *func)
-	{
-		if(name == "OnStart"sv) {
-			onstart = func;
-			return true;
-		} else if(name == "Update"sv) {
-			onupdate = func;
-			return true;
-		} else if(name == "OnSuspend"sv) {
-			onsus = func;
-			return true;
-		} else if(name == "OnResume"sv) {
-			onresume = func;
-			return true;
-		} else if(name == "OnEnd"sv) {
-			onend = func;
-			return true;
-		} else if(name == "InitialContainedAction"sv) {
-			intialact = func;
-			return true;
-		} else if(name == "OnLandOnGround"sv) {
-			landgrnd = func;
-			return true;
-		} else if(name == "OnContact"sv) {
-			oncontact = func;
-			return true;
-		} else if(name == "OnAnimationActivityComplete"sv) {
-			animcompl = func;
-			return true;
-		} else if(name == "OnAnimationActivityInterrupted"sv) {
-			animinter = func;
-			return true;
-		} else if(name == "OnAnimationEvent"sv) {
-			animevent = func;
-			return true;
-		} else if(name == "OnOtherKilled"sv) {
-			otherkilled = func;
-			return true;
-		} else if(name == "OnSight"sv) {
-			onsight = func;
-			return true;
-		} else if(name == "OnLostSight"sv) {
-			onlosesight = func;
-			return true;
-		} else if(name == "OnShoved"sv) {
-			shoved = func;
-			return true;
-		} else if(name == "OnBlinded"sv) {
-			blinded = func;
-			return true;
-		} else if(name == "OnTerritoryContested"sv) {
-			terrcontest = func;
-			return true;
-		} else if(name == "OnTerritoryCaptured"sv) {
-			terrcap = func;
-			return true;
-		} else if(name == "OnTerritoryLost"sv) {
-			terrlost = func;
-			return true;
-		} else if(name == "OnThreatChanged"sv) {
-			threachngd = func;
-			return true;
-		} else if(name == "OnHitByVomitJar"sv) {
-			hitvom = func;
-			return true;
-		} else if(name == "OnDrop"sv) {
-			drop = func;
-			return true;
-		} else if(name == "OnMoveToSuccess"sv) {
-			movesucc = func;
-			return true;
-		} else if(name == "OnStuck"sv) {
-			stuck = func;
-			return true;
-		} else if(name == "OnUnStuck"sv) {
-			unstuck = func;
-			return true;
-		} else if(name == "OnIgnite"sv) {
-			ignite = func;
-			return true;
-		} else if(name == "OnInjured"sv) {
-			injured = func;
-			return true;
-		} else if(name == "OnKilled"sv) {
-			killed = func;
-			return true;
-		} else if(name == "OnWin"sv) {
-			win = func;
-			return true;
-		} else if(name == "OnLose"sv) {
-			lose = func;
-			return true;
-		} else if(name == "OnEnteredSpit"sv) {
-			enterspit = func;
-			return true;
-		} else if(name == "OnModelChanged"sv) {
-			mdlchnd = func;
-			return true;
-		} else if(name == "OnMoveToFailure"sv) {
-			movefail = func;
-			return true;
-		} else if(name == "OnSound"sv) {
-			sound = func;
-			return true;
-		} else if(name == "OnWeaponFired"sv) {
-			wepfired = func;
-			return true;
-		} else if(name == "OnActorEmoted"sv) {
-			actemote = func;
-			return true;
-		} else if(name == "OnPickUp"sv) {
-			pickup = func;
-			return true;
-		}
-		
-		return false;
-	}
+	using member_func_t = spfunc_t (this_t::*);
 
-	bool get_function(std::string_view name, funcid_t &func)
+	member_func_t get_function_member(std::string_view name)
 	{
 		if(name == "OnStart"sv) {
-			func = onstart->GetFunctionID();
-			return true;
+			return &this_t::onstart;
 		} else if(name == "Update"sv) {
-			func = onupdate->GetFunctionID();
-			return true;
+			return &this_t::onupdate;
 		} else if(name == "OnSuspend"sv) {
-			func = onsus->GetFunctionID();
-			return true;
+			return &this_t::onsus;
 		} else if(name == "OnResume"sv) {
-			func = onresume->GetFunctionID();
-			return true;
+			return &this_t::onresume;
 		} else if(name == "OnEnd"sv) {
-			func = onend->GetFunctionID();
-			return true;
+			return &this_t::onend;
 		} else if(name == "InitialContainedAction"sv) {
-			func = intialact->GetFunctionID();
-			return true;
+			return &this_t::intialact;
 		} else if(name == "OnLandOnGround"sv) {
-			func = landgrnd->GetFunctionID();
-			return true;
+			return &this_t::landgrnd;
 		} else if(name == "OnContact"sv) {
-			func = oncontact->GetFunctionID();
-			return true;
+			return &this_t::oncontact;
 		} else if(name == "OnAnimationActivityComplete"sv) {
-			func = animcompl->GetFunctionID();
-			return true;
+			return &this_t::animcompl;
 		} else if(name == "OnAnimationActivityInterrupted"sv) {
-			func = animinter->GetFunctionID();
-			return true;
+			return &this_t::animinter;
 		} else if(name == "OnAnimationEvent"sv) {
-			func = animevent->GetFunctionID();
-			return true;
+			return &this_t::animevent;
 		} else if(name == "OnOtherKilled"sv) {
-			func = otherkilled->GetFunctionID();
-			return true;
+			return &this_t::otherkilled;
 		} else if(name == "OnSight"sv) {
-			func = onsight->GetFunctionID();
-			return true;
+			return &this_t::onsight;
 		} else if(name == "OnLostSight"sv) {
-			func = onlosesight->GetFunctionID();
-			return true;
+			return &this_t::onlosesight;
 		} else if(name == "OnShoved"sv) {
-			func = shoved->GetFunctionID();
-			return true;
+			return &this_t::shoved;
 		} else if(name == "OnBlinded"sv) {
-			func = blinded->GetFunctionID();
-			return true;
+			return &this_t::blinded;
 		} else if(name == "OnTerritoryContested"sv) {
-			func = terrcontest->GetFunctionID();
-			return true;
+			return &this_t::terrcontest;
 		} else if(name == "OnTerritoryCaptured"sv) {
-			func = terrcap->GetFunctionID();
-			return true;
+			return &this_t::terrcap;
 		} else if(name == "OnTerritoryLost"sv) {
-			func = terrlost->GetFunctionID();
-			return true;
+			return &this_t::terrlost;
 		} else if(name == "OnThreatChanged"sv) {
-			func = threachngd->GetFunctionID();
-			return true;
+			return &this_t::threachngd;
 		} else if(name == "OnHitByVomitJar"sv) {
-			func = hitvom->GetFunctionID();
-			return true;
+			return &this_t::hitvom;
 		} else if(name == "OnDrop"sv) {
-			func = drop->GetFunctionID();
-			return true;
+			return &this_t::drop;
 		} else if(name == "OnMoveToSuccess"sv) {
-			func = movesucc->GetFunctionID();
-			return true;
+			return &this_t::movesucc;
 		} else if(name == "OnStuck"sv) {
-			func = stuck->GetFunctionID();
-			return true;
+			return &this_t::stuck;
 		} else if(name == "OnUnStuck"sv) {
-			func = unstuck->GetFunctionID();
-			return true;
+			return &this_t::unstuck;
 		} else if(name == "OnIgnite"sv) {
-			func = ignite->GetFunctionID();
-			return true;
+			return &this_t::ignite;
 		} else if(name == "OnInjured"sv) {
-			func = injured->GetFunctionID();
-			return true;
+			return &this_t::injured;
 		} else if(name == "OnKilled"sv) {
-			func = killed->GetFunctionID();
-			return true;
+			return &this_t::killed;
 		} else if(name == "OnWin"sv) {
-			func = win->GetFunctionID();
-			return true;
+			return &this_t::win;
 		} else if(name == "OnLose"sv) {
-			func = lose->GetFunctionID();
-			return true;
+			return &this_t::lose;
 		} else if(name == "OnEnteredSpit"sv) {
-			func = enterspit->GetFunctionID();
-			return true;
+			return &this_t::enterspit;
 		} else if(name == "OnModelChanged"sv) {
-			func = mdlchnd->GetFunctionID();
-			return true;
+			return &this_t::mdlchnd;
 		} else if(name == "OnMoveToFailure"sv) {
-			func = movefail->GetFunctionID();
-			return true;
+			return &this_t::movefail;
 		} else if(name == "OnSound"sv) {
-			func = sound->GetFunctionID();
-			return true;
+			return &this_t::sound;
 		} else if(name == "OnWeaponFired"sv) {
-			func = wepfired->GetFunctionID();
-			return true;
+			return &this_t::wepfired;
 		} else if(name == "OnActorEmoted"sv) {
-			func = actemote->GetFunctionID();
-			return true;
+			return &this_t::actemote;
 		} else if(name == "OnPickUp"sv) {
-			func = pickup->GetFunctionID();
-			return true;
+			return &this_t::pickup;
 		}
 		
-		return false;
+		return nullptr;
 	}
 
-	bool has_function(std::string_view name)
-	{
-		if(name == "OnStart"sv) {
-			return onstart;
-		} else if(name == "Update"sv) {
-			return onupdate;
-		} else if(name == "OnSuspend"sv) {
-			return onsus;
-		} else if(name == "OnResume"sv) {
-			return onresume;
-		} else if(name == "OnEnd"sv) {
-			return onend;
-		} else if(name == "InitialContainedAction"sv) {
-			return intialact;
-		} else if(name == "OnLandOnGround"sv) {
-			return landgrnd;
-		} else if(name == "OnContact"sv) {
-			return oncontact;
-		} else if(name == "OnAnimationActivityComplete"sv) {
-			return animcompl;
-		} else if(name == "OnAnimationActivityInterrupted"sv) {
-			return animinter;
-		} else if(name == "OnAnimationEvent"sv) {
-			return animevent;
-		} else if(name == "OnOtherKilled"sv) {
-			return otherkilled;
-		} else if(name == "OnSight"sv) {
-			return onsight;
-		} else if(name == "OnLostSight"sv) {
-			return onlosesight;
-		} else if(name == "OnShoved"sv) {
-			return shoved;
-		} else if(name == "OnBlinded"sv) {
-			return blinded;
-		} else if(name == "OnTerritoryContested"sv) {
-			return terrcontest;
-		} else if(name == "OnTerritoryCaptured"sv) {
-			return terrcap;
-		} else if(name == "OnTerritoryLost"sv) {
-			return terrlost;
-		} else if(name == "OnThreatChanged"sv) {
-			return threachngd;
-		} else if(name == "OnHitByVomitJar"sv) {
-			return hitvom;
-		} else if(name == "OnDrop"sv) {
-			return drop;
-		} else if(name == "OnMoveToSuccess"sv) {
-			return movesucc;
-		} else if(name == "OnStuck"sv) {
-			return stuck;
-		} else if(name == "OnUnStuck"sv) {
-			return unstuck;
-		} else if(name == "OnIgnite"sv) {
-			return ignite;
-		} else if(name == "OnInjured"sv) {
-			return injured;
-		} else if(name == "OnKilled"sv) {
-			return killed;
-		} else if(name == "OnWin"sv) {
-			return win;
-		} else if(name == "OnLose"sv) {
-			return lose;
-		} else if(name == "OnEnteredSpit"sv) {
-			return enterspit;
-		} else if(name == "OnModelChanged"sv) {
-			return mdlchnd;
-		} else if(name == "OnMoveToFailure"sv) {
-			return movefail;
-		} else if(name == "OnSound"sv) {
-			return sound;
-		} else if(name == "OnWeaponFired"sv) {
-			return wepfired;
-		} else if(name == "OnActorEmoted"sv) {
-			return actemote;
-		} else if(name == "OnPickUp"sv) {
-			return pickup;
-		}
-		
-		return false;
-	}
+	PLUGINNB_GETSET_FUNCS_NOBASE
 };
 
 struct SPActionEntry : public SPActionEntryFuncs
 {
-	SPActionEntry(std::string &&name_, IdentityToken_t *id)
-		: name{std::move(name_)}, pId{id}
+	SPActionEntry(std::string &&name_)
+		: name{std::move(name_)}
 	{
 	}
 	
 	std::string name;
 	
-	IdentityToken_t *pId = nullptr;
-	
 	Handle_t hndl = BAD_HANDLE;
-	IPluginContext *pContext = nullptr;
 	
 	std::vector<SPAction *> actions{};
 	
@@ -5105,91 +4990,123 @@ static_assert(sizeof(SPAction *) == sizeof(cell_t));
 #include <npcevent.h>
 
 using spvarmap_t = std::unordered_map<std::string, std::vector<cell_t>>;
-using spfncmap_t = std::unordered_map<std::string, IPluginFunction *>;
+using spfncmap_t = std::unordered_map<std::string, spfunc_t>;
 
 class IPluginNextBotComponent;
 
 std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> spnbcomponents{};
 
+#define PLUGINNB_GETSET_FUNCS \
+	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) override { \
+		member_func_t member{get_function_member(name)}; \
+		if(!member) { \
+			return base_t::set_function(name, func, pContext); \
+		} \
+		(this->*member) = spfunc_t{func, pContext}; \
+		return true; \
+	} \
+	bool get_function(std::string_view name, spfunc_t &func) override { \
+		member_func_t member{get_function_member(name)}; \
+		if(!member) { \
+			return base_t::get_function(name, func); \
+		} \
+		func = (this->*member); \
+		return true; \
+	} \
+	bool has_function(std::string_view name) override { \
+		member_func_t member{get_function_member(name)}; \
+		if(!member) { \
+			return base_t::has_function(name); \
+		} \
+		return (this->*member) != nullptr; \
+	}
+
 class IPluginNextBotComponent
 {
 public:
-	IPluginNextBotComponent(IdentityToken_t *id)
-		: pId{id}
+	IPluginNextBotComponent()
 	{
-		auto it{spnbcomponents.find(id)};
-		if(it == spnbcomponents.cend()) {
-			it = spnbcomponents.emplace(id, std::vector<IPluginNextBotComponent *>{}).first;
-		}
-		it->second.emplace_back(this);
+		
 	}
 	
 	virtual ~IPluginNextBotComponent()
 	{
-		auto it{spnbcomponents.find(pId)};
-		if(it != spnbcomponents.cend()) {
-			std::vector<IPluginNextBotComponent *> &vec{it->second};
+		for(auto &pid_it : pIds) {
+			IdentityToken_t *pId{pid_it.second};
 
-			auto it_vec = vec.begin();
-			while(it_vec != vec.end()) {
-				if(*it_vec == this) {
-					vec.erase(it_vec);
-					break;
+			auto it{spnbcomponents.find(pId)};
+			if(it != spnbcomponents.end()) {
+				std::vector<IPluginNextBotComponent *> &vec{it->second};
+
+				auto it_vec = vec.begin();
+				while(it_vec != vec.end()) {
+					if(*it_vec == this) {
+						vec.erase(it_vec);
+						break;
+					}
+
+					++it_vec;
 				}
 
-				++it_vec;
-			}
-
-			if(vec.empty()) {
-				spnbcomponents.erase(it);
+				if(vec.empty()) {
+					spnbcomponents.erase(it);
+				}
 			}
 		}
 	}
 	
 	cell_t handle_set_function(IPluginContext *pContext, const cell_t *params)
 	{
-		if(pId != pContext->GetIdentity()) {
-			return pContext->ThrowNativeError("this plugin doenst own this component");
-		}
-		
 		char *name_ptr = nullptr;
 		pContext->LocalToString(params[2], &name_ptr);
-		std::string_view name{name_ptr};
+		std::string name{name_ptr};
 		
 		IPluginFunction *func = pContext->GetFunctionById(params[3]);
-		
-		if(!set_function(name, func)) {
+		IdentityToken_t *pId{pContext->GetIdentity()};
+
+		if(!set_function(name, func, pContext)) {
 			return pContext->ThrowNativeError("invalid name %s", name_ptr);
 		}
-		
+
+		auto pid_it{pIds.find(name)};
+		if(pid_it != pIds.end()) {
+			pid_it->second = pId;
+		} else {
+			pid_it = pIds.emplace(name, pId).first;
+		}
+
+		auto nbcomp_it{spnbcomponents.find(pId)};
+		if(nbcomp_it == spnbcomponents.end()) {
+			nbcomp_it = spnbcomponents.emplace(pId, std::vector<IPluginNextBotComponent *>{}).first;
+		}
+		std::vector<IPluginNextBotComponent *> &comps{nbcomp_it->second};
+
+		auto nbcomp_ptr_it{std::find(comps.begin(), comps.end(), this)};
+		if(nbcomp_ptr_it == comps.end()) {
+			comps.emplace_back(this);
+		}
+
 		return 0;
 	}
 
 	cell_t handle_get_function(IPluginContext *pContext, const cell_t *params)
 	{
-		if(pId != pContext->GetIdentity()) {
-			return pContext->ThrowNativeError("this plugin doenst own this component");
-		}
-		
 		char *name_ptr = nullptr;
 		pContext->LocalToString(params[2], &name_ptr);
 		std::string_view name{name_ptr};
 		
-		funcid_t func{static_cast<funcid_t>(-1)};
-		
-		if(!get_function(name, func)) {
-			return pContext->ThrowNativeError("invalid name %s", name_ptr);
-		}
-		
-		return func;
+		spfunc_t func{};
+		get_function(name, func);
+
+		cell_t *addr;
+		pContext->LocalToPhysAddr(params[3], &addr);
+		*addr = func.plhandle();
+
+		return static_cast<funcid_t>(func);
 	}
 
 	cell_t handle_has_function(IPluginContext *pContext, const cell_t *params)
 	{
-		if(pId != pContext->GetIdentity()) {
-			return pContext->ThrowNativeError("this plugin doenst own this component");
-		}
-		
 		char *name_ptr = nullptr;
 		pContext->LocalToString(params[2], &name_ptr);
 		std::string_view name{name_ptr};
@@ -5197,17 +5114,12 @@ public:
 		return has_function(name);
 	}
 
-	virtual void plugin_unloaded()
-	{
-		pId = nullptr;
-	}
-	
-	virtual bool set_function(std::string_view name, IPluginFunction *func)
+	virtual bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext)
 	{
 		return false;
 	}
 
-	virtual bool get_function(std::string_view name, funcid_t &func)
+	virtual bool get_function(std::string_view name, spfunc_t &func)
 	{
 		return false;
 	}
@@ -5217,7 +5129,20 @@ public:
 		return false;
 	}
 
-	IdentityToken_t *pId{nullptr};
+	virtual void plugin_unloaded(IdentityToken_t *pId)
+	{
+		auto it{pIds.begin()};
+		while(it != pIds.end()) {
+			if(it->second == pId) {
+				it = pIds.erase(it);
+				continue;
+			}
+
+			++it;
+		}
+	}
+
+	std::unordered_map<std::string, IdentityToken_t *> pIds{};
 
 	spvarmap_t &get_sp_data()
 	{ return data; }
@@ -5225,37 +5150,47 @@ public:
 	spvarmap_t data{};
 };
 
-class SPActionPluginComponent : public IPluginNextBotComponent, public SPActionEntryFuncs
+class SPActionPluginComponent : public SPActionEntryFuncs, public IPluginNextBotComponent
 {
 public:
 	using IPluginNextBotComponent::IPluginNextBotComponent;
 
-	void plugin_unloaded() override
+	void plugin_unloaded(IdentityToken_t *pId) override
 	{
-		IPluginNextBotComponent::plugin_unloaded();
-		SPActionEntryFuncs::plugin_unloaded();
+		SPActionEntryFuncs::plugin_unloaded(pId);
+		IPluginNextBotComponent::plugin_unloaded(pId);
 
-		fncs.clear();
+		auto it{fncs.begin()};
+		while(it != fncs.end()) {
+			if(it->second == pId) {
+				it = fncs.erase(it);
+				continue;
+			}
+
+			++it;
+		}
 	}
 
-	bool set_function(std::string_view name, IPluginFunction *func) override
+	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) override
 	{
-		if(SPActionEntryFuncs::set_function(name, func)) {
+		if(SPActionEntryFuncs::set_function(name, func, pContext) ||
+			IPluginNextBotComponent::set_function(name, func, pContext)) {
 			return true;
 		}
 		std::string name_tmp{name};
 		auto it{fncs.find(name_tmp)};
 		if(it == fncs.cend()) {
-			it = fncs.emplace(std::move(name_tmp), func).first;
+			it = fncs.emplace(std::move(name_tmp), spfunc_t{func, pContext}).first;
 		} else {
-			it->second = func;
+			it->second = spfunc_t{func, pContext};
 		}
 		return true;
 	}
 
-	bool get_function(std::string_view name, funcid_t &func) override
+	bool get_function(std::string_view name, spfunc_t &func) override
 	{
-		if(SPActionEntryFuncs::get_function(name, func)) {
+		if(SPActionEntryFuncs::get_function(name, func) ||
+			IPluginNextBotComponent::get_function(name, func)) {
 			return true;
 		}
 		std::string name_tmp{name};
@@ -5263,13 +5198,14 @@ public:
 		if(it == fncs.cend()) {
 			return false;
 		}
-		func = it->second->GetFunctionID();
+		func = it->second;
 		return true;
 	}
 
 	bool has_function(std::string_view name) override
 	{
-		if(SPActionEntryFuncs::has_function(name)) {
+		if(SPActionEntryFuncs::has_function(name) ||
+			IPluginNextBotComponent::has_function(name)) {
 			return true;
 		}
 		std::string name_tmp{name};
@@ -5285,8 +5221,6 @@ class SPAction : public Action<SPActor>
 public:
 	using BaseClass = Action<SPActor>;
 
-	SPAction() = delete;
-	
 	virtual const char *GetName( void ) const { return name.c_str(); }
 
 	static void initvars_base_impl(cell_t *&vars, SPActionResult &result)
@@ -5358,8 +5292,8 @@ public:
 		}
 	}
 
-	SPAction(IdentityToken_t *id)
-		: BaseClass{}, plugin{id}
+	SPAction()
+		: BaseClass{}, plugin{}
 	{
 	}
 
@@ -5376,13 +5310,17 @@ public:
 	spvarmap_t &get_sp_data()
 	{ return plugin.get_sp_data(); }
 
-	IPluginFunction *get_entry_func(IPluginFunction *(SPActionEntryFuncs::*func))
+	spfunc_t &get_entry_func(spfunc_t (SPActionEntryFuncs::*func))
 	{
+		spfunc_t *tmp{nullptr};
+
 		if(plugin.*func) {
-			return plugin.*func;
+			tmp = &(plugin.*func);
 		} else {
-			return entry->*func;
+			tmp = &(entry->*func);
 		}
+
+		return *tmp;
 	}
 
 	virtual BaseClass *InitialContainedAction(SPActor *me)
@@ -6466,7 +6404,7 @@ public:
 
 SPAction *SPActionEntry::create()
 {
-	SPAction *action = new SPAction{pId};
+	SPAction *action = new SPAction{};
 	action->entry = this;
 	action->name = name;
 	actions.emplace_back(action);
@@ -6478,15 +6416,20 @@ SPAction *SPActionEntry::create()
 class IIntentionCustom : public IIntention, public IPluginNextBotComponent
 {
 public:
-	virtual const char *GetDebugString() const
+	using this_t = IIntentionCustom;
+	using base_t = IPluginNextBotComponent;
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	virtual const char *GetDebugString() const override
 	{
 		return m_behavior ? m_behavior->GetDebugString() : "< NULL behavior >";
 	}
+#endif
 	
-	IIntentionCustom( INextBot *bot, bool reg, IdentityToken_t *id, IPluginFunction *initact_, std::string &&name_ )
-		: IIntention( bot, reg ), IPluginNextBotComponent{id}
+	IIntentionCustom( INextBot *bot, bool reg, IPluginFunction *initact_, IPluginContext *pContext, std::string &&name_ )
+		: IIntention( bot, reg ), IPluginNextBotComponent{}
 	{
-		initact = initact_;
+		initact = spfunc_t{initact_, pContext};
 		name = std::move(name_);
 		m_behavior = new SPBehavior( initialaction(bot), name.c_str() );
 
@@ -6497,9 +6440,9 @@ public:
 	}
 
 	template <typename... Args>
-	static IIntentionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id, Args &&... args)
+	static IIntentionCustom *create(INextBot *bot, bool reg, Args &&... args)
 	{
-		return new IIntentionCustom(bot, reg, id, std::forward<Args>(args)...);
+		return new IIntentionCustom(bot, reg, std::forward<Args>(args)...);
 	}
 	
 	void HookUpdateOnRemove()
@@ -6515,7 +6458,7 @@ public:
 		RETURN_META(MRES_HANDLED);
 	}
 	
-	virtual ~IIntentionCustom()
+	virtual ~IIntentionCustom() override
 	{
 		if(hooked_remove) {
 			INextBot *bot = GetBot();
@@ -6527,26 +6470,28 @@ public:
 		delete m_behavior;
 	}
 	
-	virtual void plugin_unloaded()
+	virtual void plugin_unloaded(IdentityToken_t *pId) override
 	{
-		IPluginNextBotComponent::plugin_unloaded();
+		IPluginNextBotComponent::plugin_unloaded(pId);
 		
-		initact = nullptr;
-		ishinder = nullptr;
+		cleanup_func(initact, pId);
+		cleanup_func(ishinder, pId);
 	}
 	
-	virtual bool set_function(std::string_view name, IPluginFunction *func) override
+	using member_func_t = spfunc_t (this_t::*);
+
+	member_func_t get_function_member(std::string_view name)
 	{
 		if(name == "InitialContainedAction"sv) {
-			initact = func;
-			return true;
+			return &this_t::initact;
 		} else if(name == "IsHindrance"sv) {
-			ishinder = func;
-			return true;
+			return &this_t::ishinder;
 		}
-		
-		return IPluginNextBotComponent::set_function(name, func);
+
+		return nullptr;
 	}
+
+	PLUGINNB_GETSET_FUNCS
 	
 	bool IsTankImmediatelyDangerousTo(CBasePlayer *pPlayer, CBaseCombatCharacter *pBCC)
 	{
@@ -6572,7 +6517,7 @@ public:
 		return act;
 	}
 	
-	virtual QueryResultType IsHindrance( const INextBot *me, CBaseEntity *blocker ) const
+	virtual QueryResultType IsHindrance( const INextBot *me, CBaseEntity *blocker ) const override
 	{
 		QueryResultType result = IIntention::IsHindrance(me, blocker);
 		if(result != ANSWER_UNDEFINED) {
@@ -6597,7 +6542,7 @@ public:
 		return ANSWER_UNDEFINED;
 	}
 	
-	virtual void Reset( void )
+	virtual void Reset( void ) override
 	{
 		IIntention::Reset();
 		
@@ -6605,21 +6550,21 @@ public:
 		m_behavior = new SPBehavior( initialaction(GetBot()), name.c_str() );
 	}
 	
-	virtual void Update( void )
+	virtual void Update( void ) override
 	{
 		IIntention::Update();
 		
 		m_behavior->Update( (SPActor *)GetBot()->GetEntity() , GetUpdateInterval() );
 	}
 	
-	virtual INextBotEventResponder *FirstContainedResponder( void ) const  { return m_behavior; }
-	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const { return NULL; }
+	virtual INextBotEventResponder *FirstContainedResponder( void ) const override { return m_behavior; }
+	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const override { return NULL; }
 	
 	SPBehavior *m_behavior = nullptr;
 	std::string name{};
 	
-	IPluginFunction *initact = nullptr;
-	IPluginFunction *ishinder = nullptr;
+	spfunc_t initact = nullptr;
+	spfunc_t ishinder = nullptr;
 
 	bool hooked_remove{false};
 };
@@ -7023,8 +6968,11 @@ LocomotionType get_locomotion_type(ILocomotion *loc)
 struct customlocomotion_base_vars_t : IPluginNextBotComponent
 {
 public:
-	customlocomotion_base_vars_t(IdentityToken_t *id, LocomotionType type_)
-		: IPluginNextBotComponent{id}, type{type_} {  }
+	using this_t = customlocomotion_base_vars_t;
+	using base_t = IPluginNextBotComponent;
+
+	customlocomotion_base_vars_t(LocomotionType type_)
+		: IPluginNextBotComponent{}, type{type_} {  }
 	
 	virtual ~customlocomotion_base_vars_t() override {}
 
@@ -7045,21 +6993,21 @@ public:
 	float limit = 99999999.9f;
 	float slope = 0.6f;
 	
-	IPluginFunction *climbladdr = nullptr;
-	IPluginFunction *desceladdr = nullptr;
-	IPluginFunction *climbledge = nullptr;
-	IPluginFunction *collidewith = nullptr;
-	IPluginFunction *entitytaver = nullptr;
+	spfunc_t climbladdr = nullptr;
+	spfunc_t desceladdr = nullptr;
+	spfunc_t climbledge = nullptr;
+	spfunc_t collidewith = nullptr;
+	spfunc_t entitytaver = nullptr;
 	
-	virtual void plugin_unloaded() override
+	virtual void plugin_unloaded(IdentityToken_t *pId) override
 	{
-		IPluginNextBotComponent::plugin_unloaded();
+		IPluginNextBotComponent::plugin_unloaded(pId);
 		
-		climbladdr = nullptr;
-		desceladdr = nullptr;
-		climbledge = nullptr;
-		collidewith = nullptr;
-		entitytaver = nullptr;
+		cleanup_func(climbladdr, pId);
+		cleanup_func(desceladdr, pId);
+		cleanup_func(climbledge, pId);
+		cleanup_func(collidewith, pId);
+		cleanup_func(entitytaver, pId);
 	}
 	
 	void HookClimbLadder(const CNavLadder *ladder, const CNavArea *area)
@@ -7155,27 +7103,26 @@ public:
 		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
 	
-	virtual bool set_function(std::string_view name, IPluginFunction *func) override
+	using member_func_t = spfunc_t (this_t::*);
+
+	member_func_t get_function_member(std::string_view name)
 	{
 		if(name == "ClimbLadder"sv) {
-			climbladdr = func;
-			return true;
+			return &this_t::climbladdr;
 		} else if(name == "DescendLadder"sv) {
-			desceladdr = func;
-			return true;
+			return &this_t::desceladdr;
 		} else if(name == "ClimbUpToLedge"sv) {
-			climbledge = func;
-			return true;
+			return &this_t::climbledge;
 		} else if(name == "ShouldCollideWith"sv) {
-			collidewith = func;
-			return true;
+			return &this_t::collidewith;
 		} else if(name == "IsEntityTraversable"sv) {
-			entitytaver = func;
-			return true;
+			return &this_t::entitytaver;
 		}
-		
-		return IPluginNextBotComponent::set_function(name, func);
+
+		return nullptr;
 	}
+
+	PLUGINNB_GETSET_FUNCS
 
 	void HookUpdate()
 	{
@@ -7373,18 +7320,21 @@ static bool g_bFaceTowardsDisabled{false};
 
 struct customlocomotion_vars_t : customlocomotion_base_vars_t
 {
-	customlocomotion_vars_t(IdentityToken_t *id, LocomotionType type_)
-		: customlocomotion_base_vars_t{id, type_} {}
+	using this_t = customlocomotion_vars_t;
+	using base_t = customlocomotion_base_vars_t;
+
+	customlocomotion_vars_t(LocomotionType type_)
+		: customlocomotion_base_vars_t{type_} {}
 	
 	float yaw = 250.0f;
 	
-	IPluginFunction *travladdr = nullptr;
+	spfunc_t travladdr = nullptr;
 
-	virtual void plugin_unloaded() override
+	virtual void plugin_unloaded(IdentityToken_t *pId) override
 	{
-		customlocomotion_base_vars_t::plugin_unloaded();
+		customlocomotion_base_vars_t::plugin_unloaded(pId);
 		
-		travladdr = nullptr;
+		cleanup_func(travladdr, pId);
 	}
 
 	float HookGetMaxYawRate()
@@ -7416,18 +7366,19 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		return mres_to_meta_res(res);
 	}
 	
-	virtual bool set_function(std::string_view name, IPluginFunction *func) override
+	using member_func_t = spfunc_t (this_t::*);
+
+	member_func_t get_function_member(std::string_view name)
 	{
-		if(customlocomotion_base_vars_t::set_function(name, func)) {
-			return true;
-		} else if(name == "TraverseLadder"sv) {
-			travladdr = func;
-			return true;
+		if(name == "TraverseLadder"sv) {
+			return &this_t::travladdr;
 		}
-		
-		return IPluginNextBotComponent::set_function(name, func);
+
+		return nullptr;
 	}
-	
+
+	PLUGINNB_GETSET_FUNCS
+
 	virtual void remove_hooks(ILocomotion *loc) override
 	{
 		customlocomotion_base_vars_t::remove_hooks(loc);
@@ -7461,8 +7412,8 @@ class NextBotGroundLocomotionCustom : public NextBotGroundLocomotion
 public:
 	struct vars_t : customlocomotion_vars_t
 	{
-		vars_t(IdentityToken_t *id)
-			: customlocomotion_vars_t{id, Locomotion_GroundCustom} {}
+		vars_t()
+			: customlocomotion_vars_t{Locomotion_GroundCustom} {}
 
 		virtual void add_hooks(ILocomotion *bytes, bool hook_update = true, bool hook_climbledge = true) override
 		{
@@ -7503,12 +7454,12 @@ public:
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 
-	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
+	static NextBotGroundLocomotionCustom *create(INextBot *bot, bool reg)
 	{
 		NextBotGroundLocomotionCustom *bytes = (NextBotGroundLocomotionCustom *)calloc(1, sizeof(NextBotGroundLocomotion) + sizeof(vars_t));
 		call_mfunc<void, NextBotGroundLocomotion, INextBot *>(bytes, NextBotGroundLocomotionCTOR, bot);
 		
-		new (bytes->vars_ptr()) vars_t(id);
+		new (bytes->vars_ptr()) vars_t();
 		
 		bytes->getvars().add_hooks(bytes);
 		
@@ -7645,27 +7596,33 @@ class CNextBotFlyingLocomotion : public ILocomotion
 public:
 	struct vars_t : customlocomotion_base_vars_t
 	{
-		vars_t(IdentityToken_t *id)
-			: customlocomotion_base_vars_t{id, Locomotion_FlyingCustom} {}
+		using this_t = vars_t;
+		using base_t = customlocomotion_base_vars_t;
 
-		IPluginFunction *limitpitch = nullptr;
+		vars_t()
+			: customlocomotion_base_vars_t{Locomotion_FlyingCustom} {}
 
-		virtual void plugin_unloaded() override
+		spfunc_t limitpitch = nullptr;
+
+		virtual void plugin_unloaded(IdentityToken_t *pId) override
 		{
-			customlocomotion_base_vars_t::plugin_unloaded();
+			customlocomotion_base_vars_t::plugin_unloaded(pId);
 			
-			limitpitch = nullptr;
+			cleanup_func(limitpitch, pId);
 		}
 
-		virtual bool set_function(std::string_view name, IPluginFunction *func) override
+		using member_func_t = spfunc_t (this_t::*);
+
+		member_func_t get_function_member(std::string_view name)
 		{
 			if(name == "LimitPitch"sv) {
-				limitpitch = func;
-				return true;
+				return &this_t::limitpitch;
 			}
-			
-			return customlocomotion_base_vars_t::set_function(name, func);
+
+			return nullptr;
 		}
+
+		PLUGINNB_GETSET_FUNCS
 
 		virtual void add_hooks(ILocomotion *bytes, bool hook_update = false, bool hook_climbledge = false) override
 		{
@@ -8351,12 +8308,12 @@ public:
 		}
 	}
 
-	static CNextBotFlyingLocomotion *create(INextBot *bot, bool reg, IdentityToken_t *id)
+	static CNextBotFlyingLocomotion *create(INextBot *bot, bool reg)
 	{
 		CNextBotFlyingLocomotion *bytes = (CNextBotFlyingLocomotion *)calloc(1, sizeof(ILocomotion) + sizeof(vars_t));
 		call_mfunc<void, ILocomotion, INextBot *>(bytes, ILocomotionCTOR, bot);
 		
-		new (bytes->vars_ptr()) vars_t(id);
+		new (bytes->vars_ptr()) vars_t();
 		
 		bytes->getvars().add_hooks(bytes, false);
 		
@@ -8374,8 +8331,8 @@ class ZombieBotLocomotionCustom : public ZombieBotLocomotion
 public:
 	struct vars_t : customlocomotion_vars_t
 	{
-		vars_t(IdentityToken_t *id)
-			: customlocomotion_vars_t{id, Locomotion_GroundCustom} {}
+		vars_t()
+			: customlocomotion_vars_t{Locomotion_GroundCustom} {}
 	};
 	
 	unsigned char *vars_ptr()
@@ -8383,12 +8340,12 @@ public:
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
-	static ZombieBotLocomotionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
+	static ZombieBotLocomotionCustom *create(INextBot *bot, bool reg)
 	{
 		ZombieBotLocomotionCustom *bytes = (ZombieBotLocomotionCustom *)calloc(1, sizeof(ZombieBotLocomotion) + sizeof(vars_t));
 		call_mfunc<void, ZombieBotLocomotion, INextBot *>(bytes, ZombieBotLocomotionCTOR, bot);
 		
-		new (bytes->vars_ptr()) vars_t(id);
+		new (bytes->vars_ptr()) vars_t();
 		
 		bytes->getvars().add_hooks(bytes);
 		
@@ -8484,13 +8441,16 @@ static_assert(sizeof(Activity) == sizeof(cell_t));
 class IBodyCustom : public IBody, public IPluginNextBotComponent
 {
 public:
-	IBodyCustom( INextBot *bot, bool reg, IdentityToken_t *id )
-		: IBody( bot, reg ), IPluginNextBotComponent(id)
+	using this_t = IBodyCustom;
+	using base_t = IPluginNextBotComponent;
+
+	IBodyCustom( INextBot *bot, bool reg )
+		: IBody( bot, reg ), IPluginNextBotComponent()
 	{
 	}
 
-	IPluginFunction *selectseq = nullptr;
-	IPluginFunction *translact = nullptr;
+	spfunc_t selectseq = nullptr;
+	spfunc_t translact = nullptr;
 
 	Activity TranslateActivity(Activity act)
 	{
@@ -8756,28 +8716,32 @@ public:
 		pEntity->DispatchAnimEvents();
 	}
 
-	void plugin_unloaded() override
+	void plugin_unloaded(IdentityToken_t *pId) override
 	{
-		IPluginNextBotComponent::plugin_unloaded();
+		IPluginNextBotComponent::plugin_unloaded(pId);
 
-		selectseq = nullptr;
-		translact = nullptr;
+		cleanup_func(selectseq, pId);
+		cleanup_func(translact, pId);
 	}
 
-	bool set_function(std::string_view name, IPluginFunction *func) override
+	using member_func_t = spfunc_t (this_t::*);
+
+	member_func_t get_function_member(std::string_view name)
 	{
 		if(name == "SelectAnimationSequence"sv) {
-			selectseq = func;
-			return true;
+			return &this_t::selectseq;
 		} else if(name == "TranslateActivity"sv) {
-			translact = func;
-			return true;
+			return &this_t::translact;
 		}
 
-		return IPluginNextBotComponent::set_function(name, func);
+		return nullptr;
 	}
 
-	virtual const char *GetDebugString() const { return "IBodyCustom"; }
+	PLUGINNB_GETSET_FUNCS
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	virtual const char *GetDebugString() const override { return "IBodyCustom"; }
+#endif
 
 	mutable Vector hullMins;
 	mutable Vector hullMaxs;
@@ -8872,9 +8836,9 @@ public:
 		return viewVector;
 	}
 
-	static IBodyCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
+	static IBodyCustom *create(INextBot *bot, bool reg)
 	{
-		return new IBodyCustom(bot, reg, id);
+		return new IBodyCustom(bot, reg);
 	}
 };
 
@@ -8901,25 +8865,15 @@ public:
 struct customvision_base_vars_t : IPluginNextBotComponent
 {
 public:
-	customvision_base_vars_t(IdentityToken_t *id)
-		: IPluginNextBotComponent{id} {}
+	customvision_base_vars_t()
+		: IPluginNextBotComponent{} {}
 	
 	virtual ~customvision_base_vars_t() override {}
 	
 	float maxrange = 2000.0;
 	float minreco = 0.0;
 	float deffov = 90.0;
-	
-	virtual void plugin_unloaded() override
-	{
-		IPluginNextBotComponent::plugin_unloaded();
-	}
-	
-	virtual bool set_function(std::string_view name, IPluginFunction *func) override
-	{
-		return IPluginNextBotComponent::set_function(name, func);
-	}
-	
+
 	virtual void remove_hooks(IVision *bytes)
 	{
 		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customvision_base_vars_t::dtor), false);
@@ -8965,8 +8919,8 @@ public:
 
 	struct vars_t : customvision_base_vars_t
 	{
-		vars_t(IdentityToken_t *id)
-			: customvision_base_vars_t{id} {}
+		vars_t()
+			: customvision_base_vars_t{} {}
 	};
 	
 	unsigned char *vars_ptr()
@@ -8974,12 +8928,12 @@ public:
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
 	
-	static GameVisionCustom *create(INextBot *bot, bool reg, IdentityToken_t *id)
+	static GameVisionCustom *create(INextBot *bot, bool reg)
 	{
 		GameVisionCustom *bytes = (GameVisionCustom *)calloc(1, sizeof(GameVision) + sizeof(vars_t));
 		call_mfunc<void, GameVision, INextBot *>(bytes, getctorptr(), bot);
 		
-		new (bytes->vars_ptr()) vars_t(id);
+		new (bytes->vars_ptr()) vars_t();
 		
 		bytes->getvars().add_hooks(bytes);
 
@@ -12303,7 +12257,7 @@ cell_t INextBotAllocateCustomComponent(IPluginContext *pContext, const cell_t *p
 {
 	INextBot *bot = (INextBot *)params[1];
 	
-	T *locomotion = T::create(bot, false, pContext->GetIdentity(), std::forward<Args>(args)...);
+	T *locomotion = T::create(bot, false, std::forward<Args>(args)...);
 	
 	auto old = (bot->*getfunc)();
 	
@@ -12432,7 +12386,7 @@ cell_t INextBotAllocateCustomIntention(IPluginContext *pContext, const cell_t *p
 	
 	std::string name{nameptr};
 	
-	return INextBotAllocateIntention<IIntentionCustom>(pContext, params, initact, std::move(name));
+	return INextBotAllocateIntention<IIntentionCustom>(pContext, params, initact, pContext, std::move(name));
 }
 
 cell_t PathLengthget(IPluginContext *pContext, const cell_t *params)
@@ -14705,6 +14659,9 @@ SH_DECL_HOOK1(INextBot, ShouldTouch, const, 0, bool, CBaseEntity *);
 class INextBotCustom : public IPluginNextBotComponent
 {
 public:
+	using this_t = INextBotCustom;
+	using base_t = IPluginNextBotComponent;
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	bool allowedclimb = true;
 	bool reactvis = true;
@@ -14712,17 +14669,17 @@ public:
 	bool reactcontact = true;
 #endif
 	
-	IPluginFunction *climbunto = nullptr;
-	IPluginFunction *ablebreak = nullptr;
-	IPluginFunction *ableblock = nullptr;
-	IPluginFunction *shouldtouch = nullptr;
-	IPluginFunction *enemy = nullptr;
-	IPluginFunction *isfren = nullptr;
+	spfunc_t climbunto = nullptr;
+	spfunc_t ablebreak = nullptr;
+	spfunc_t ableblock = nullptr;
+	spfunc_t shouldtouch = nullptr;
+	spfunc_t enemy = nullptr;
+	spfunc_t isfren = nullptr;
 
 	int ref = -1;
 	
-	INextBotCustom(INextBot *pNextBot, IdentityToken_t *id)
-		: IPluginNextBotComponent(id), ref{gamehelpers->EntityToReference(pNextBot->GetEntity())}
+	INextBotCustom(INextBot *pNextBot)
+		: IPluginNextBotComponent(), ref{gamehelpers->EntityToReference(pNextBot->GetEntity())}
 	{
 		bot = pNextBot;
 
@@ -14812,30 +14769,32 @@ public:
 		nbcustomap.erase(ref);
 	}
 	
-	virtual void plugin_unloaded()
+	virtual void plugin_unloaded(IdentityToken_t *pId)
 	{
-		IPluginNextBotComponent::plugin_unloaded();
+		IPluginNextBotComponent::plugin_unloaded(pId);
 		
-		climbunto = nullptr;
-		ablebreak = nullptr;
-		ableblock = nullptr;
-		shouldtouch = nullptr;
-		enemy = nullptr;
-		isfren = nullptr;
+		cleanup_func(climbunto, pId);
+		cleanup_func(ablebreak, pId);
+		cleanup_func(ableblock, pId);
+		cleanup_func(shouldtouch, pId);
+		cleanup_func(enemy, pId);
+		cleanup_func(isfren, pId);
 	}
-	
-	virtual bool set_function(std::string_view name, IPluginFunction *func) override
+
+	using member_func_t = spfunc_t (this_t::*);
+
+	member_func_t get_function_member(std::string_view name)
 	{
 		if(name == "IsAbleToBlockMovementOf"sv) {
-			ableblock = func;
-			return true;
+			return &this_t::ableblock;
 		} else if(name == "ShouldTouch"sv) {
-			shouldtouch = func;
-			return true;
+			return &this_t::shouldtouch;
 		}
-		
-		return IPluginNextBotComponent::set_function(name, func);
+
+		return nullptr;
 	}
+
+	PLUGINNB_GETSET_FUNCS
 	
 	INextBot *bot = nullptr;
 };
@@ -14852,7 +14811,7 @@ cell_t INextBotMakeCustom(IPluginContext *pContext, const cell_t *params)
 	if(it != nbcustomap.end()) {
 		pcustom = it->second;
 	} else {
-		pcustom = new INextBotCustom(pNextBot, pContext->GetIdentity());
+		pcustom = new INextBotCustom(pNextBot);
 	}
 	
 	return (cell_t)pcustom;
@@ -14974,10 +14933,9 @@ cell_t BehaviorActionEntryCTOR(IPluginContext *pContext, const cell_t *params)
 	
 	std::string str{name};
 	
-	SPActionEntry *obj = new SPActionEntry{std::move(name), pContext->GetIdentity()};
+	SPActionEntry *obj = new SPActionEntry{std::move(name)};
 	Handle_t hndl = handlesys->CreateHandle(BehaviorEntryHandleType, obj, pContext->GetIdentity(), myself->GetIdentity(), nullptr);
 	obj->hndl = hndl;
-	obj->pContext = pContext;
 	
 	return hndl;
 }
@@ -14993,17 +14951,13 @@ cell_t BehaviorActionEntryset_function(IPluginContext *pContext, const cell_t *p
 		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
 	}
 	
-	if(obj->pId != pContext->GetIdentity()) {
-		return pContext->ThrowNativeError("this plugin doenst own this entry");
-	}
-	
 	char *name_ptr = nullptr;
 	pContext->LocalToString(params[2], &name_ptr);
 	std::string_view name{name_ptr};
 	
 	IPluginFunction *func = pContext->GetFunctionById(params[3]);
 	
-	if(!obj->set_function(name, func)) {
+	if(!obj->set_function(name, func, pContext)) {
 		return pContext->ThrowNativeError("invalid name %s", name_ptr);
 	}
 	
@@ -15021,21 +14975,14 @@ cell_t BehaviorActionEntryget_function(IPluginContext *pContext, const cell_t *p
 		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
 	}
 	
-	if(obj->pId != pContext->GetIdentity()) {
-		return pContext->ThrowNativeError("this plugin doenst own this entry");
-	}
-	
 	char *name_ptr = nullptr;
 	pContext->LocalToString(params[2], &name_ptr);
 	std::string_view name{name_ptr};
 	
-	funcid_t func{static_cast<funcid_t>(-1)};
+	spfunc_t func{};
+	obj->get_function(name, func);
 	
-	if(!obj->get_function(name, func)) {
-		return pContext->ThrowNativeError("invalid name %s", name_ptr);
-	}
-	
-	return func;
+	return static_cast<funcid_t>(func);
 }
 
 cell_t BehaviorActionEntryhas_function(IPluginContext *pContext, const cell_t *params)
@@ -15047,10 +14994,6 @@ cell_t BehaviorActionEntryhas_function(IPluginContext *pContext, const cell_t *p
 	if(err != HandleError_None)
 	{
 		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
-	}
-	
-	if(obj->pId != pContext->GetIdentity()) {
-		return pContext->ThrowNativeError("this plugin doenst own this entry");
 	}
 	
 	char *name_ptr = nullptr;
@@ -17723,12 +17666,14 @@ void Sample::OnPluginLoaded(IPlugin *plugin)
 
 void Sample::OnPluginUnloaded(IPlugin *plugin)
 {
-	auto it = spnbcomponents.find(plugin->GetIdentity());
-	if(it != spnbcomponents.cend()) {
+	IdentityToken_t *pId{plugin->GetIdentity()};
+
+	auto it = spnbcomponents.find(pId);
+	if(it != spnbcomponents.end()) {
 		std::vector<IPluginNextBotComponent *> &vec{it->second};
 
 		for(IPluginNextBotComponent *inte : vec) {
-			inte->plugin_unloaded();
+			inte->plugin_unloaded(pId);
 		}
 
 		spnbcomponents.erase(it);

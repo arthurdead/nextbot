@@ -66,8 +66,6 @@ methodmap CustomBehaviorActionEntry < Handle
 	public native CustomBehaviorActionEntry(const char[] name);
 	
 	public native void set_function(const char[] name, Function func);
-	public native Function get_function(const char[] name);
-	public native bool has_function(const char[] name);
 
 	public native CustomBehaviorAction create();
 };
@@ -85,6 +83,8 @@ methodmap BehaviorAction
 	}*/
 };
 
+#define BehaviorAction_Null (view_as<BehaviorAction>(Address_Null))
+
 methodmap CustomBehaviorAction < BehaviorAction
 {
 	property CustomBehaviorActionEntry Entry
@@ -100,9 +100,11 @@ methodmap CustomBehaviorAction < BehaviorAction
 	public native void get_data_array(const char[] name, any[] data, int len);
 
 	public native void set_function(const char[] name, Function func);
-	public native Function get_function(const char[] name);
+	public native Function get_function(const char[] name, Handle &pl = null);
 	public native bool has_function(const char[] name);
 };
+
+#define CustomBehaviorAction_Null (view_as<CustomBehaviorAction>(Address_Null))
 
 enum struct BehaviorResult
 {
