@@ -16772,7 +16772,7 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 		//TODO!!!!!! move this to clsobj_hack
 		entity_vtabl[CBaseEntityBloodColor] = func_to_void(&EntityVTableHack::DetourBloodColor);
 	}
-	//entity_vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::DetourIsNPC);
+	entity_vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::DetourIsNPC);
 
 	if(pCC) {
 		switch(ntype) {
