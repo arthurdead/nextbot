@@ -180,6 +180,11 @@
 				"library" "server"
 				"linux" "@_ZN20CBaseCombatCharacter11IsAbleToSeeEPS_NS_20FieldOfViewCheckTypeE"
 			}
+			"TheNextBots"
+			{
+				"library" "server"
+				"linux" "@_Z11TheNextBotsv"
+			}
 		}
 	}
 	"left4dead2"

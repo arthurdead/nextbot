@@ -503,6 +503,10 @@ methodmap INextBotComponent < INextBotEventResponder
 	public native void Reset();
 };
 
+native void CollectAllBots(ArrayList botVector);
+
+forward void OnNextbotSpawned(INextBot bot, int entity);
+
 enum TraverseWhenType
 {
 	IMMEDIATELY,

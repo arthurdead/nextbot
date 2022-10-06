@@ -4259,6 +4259,141 @@ public:
 	CUtlVector< NextBotDebugLineType * > m_debugHistory;
 };
 
+class NextBotManager
+{
+public:
+	virtual ~NextBotManager() = 0;
+
+	virtual void Update( void ) = 0;
+
+	int GetNextBotCount( void ) const;				// How many nextbots are alive right now?
+
+	/**
+	 * Populate given vector with all bots in the system
+	 */
+	void CollectAllBots( CUtlVector< INextBot * > *botVector );
+
+
+	/**
+	 * DEPRECATED: Use CollectAllBots().
+	 * Execute functor for each NextBot in the system.
+	 * If a functor returns false, stop iteration early
+	 * and return false.
+	 */	
+	template < typename Functor >
+	bool ForEachBot( Functor &func )
+	{
+		for( int i=m_botList.Head(); i != m_botList.InvalidIndex(); i = m_botList.Next( i ) )
+		{
+			if ( !func( m_botList[i] ) )
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * DEPRECATED: Use CollectAllBots().
+	 * Execute functor for each NextBot in the system as 
+	 * a CBaseCombatCharacter.
+	 * If a functor returns false, stop iteration early
+	 * and return false.
+	 */	
+	template < typename Functor >
+	bool ForEachCombatCharacter( Functor &func )
+	{
+		for( int i=m_botList.Head(); i != m_botList.InvalidIndex(); i = m_botList.Next( i ) )
+		{
+			if ( !func( m_botList[i]->GetEntity() ) )
+			{
+
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Return closest bot to given point that passes the given filter
+	 */	
+	template < typename Filter >
+	INextBot *GetClosestBot( const Vector &pos, Filter &filter )
+	{
+		INextBot *close = NULL;
+		float closeRangeSq = FLT_MAX;
+
+		for( int i=m_botList.Head(); i != m_botList.InvalidIndex(); i = m_botList.Next( i ) )
+		{
+			float rangeSq = ( m_botList[i]->GetEntity()->GetAbsOrigin() - pos ).LengthSqr();
+			if ( rangeSq < closeRangeSq && filter( m_botList[i] ) )
+			{
+				closeRangeSq = rangeSq;
+				close = m_botList[i];
+			}
+		}
+
+		return close;
+	}
+
+	/**
+	 * Event propagators
+	 */
+	virtual void OnMapLoaded( void ) = 0;						// when the server has changed maps
+	virtual void OnRoundRestart( void ) = 0;					// when the scenario restarts
+	virtual void OnBeginChangeLevel( void ) = 0;				// when the server is about to change maps
+	virtual void OnKilled( CBaseCombatCharacter *victim, const CTakeDamageInfo &info ) = 0;	// when an actor is killed
+	virtual void OnSound( CBaseEntity *source, const Vector &pos, KeyValues *keys ) = 0;				// when an entity emits a sound
+	virtual void OnSpokeConcept( CBaseCombatCharacter *who, AIConcept_t concept_t, AI_Response *response ) = 0;	// when an Actor speaks a concept_t
+	virtual void OnWeaponFired( CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon ) = 0;		// when someone fires a weapon
+
+protected:
+	CUtlLinkedList< INextBot * > m_botList;				// list of all active NextBots
+
+	int m_iUpdateTickrate;
+	double m_CurUpdateStartTime;
+	double m_SumFrameTime;
+
+	unsigned int m_debugType;						// debug flags
+
+	struct DebugFilter
+	{
+		int index;			// entindex
+		enum { MAX_DEBUG_NAME_SIZE = 128 };
+		char name[ MAX_DEBUG_NAME_SIZE ];
+	};
+	CUtlVector< DebugFilter > m_debugFilterList;
+
+	INextBot *m_selectedBot;						// selected bot for further debug operations
+};
+
+void NextBotManager::CollectAllBots( CUtlVector< INextBot * > *botVector )
+{
+	if ( !botVector )
+		return;
+
+	botVector->RemoveAll();
+
+	for( int i=m_botList.Head(); i != m_botList.InvalidIndex(); i = m_botList.Next( i ) )
+	{
+		botVector->AddToTail( m_botList[i] );
+	}
+}
+
+inline int NextBotManager::GetNextBotCount( void ) const
+{
+	return m_botList.Count();
+}
+
+static void *TheNextBotsPtr{nullptr};
+
+static NextBotManager &TheNextBots()
+{
+	return (void_to_func<NextBotManager &(*)()>(TheNextBotsPtr))();
+}
+
 void IBody::AimHeadTowards( const Vector &lookAtPos, 
 								LookAtPriorityType priority, 
 								float duration,
@@ -15118,6 +15253,7 @@ cell_t GetNavAreaFromVector(IPluginContext *pContext, const cell_t *params)
 }
 
 cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params);
+cell_t CollectAllBots(IPluginContext *pContext, const cell_t *params);
 
 cell_t DirectionBetweenEntityVector(IPluginContext *pContext, const cell_t *params)
 {
@@ -15943,6 +16079,7 @@ sp_nativeinfo_t natives[] =
 	{"CombatCharacterInAimConeEnt", CombatCharacterInAimConeEnt},
 	{"CombatCharacterIsAbleToSeeEnt", CombatCharacterIsAbleToSeeEnt},
 	{"CombatCharacterDisposition", CombatCharacterDisposition},
+	{"CollectAllBots", CollectAllBots},
 	{NULL, NULL}
 };
 
@@ -17233,6 +17370,23 @@ static bool gamerules_vtable_assigned{false};
 static bool nextbot_funcs_patched{false};
 static int NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER = -1;
 
+static CDetour *NextBotCombatCharacterSpawn_detour{nullptr};
+
+IForward *nbspawn_fwd{nullptr};
+
+DETOUR_DECL_MEMBER0(NextBotCombatCharacterSpawn, void)
+{
+	NextBotCombatCharacter *pThis{(NextBotCombatCharacter *)this};
+
+	DETOUR_MEMBER_CALL(NextBotCombatCharacterSpawn)();
+
+	if(nbspawn_fwd->GetFunctionCount() > 0) {
+		nbspawn_fwd->PushCell((cell_t)pThis->MyNextBotPointer());
+		nbspawn_fwd->PushCell(gamehelpers->EntityToBCompatRef(pThis));
+		nbspawn_fwd->Execute(nullptr);
+	}
+}
+
 void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 {
 	if(!gamerules_vtable_assigned) {
@@ -17285,6 +17439,11 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 		void *spawn = entity_vtabl[CBaseEntitySpawn];
 		SourceHook::SetMemAccess(spawn, NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 		*(unsigned char *)((unsigned char *)spawn + NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER) = COLLISION_GROUP_NPC;
+
+		if(!NextBotCombatCharacterSpawn_detour) {
+			NextBotCombatCharacterSpawn_detour = DETOUR_CREATE_MEMBER(NextBotCombatCharacterSpawn, spawn)
+			NextBotCombatCharacterSpawn_detour->EnableDetour();
+		}
 
 		int GetSolidMaskOffset = vfunc_index(&IBody::GetSolidMask);
 		int GetCollisionGroupOffset = vfunc_index(&IBody::GetCollisionGroup);
@@ -17340,6 +17499,30 @@ cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *par
 	return 0;
 }
 
+cell_t CollectAllBots(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	CUtlVector<INextBot *> botVector{};
+	TheNextBots().CollectAllBots(&botVector);
+
+	size_t len = botVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)botVector[i];
+	}
+
+	return 0;
+}
+
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
 	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
@@ -17384,7 +17567,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
 #endif
 	g_pGameConf->GetMemSig("INextBot::INextBot", &INextBotCTOR);
-	
+
+	g_pGameConf->GetMemSig("TheNextBots", &TheNextBotsPtr);
+
 	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
 	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
 	g_pGameConf->GetMemSig("Path::FindNextOccludedNode", &PathFindNextOccludedNode);
@@ -17445,7 +17630,9 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	
 	g_pGameConf->GetOffset("CBaseEntity::Spawn", &CBaseEntitySpawn);
 	SH_MANUALHOOK_RECONFIGURE(Spawn, CBaseEntitySpawn, 0, 0);
-	
+
+	nbspawn_fwd = forwards->CreateForward("OnNextbotSpawned", ET_Ignore, 2, nullptr, Param_Cell, Param_Cell);
+
 	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
 
 	g_pGameConf->GetOffset("CBaseEntity::Deflected", &offset);
@@ -17747,6 +17934,7 @@ void Sample::NotifyInterfaceDrop(SMInterface *pInterface)
 
 void Sample::SDK_OnUnload()
 {
+	forwards->ReleaseForward(nbspawn_fwd);
 	pPathOptimize->Destroy();
 	pMyNPCPointer->Destroy();
 #if SOURCE_ENGINE == SE_TF2
@@ -17758,6 +17946,9 @@ void Sample::SDK_OnUnload()
 	pVocalize->Destroy();
 	pIsTankImmediatelyDangerousTo->Destroy();
 #endif
+	if(NextBotCombatCharacterSpawn_detour) {
+		NextBotCombatCharacterSpawn_detour->Destroy();
+	}
 	pTraverseLadder->Destroy();
 	plsys->RemovePluginsListener(this);
 	g_pSDKHooks->RemoveEntityListener(this);

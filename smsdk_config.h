@@ -40,7 +40,7 @@
 /* Basic information exposed publicly */
 #define SMEXT_CONF_NAME			"Nextbot"
 #define SMEXT_CONF_DESCRIPTION	""
-#define SMEXT_CONF_VERSION		"0.1.1.6"
+#define SMEXT_CONF_VERSION		"0.1.1.7"
 #define SMEXT_CONF_AUTHOR		"Arthurdead"
 #define SMEXT_CONF_URL			""
 #define SMEXT_CONF_LOGTAG		"NEXTBOT"
@@ -59,7 +59,7 @@
 #define SMEXT_CONF_METAMOD		
 
 /** Enable interfaces you want to use here by uncommenting lines */
-//#define SMEXT_ENABLE_FORWARDSYS
+#define SMEXT_ENABLE_FORWARDSYS
 #define SMEXT_ENABLE_HANDLESYS
 #define SMEXT_ENABLE_PLAYERHELPERS
 //#define SMEXT_ENABLE_DBMANAGER
