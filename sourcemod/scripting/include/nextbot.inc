@@ -14,8 +14,18 @@
 	#define __NB_EXT_WAS_REQUIRED
 #endif
 
+#if defined REQUIRE_PLUGIN
+	#define __NB_PL_WAS_REQUIRED
+#endif
+
 #undef REQUIRE_EXTENSIONS
+#undef REQUIRE_PLUGIN
 #tryinclude <animhelpers>
+
+#if defined __NB_PL_WAS_REQUIRED
+	#define REQUIRE_PLUGIN
+#endif
+
 #tryinclude <damagerules>
 #tryinclude <datamaps>
 
@@ -31,17 +41,10 @@ enum Activity
 #endif
 
 #define	CONTENTS_BLOCKLOS 0x40
+#define CONTENTS_REDTEAM CONTENTS_TEAM1
+#define CONTENTS_BLUETEAM CONTENTS_TEAM2
 #define MASK_BLOCKLOS (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_BLOCKLOS)
 #define MASK_BLOCKLOS_AND_NPCS (MASK_BLOCKLOS|CONTENTS_MONSTER)
-
-enum
-{
-	DONT_BLEED = -1,
-	BLOOD_COLOR_RED = 0,
-	BLOOD_COLOR_YELLOW,
-	BLOOD_COLOR_GREEN,
-	BLOOD_COLOR_MECH,
-};
 
 #if defined GAME_TF2
 	#define TEAM_ANY -2
@@ -115,6 +118,79 @@ enum struct BehaviorResult
 	void set_reason(const char[] str)
 	{
 		strcopy(this.reason, BEHAVIOR_REASON_MAX, str);
+	}
+
+	BehaviorResultType Continue()
+	{
+		return BEHAVIOR_CONTINUE;
+	}
+
+	BehaviorResultType ChangeTo(BehaviorAction action, const char[] reason = NULL_STRING)
+	{
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		return BEHAVIOR_CHANGE_TO;
+	}
+
+	BehaviorResultType SuspendFor(BehaviorAction action, const char[] reason = NULL_STRING)
+	{
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		return BEHAVIOR_SUSPEND_FOR;
+	}
+
+	BehaviorResultType Done(const char[] reason = NULL_STRING)
+	{
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		return BEHAVIOR_DONE;
+	}
+
+	BehaviorResultType TryContinue(EventResultPriorityType priority = RESULT_TRY)
+	{
+		this.priority = priority;
+		return BEHAVIOR_CONTINUE;
+	}
+
+	BehaviorResultType TryChangeTo(BehaviorAction action, EventResultPriorityType priority = RESULT_TRY, const char[] reason = NULL_STRING)
+	{
+		this.action = action;
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		this.priority = priority;
+		return BEHAVIOR_CHANGE_TO;
+	}
+
+	BehaviorResultType TrySuspendFor(BehaviorAction action, EventResultPriorityType priority = RESULT_TRY, const char[] reason = NULL_STRING)
+	{
+		this.action = action;
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		this.priority = priority;
+		return BEHAVIOR_SUSPEND_FOR;
+	}
+
+	BehaviorResultType TryDone(EventResultPriorityType priority = RESULT_TRY, const char[] reason = NULL_STRING)
+	{
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		this.priority = priority;
+		return BEHAVIOR_DONE;
+	}
+
+	BehaviorResultType TryToSustain(EventResultPriorityType priority = RESULT_TRY, const char[] reason = NULL_STRING)
+	{
+		if(!IsNullString(reason)) {
+			this.set_reason(reason);
+		}
+		this.priority = priority;
+		return BEHAVIOR_SUSTAIN;
 	}
 }
 
@@ -456,6 +532,10 @@ methodmap CNavMesh
 	public static native int GetPlace(float vec[3]);
 	public static native int PlaceToName(int id, char[] name, int len);
 	public static native int NameToPlace(const char[] name);
+
+	public static native Address GetMemory();
+
+	public static native bool IsLoaded();
 };
 
 native int GetNavAreaVectorCount();
@@ -775,7 +855,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 
 	//public native void Deflect(int deflector);
 
-	//public native void SetVelocity(const float accel[3]);
+	public native void SetVelocity(const float accel[3]);
 
 	property float MaxYawRate
 	{
@@ -791,7 +871,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 };
 
 #if defined GAME_TF2
-#define GameLocomotion NextBotGoundLocomotion
+#define GameLocomotion NextBotGroundLocomotion
 #elseif defined GAME_L4D2
 #define GameLocomotion ZombieBotLocomotion
 #endif
@@ -842,6 +922,19 @@ methodmap GameLocomotion < ILocomotion
 	{
 		public native set(bool lad);
 	}
+
+#if defined GAME_L4D2
+	/*
+	public native void GetMoveVector(float vec[3]);
+	public native void GetGroundAcceleration(float vec[3]);
+	*/
+#endif
+
+#if defined GAME_TF2
+	public native void GetAcceleration(float ang[3]);
+#endif
+	public native void SetAcceleration(const float ang[3]);
+	public native void SetVelocity(const float ang[3]);
 };
 
 methodmap GameLocomotionCustom < GameLocomotion
@@ -923,21 +1016,11 @@ methodmap GameLocomotionCustom < GameLocomotion
 	{
 		public native set(float height);
 	}
-
-#if defined GAME_L4D2
-	/*
-	public native void SetAcceleration(const float accel[3]);
-	public native void SetVelocity(const float accel[3]);
-
-	public native void GetMoveVector(float vec[3]);
-	public native void GetGroundAcceleration(float vec[3]);
-	*/
-#endif
 };
 
 #if defined GAME_TF2
-#define NextBotGoundLocomotionCustom_Null (view<NextBotGoundLocomotionCustom>(Address_Null))
-#define GameLocomotionCustom_Null NextBotGoundLocomotionCustom_Null
+#define NextBotGroundLocomotionCustom_Null (view<NextBotGroundLocomotionCustom>(Address_Null))
+#define GameLocomotionCustom_Null NextBotGroundLocomotionCustom_Null
 #elseif defined GAME_L4D2
 #define ZombieBotLocomotionCustom_Null (view<ZombieBotLocomotionCustom>(Address_Null))
 #define GameLocomotionCustom_Null ZombieBotLocomotionCustom_Null
@@ -1019,10 +1102,10 @@ methodmap AnyLocomotion < ILocomotion
 		{
 			LocomotionType type = this.Type;
 
-			if(type & Locomotion_Ground) {
-				return view_as<GameLocomotion>(this).MaxYawRate;
-			} else if(type == Locomotion_FlyingCustom) {
+			if(type == Locomotion_FlyingCustom) {
 				return view_as<NextBotFlyingLocomotion>(this).MaxYawRate;
+			} else if(type & Locomotion_Ground) {
+				return view_as<GameLocomotion>(this).MaxYawRate;
 			}
 
 			return 0.0;
@@ -1063,6 +1146,10 @@ methodmap AnyLocomotion < ILocomotion
 
 	property float StepHeight
 	{
+		public get()
+		{
+			return view_as<ILocomotion>(this).StepHeight;
+		}
 		public set(float height)
 		{
 			LocomotionType type = this.Type;
@@ -1278,6 +1365,28 @@ methodmap AnyLocomotion < ILocomotion
 		}
 	}
 
+	property bool AllowFacing
+	{
+		public get()
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				return view_as<NextBotFlyingLocomotion>(this).AllowFacing;
+			}
+
+			return false;
+		}
+		public set(bool allow)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).AllowFacing = allow;
+			}
+		}
+	}
+
 	property float Acceleration
 	{
 		public get()
@@ -1341,6 +1450,17 @@ methodmap AnyLocomotion < ILocomotion
 			if(type == Locomotion_FlyingCustom) {
 				view_as<NextBotFlyingLocomotion>(this).VerticalDamp = damp;
 			}
+		}
+	}
+
+	public void SetVelocity(const float vel[3])
+	{
+		LocomotionType type = this.Type;
+
+		if(type == Locomotion_FlyingCustom) {
+			view_as<NextBotFlyingLocomotion>(this).SetVelocity(vel);
+		} else if(type & Locomotion_Ground) {
+			view_as<GameLocomotion>(this).SetVelocity(vel);
 		}
 	}
 };
@@ -1604,7 +1724,7 @@ methodmap IBody < INextBotComponent
 		public native get();
 	}
 
-	property float SolidMask
+	property int SolidMask
 	{
 		public native get();
 	}
@@ -1618,6 +1738,8 @@ methodmap IBody < INextBotComponent
 
 	public native void GetHullMins(float vec[3]);
 	public native void GetHullMaxs(float vec[3]);
+
+	public native void SetPosition(const float pos[3]);
 
 	public native bool StartActivity(Activity act, ActivityType flags = NO_ACTIVITY_FLAGS);
 	public native int SelectAnimationSequence(Activity act);
@@ -1840,6 +1962,9 @@ methodmap INextBot < INextBotEventResponder
 
 		return false;
 	}
+
+	public native void GetPosition(float pos[3]);
+	public native void SetPosition(const float pos[3]);
 
 	public native bool IsRangeLessThanEntity(int entity, float range);
 	public native bool IsRangeLessThanVector(const float vec[3], float range);
@@ -2425,17 +2550,7 @@ stock float baseline_path_cost(INextBot bot, CNavArea area, CNavArea fromArea, C
 #if !defined REQUIRE_EXTENSIONS
 public void __ext_nextbot_SetNTVOptional()
 {
-	MarkNativeAsOptional("Path.Path");
-	MarkNativeAsOptional("Path.ComputeVector");
-	MarkNativeAsOptional("Path.ComputeEntity");
-	MarkNativeAsOptional("Path.Memory.get");
-	MarkNativeAsOptional("PathFollower.PathFollower");
-	MarkNativeAsOptional("PathFollower.Update");
-#if defined GAME_TF2
-	MarkNativeAsOptional("CTFPathFollower.CTFPathFollower");
-	MarkNativeAsOptional("NextBotGoundLocomotion.NextBotGoundLocomotion");
-	MarkNativeAsOptional("NextBotGoundLocomotion.Memory.get");
-#endif
+	
 }
 #endif
 

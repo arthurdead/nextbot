@@ -180,6 +180,16 @@
 				"library" "server"
 				"linux" "@_ZN20CBaseCombatCharacter11IsAbleToSeeEPS_NS_20FieldOfViewCheckTypeE"
 			}
+			"PathFollower::AdjustSpeed"
+			{
+				"library" "server"
+				"linux" "@_ZN12PathFollower11AdjustSpeedEP8INextBot"
+			}
+			"NDebugOverlay::Cross3D"
+			{
+				"library" "server"
+				"linux" "@_ZN13NDebugOverlay7Cross3DERK6Vectorfiiibf"
+			}
 			"TheNextBots"
 			{
 				"library" "server"
@@ -560,6 +570,10 @@
 			"CBaseEntity::PostConstructor"
 			{
 				"linux" "27"
+			}
+			"CBaseEntity::Touch"
+			{
+				"linux" "103"
 			}
 		}
 		"Signatures"
