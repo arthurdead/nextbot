@@ -8,7 +8,7 @@ public Plugin myinfo =
 	name = "nextbot",
 	author = "Arthurdead",
 	description = "",
-	version = "0.1.1.5",
+	version = "0.1.1.6",
 	url = ""
 };
 
@@ -44,25 +44,6 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 	int team = GetEntProp(entity, Prop_Data, "m_iTeamNum");
 
 	bool mvm = IsMannVsMachineMode();
-
-	if(area.IsBlocked(team)) {
-		return -1.0;
-	}
-
-	if(mvm) {
-		switch(team) {
-			case TF_TEAM_PVE_INVADERS: {
-				if(area.IsBlocked(TF_TEAM_PVE_INVADERS_GIANTS)) {
-					return -1.0;
-				}
-			}
-			case TF_TEAM_PVE_INVADERS_GIANTS: {
-				if(area.IsBlocked(TF_TEAM_PVE_INVADERS)) {
-					return -1.0;
-				}
-			}
-		}
-	}
 
 	if(flags & cost_flags_noenemyspawn) {
 #if defined GAME_TF2
@@ -120,23 +101,20 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 		dist = GetVectorLength(sub);
 	}
 
-	float cost = (dist + fromArea.CostSoFar);
-
 	float deltaZ = fromArea.ComputeAdjacentConnectionHeightChange(area);
 	if(deltaZ >= locomotion.StepHeight ||
 		area.HasAttributes(NAV_MESH_JUMP)) {
-		if(flags & cost_flags_nojumping) {
-			return -1.0;
-		} else if(deltaZ >= locomotion.MaxJumpHeight) {
+		if(flags & cost_flags_nojumping ||
+			deltaZ >= locomotion.MaxJumpHeight) {
 			return -1.0;
 		}
 
 		if(flags & cost_flags_fastest) {
 			static const float jumpPenalty = 2.0;
-			cost += (jumpPenalty * dist);
+			dist *= jumpPenalty;
 		} else {
 			static const float jumpPenalty = 2.0;
-			cost += (jumpPenalty * dist);
+			dist *= jumpPenalty;
 		}
 	} else if(deltaZ < -locomotion.DeathDropHeight) {
 		return -1.0;
@@ -148,7 +126,7 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 		}
 
 		static const float underwaterPenalty = 20.0;
-		cost += (underwaterPenalty * dist);
+		dist *= underwaterPenalty;
 	}
 
 	if(area.HasAttributes(NAV_MESH_CROUCH)) {
@@ -158,81 +136,66 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 
 		if(flags & cost_flags_fastest) {
 			static const float crouchPenalty = 20.0;
-			cost += (crouchPenalty * dist);
+			dist *= crouchPenalty;
 		} else {
 			static const float crouchPenalty = 5.0;
-			cost += (crouchPenalty * dist);
+			dist *= crouchPenalty;
 		}
 	}
 
 	if(area.HasAttributes(NAV_MESH_WALK)) {
 		if(flags & cost_flags_fastest) {
 			static const float walkPenalty = 20.0;
-			cost += (walkPenalty * dist);
+			dist *= walkPenalty;
 		} else {
 			static const float walkPenalty = 5.0;
-			cost += (walkPenalty * dist);
+			dist *= walkPenalty;
 		}
 	}
 
 	if(area.HasAttributes(NAV_MESH_AVOID)) {
 		static const float avoidPenalty = 20.0;
-		cost += (avoidPenalty * dist);
+		dist *= avoidPenalty;
 	}
 
 	if(area.Damaging) {
 		static const float damagingPenalty = 100.0;
-		cost += (damagingPenalty * dist);
+		dist *= damagingPenalty;
 	}
 
 	if(flags & cost_flags_safest) {
-		static const float dangerCost = 100.0;
-		cost += (dist + (dist * (dangerCost * area.GetDanger(team))));
-
 	#if defined GAME_TF2
 		CTFNavArea tfarea = view_as<CTFNavArea>(area);
 		if(tfarea.InCombat) {
 			static const float combatDangerCost = 4.0;
-			cost += ((combatDangerCost * tfarea.CombatIntensity) * dist);
+			dist *= (combatDangerCost * tfarea.CombatIntensity);
 		}
 
-		static const float enemySentryDangerCost = 5.0;
 		if(!TeamManager_IsTruceActive()) {
+			static const float enemySentryDangerCost = 5.0;
+
 			switch(team) {
 				case TF_TEAM_RED: {
 					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-						cost += (enemySentryDangerCost * dist);
+						dist *= enemySentryDangerCost;
 					}
 				}
 				case TF_TEAM_BLUE: {
 					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-						cost += (enemySentryDangerCost * dist);
+						dist *= enemySentryDangerCost;
 					}
 				}
 				case TEAM_UNASSIGNED, TF_TEAM_HALLOWEEN: {
 					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER) ||
 						tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-						cost += (enemySentryDangerCost * dist);
+						dist *= enemySentryDangerCost;
 					}
 				}
 				case TF_TEAM_PVE_INVADERS_GIANTS: {
 					if(mvm) {
 						if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-							cost += (enemySentryDangerCost * dist);
+							dist *= enemySentryDangerCost;
 						}
-					}
-				}
-			}
-
-			int obj = -1;
-			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-				int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
-				if(TeamManager_AreTeamsEnemies(team, obj_team)) {
-					UpdateEntityLastKnownArea(obj);
-
-					if(GetEntityLastKnownArea(obj) == area) {
-						static const float enemyBuildingCost = 10.0;
-						cost += (enemyBuildingCost * dist);
 					}
 				}
 			}
@@ -241,12 +204,6 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 	}
 
 	if(flags & cost_flags_discrete) {
-		float size = ((area.SizeX + area.SizeY) / 2.0);
-		if(size >= 1.0) {
-			static const float costPerFriendPerUnit = 50000.0;
-			cost += ((costPerFriendPerUnit * float(area.GetPlayerCount(team))) / size);
-		}
-
 	#if defined GAME_TF2
 		CTFNavArea tfarea = view_as<CTFNavArea>(area);
 
@@ -255,55 +212,34 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 			switch(team) {
 				case TF_TEAM_BLUE: {
 					if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-						cost += (friendlySentryDangerCost * dist);
+						dist *= friendlySentryDangerCost;
 					}
 				}
 				case TF_TEAM_RED: {
 					if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-						cost += (friendlySentryDangerCost * dist);
+						dist *= friendlySentryDangerCost;
 					}
 				}
 				case TF_TEAM_PVE_INVADERS_GIANTS: {
 					if(mvm) {
 						if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-							cost += (friendlySentryDangerCost * dist);
+							dist *= friendlySentryDangerCost;
 						}
-					}
-				}
-			}
-
-			int obj = -1;
-			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-				int obj_team = GetEntProp(obj, Prop_Data, "m_iTeamNum");
-				if(TeamManager_AreTeamsFriends(team, obj_team)) {
-					UpdateEntityLastKnownArea(obj);
-
-					if(GetEntityLastKnownArea(obj) == area) {
-						static const float friendlyBuildingCost = 5.0;
-						cost += (friendlyBuildingCost * dist);
 					}
 				}
 			}
 		} else {
 			if(tfarea.HasAttributeTF(TF_NAV_BLUE_SENTRY_DANGER)) {
-				cost += (friendlySentryDangerCost * dist);
+				dist *= friendlySentryDangerCost;
 			}
 			if(tfarea.HasAttributeTF(TF_NAV_RED_SENTRY_DANGER)) {
-				cost += (friendlySentryDangerCost * dist);
-			}
-
-			int obj = -1;
-			while((obj = FindEntityByClassname(obj, "tf_obj_sentrygun")) != -1) {
-				UpdateEntityLastKnownArea(obj);
-
-				if(GetEntityLastKnownArea(obj) == area) {
-					static const float friendlyBuildingCost = 5.0;
-					cost += (friendlyBuildingCost * dist);
-				}
+				dist *= friendlySentryDangerCost;
 			}
 		}
 	#endif
 	}
+
+	float cost = -1.0;
 
 	if(flags & cost_flags_mod_small) {
 		int timeMod = (RoundToFloor(GetGameTime() / NB_PATHCOST_MOD_PERIOD) + 1);
@@ -313,7 +249,9 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 	} else if(flags & cost_flags_mod_heavy) {
 		int timeMod = (RoundToFloor(GetGameTime() / NB_PATHCOST_MOD_PERIOD) + 1);
 		float preference = 1.0 + 50.0 * ( 1.0 + Cosine( float( entity * area.ID * timeMod ) ) );
-		cost += (preference * dist);
+		cost = (dist * preference);
+	} else {
+		cost = dist;
 	}
 
 #if defined GAME_TF2
@@ -322,5 +260,5 @@ static any native_baseline_path_cost_impl(Handle plugin, int params)
 	}
 #endif
 
-	return cost;
+	return cost + fromArea.CostSoFar;
 }

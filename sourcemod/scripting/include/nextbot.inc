@@ -78,12 +78,12 @@ methodmap BehaviorAction
 	/*public native int GetName(char[] name, int len);
 	public native bool IsNamed(const char[] name);
 	public native int GetFullName(char[] name, int len);
-	public native int GetDebugString(char[] name, int len);
+	public native int GetDebugString(char[] name, int len);*/
 
 	property int Actor
 	{
 		public native get();
-	}*/
+	}
 };
 
 #define BehaviorAction_Null (view_as<BehaviorAction>(Address_Null))
@@ -99,7 +99,7 @@ methodmap CustomBehaviorAction < BehaviorAction
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
 	
-	public native void set_data_array(const char[] name, any[] data, int len);
+	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 
 	public native void set_function(const char[] name, Function func);
@@ -127,6 +127,7 @@ enum struct BehaviorResult
 
 	BehaviorResultType ChangeTo(BehaviorAction action, const char[] reason = NULL_STRING)
 	{
+		this.action = action;
 		if(!IsNullString(reason)) {
 			this.set_reason(reason);
 		}
@@ -135,6 +136,7 @@ enum struct BehaviorResult
 
 	BehaviorResultType SuspendFor(BehaviorAction action, const char[] reason = NULL_STRING)
 	{
+		this.action = action;
 		if(!IsNullString(reason)) {
 			this.set_reason(reason);
 		}
@@ -212,9 +214,6 @@ typeset nb_funcs_t
 
 	//IIntentionCustom.InitialContainedAction
 	function BehaviorAction (int entity);
-
-	//IIntentionCustom.IsHindrance
-	function QueryResultType (IIntentionCustom intention, INextBot bot, int blocker);
 
 	//GameLocomotionCustom.TraverseLadder
 	function MRESReturn (GameLocomotionCustom locomotion, bool &result);
@@ -306,6 +305,25 @@ typeset nb_funcs_t
 
 	//NextBotFlyingLocomotion.LimitPitch
 	function void (NextBotFlyingLocomotion locomotion, float &pitch);
+
+	//BehaviorAction.ShouldHurry
+	//BehaviorAction.ShouldRetreat
+	function QueryResultType (CustomBehaviorAction action, INextBot bot, int entity);
+
+	//BehaviorAction.ShouldAttack
+	function QueryResultType (CustomBehaviorAction action, INextBot bot, int entity, CKnownEntity them);
+
+	//BehaviorAction.IsHindrance
+	function QueryResultType (CustomBehaviorAction action, INextBot bot, int entity, int blocker);
+
+	//BehaviorAction.SelectTargetPoint
+	function void (CustomBehaviorAction action, INextBot bot, int entity, int subject, float pos[3]);
+
+	//BehaviorAction.IsPositionAllowed
+	function QueryResultType (CustomBehaviorAction action, INextBot bot, int entity, const float pos[3]);
+
+	//BehaviorAction.SelectMoreDangerousThreat
+	function CKnownEntity (CustomBehaviorAction action, INextBot bot, int entity, int subject, CKnownEntity threat1, CKnownEntity threat2);
 };
 
 enum Disposition_t 
@@ -400,13 +418,20 @@ methodmap CNavArea
 	public native float GetDanger(int team);
 	public native bool HasAvoidanceObstacle(float maxObstructionHeight = STEP_HEIGHT);
 
-	public native bool IsPotentiallyVisibleToTeam(int team);
-
 	public native float GetZ(float x, float y);
 
 	public native void GetClosestPointOnArea(const float pos[3], float close[3]);
 
 	public native bool IsBlocked(int teamID, bool ignoreNavBlockers = false);
+
+	public native bool IsEntirelyVisible(const float eye[3], int ignore = -1);
+	public native bool IsPartiallyVisible(const float eye[3], int ignore = -1);
+
+	public native bool IsPotentiallyVisible(CNavArea area);
+	public native bool IsPotentiallyVisibleToTeam(int team);
+
+	public native bool IsCompletelyVisible(CNavArea area);
+	public native bool IsCompletelyVisibleToTeam(int team);
 };
 
 #define CNavArea_Null view_as<CNavArea>(Address_Null)
@@ -465,13 +490,38 @@ methodmap CTFNavArea < CNavArea
 		public native get();
 	}
 
-	public native bool HasAttributeTF(TFNavAttributeType bits);
-
 	property bool ValidForWanderingPopulation
 	{
-		public get()
-		{ return !this.HasAttributeTF(TF_NAV_BLOCKED|TF_NAV_SPAWN_ROOM_RED|TF_NAV_SPAWN_ROOM_BLUE|TF_NAV_NO_SPAWNING|TF_NAV_RESCUE_CLOSET); }
+		public native get();
 	}
+
+	property float TravelDistanceToBombTarget
+	{
+		public native get();
+	}
+
+	property int WanderCount
+	{
+		public native get();
+		public native set(int count);
+	}
+
+	public native void AddToWanderCount(int count);
+
+	public native void OnCombat();
+
+	public native void GetEnemyInvasionAreaVector(int myTeam, ArrayList priorVector);
+	public native float GetIncursionDistance(int team);
+	public native CTFNavArea GetNextIncursionArea(int team);
+	public native bool IsAwayFromInvasionAreas(int myTeam, float safetyRange = 1000.0);
+
+	public native bool IsReachableByTeam(int team);
+
+	public native bool IsPotentiallyVisibleToActor(int who);
+
+	public native void SetAttributeTF(TFNavAttributeType flags);
+	public native void ClearAttributeTF(TFNavAttributeType flags);
+	public native bool HasAttributeTF(TFNavAttributeType flags);
 };
 #elseif defined GAME_L4D2
 enum
@@ -538,10 +588,54 @@ methodmap CNavMesh
 	public static native bool IsLoaded();
 };
 
+#if defined GAME_TF2
+methodmap CTFNavMesh < CNavMesh
+{
+	public static native void CollectAmbushAreas(ArrayList ambushVector, CTFNavArea startArea, int teamToAmbush, float searchRadius, float incursionTolerance = 300.0);
+
+	public static native void CollectSpawnRoomThresholdAreas(ArrayList spawnExitAreaVector, int team);
+
+	public static native void CollectAreaWithinBombTravelRange(ArrayList spawnExitAreaVector, float minTravel, float maxTravel);
+
+	public static native void GetSetupGateDefenseAreas(ArrayList spawnExitAreaVector);
+	public static native void GetControlPointAreas(int pointIndex, ArrayList spawnExitAreaVector);
+	public static native CTFNavArea GetControlPointCenterArea(int pointIndex);
+	public static native void GetSpawnRoomAreas(int team, ArrayList spawnExitAreaVector);
+	public static native void GetSpawnRoomExitAreas(int team, ArrayList spawnExitAreaVector);
+
+	//public static native bool IsSentryGunHere(CTFNavArea area);
+};
+#endif
+
 native int GetNavAreaVectorCount();
 native CNavArea GetNavAreaFromVector(int idx);
 
 native void CollectSurroundingAreas(ArrayList nearbyAreaVector, CNavArea startArea, float travelDistanceLimit = 1500.0, float maxStepUpLimit = STEP_HEIGHT, float maxDropDownLimit = 100.0);
+
+typedef searchareasexecute_func_t = function bool (CNavArea area, CNavArea priorArea, float travelDistanceSoFar, any data);
+typedef searchareasshould_func_t = function bool (CNavArea area, CNavArea priorArea, float travelDistanceSoFar, any data);
+typedef searchareasiter_func_t = function void (CNavArea area, CNavArea priorArea, float travelDistanceSoFar, any data);
+typedef searchareaspost_func_t = function void (any data);
+
+enum struct ISearchSurroundingAreasFunctor
+{
+	searchareasexecute_func_t Execute;
+	searchareasshould_func_t ShouldSearch;
+	searchareasiter_func_t IterateAdjacentAreas;
+	searchareaspost_func_t PostSearch;
+
+	void Init()
+	{
+		this.Execute = INVALID_FUNCTION;
+		this.ShouldSearch = INVALID_FUNCTION;
+		this.IterateAdjacentAreas = INVALID_FUNCTION;
+		this.PostSearch = INVALID_FUNCTION;
+	}
+}
+
+#define ISearchSurroundingAreasFunctorVar any[]
+
+native void SearchSurroundingAreas(CNavArea startArea, ISearchSurroundingAreasFunctorVar func, float travelDistanceLimit = -1.0, any data = 0);
 
 methodmap CNavLadder
 {
@@ -1520,10 +1614,22 @@ methodmap CKnownEntity
 		public native set(bool height);
 	}
 
+	property bool VisibleInFOVNow
+	{
+		public native get();
+	}
+
+	property bool VisibleRecently
+	{
+		public native get();
+	}
+
+	property bool Obsolete
+	{
+		public native get();
+	}
+
 	public native void MarkLastKnownPositionAsSeen();
-	public native bool IsVisibleInFOVNow();
-	public native bool IsVisibleRecently();
-	public native bool IsObsolete();
 	public native bool Is(int entity);
 	public native bool IsEqual(CKnownEntity entity);
 	public native void Destroy();
@@ -1539,9 +1645,6 @@ enum FieldOfViewCheckType
 	USE_FOV,
 	DISREGARD_FOV
 };
-
-typedef foreachknow_func_t = function bool (CKnownEntity known, any data);
-typedef closestknowfilter_func_t = function bool (int entity, any data);
 
 native bool EntityVisibleEnt(int entity, int target, int mask = MASK_BLOCKLOS, int &blocker = -1);
 native bool EntityVisibleVec(int entity, const float pos[3], int mask = MASK_BLOCKLOS, int &blocker = -1);
@@ -1578,6 +1681,9 @@ enum LineOfSightCheckType
 
 native bool CombatCharacterIsLineOfSightClearVec(int entity, const float pos[3], LineOfSightCheckType checkType = IGNORE_NOTHING, int entityToIgnore = -1);
 native bool CombatCharacterIsLineOfSightClearEnt(int entity, int target, LineOfSightCheckType checkType = IGNORE_NOTHING);
+
+typedef foreachknow_func_t = function bool (CKnownEntity known, any data);
+typedef closestknowfilter_func_t = function bool (int entity, any data);
 
 methodmap IVision < INextBotComponent
 {
@@ -1736,6 +1842,9 @@ methodmap IBody < INextBotComponent
 	}
 #endif
 
+	public native void GetEyePosition(float vec[3]);
+	public native void GetViewVector(float vec[3]);
+
 	public native void GetHullMins(float vec[3]);
 	public native void GetHullMaxs(float vec[3]);
 
@@ -1862,7 +1971,24 @@ enum QueryResultType
 
 methodmap IIntention < INextBotComponent
 {
-
+	//public native QueryResultType ShouldPickUp(INextBot me, int item);
+	public native QueryResultType ShouldHurry(INextBot me);
+#if defined GAME_TF2
+	public native QueryResultType ShouldRetreat(INextBot me);
+	public native QueryResultType ShouldAttack(INextBot me, CKnownEntity them);
+#endif
+	public native QueryResultType IsHindrance(INextBot me, int blocker);
+	public native void SelectTargetPoint(INextBot me, int subject, float pos[3]);
+	public native QueryResultType IsPositionAllowed(INextBot me, const float pos[3]);
+#if defined GAME_L4D2
+	//public native PathFollower QueryCurrentPath(INextBot me);
+#endif
+#if defined GAME_TF2
+	public native CKnownEntity SelectMoreDangerousThreat(INextBot me, int subject, CKnownEntity threat1, CKnownEntity threat2);
+#endif
+#if defined GAME_L4D2
+	//public native int SelectMoreDangerousThreat(INextBot me, int subject, int threat1, int threat2);
+#endif
 };
 
 #define IIntention_Null (view_as<IIntention>(Address_Null))
@@ -1929,6 +2055,11 @@ methodmap INextBot < INextBotEventResponder
 		public native get();
 	}
 
+	property IIntention IntentionInterface
+	{
+		public native get();
+	}
+
 	property PathFollower CurrentPath
 	{
 		public native get();
@@ -1940,28 +2071,7 @@ methodmap INextBot < INextBotEventResponder
 
 	public native void Reset();
 
-	public bool DoThink(int entity)
-	{
-		static ConVar NextBotStop = null;
-		if(NextBotStop == null) {
-			NextBotStop = FindConVar("nb_stop");
-		}
-
-		if(this.BeginUpdate()) {
-
-			UpdateEntityLastKnownArea(entity);
-
-			if(!NextBotStop.BoolValue && !(GetEntityFlags(entity) & FL_FROZEN)) {
-				this.Update();
-			}
-
-			this.EndUpdate();
-
-			return true;
-		}
-
-		return false;
-	}
+	public native bool DoThink(int entity);
 
 	public native void GetPosition(float pos[3]);
 	public native void SetPosition(const float pos[3]);
@@ -1978,80 +2088,24 @@ methodmap INextBot < INextBotEventResponder
 	public native float GetRangeSquaredToEntity(int entity);
 	public native float GetRangeSquaredToVector(const float vec[3]);
 
-	public float GetDistanceBetweenEntity(int other)
-	{
-		float this_pos[3];
-		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+	public native float GetDistanceBetweenEntity(int other);
+	public native float GetDistanceBetweenVector(const float other_pos[3]);
 
-		float other_pos[3];
-		GetEntPropVector(other, Prop_Data, "m_vecAbsOrigin", other_pos);
+	public native bool IsDistanceBetweenLessThanEntity(int other, float range);
+	public native bool IsDistanceBetweenLessThanVector(const float other_pos[3], float range);
 
-		float sub[3];
-		SubtractVectors(this_pos, other_pos, sub);
+	public native bool IsDistanceBetweenGreaterThanEntity(int other, float range);
+	public native bool IsDistanceBetweenGreaterThanVector(const float other_pos[3], float range);
 
-		return GetVectorLength(sub, false);
-	}
+	public native bool IsLineOfFireClearVec(const float where[3]);
+	public native bool IsLineOfFireClearEnt(int who);
+	public native bool IsLineOfFireClearVecEx(const float from[3], const float to[3]);
+	public native bool IsLineOfFireClearEntEx(const float from[3], int who);
 
-	public float GetDistanceBetweenVector(const float other_pos[3])
-	{
-		float this_pos[3];
-		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
+	public native bool IsEntityBetweenTargetAndSelf(int other, int target);
 
-		float sub[3];
-		SubtractVectors(this_pos, other_pos, sub);
-
-		return GetVectorLength(sub, false);
-	}
-
-	public bool IsDistanceBetweenLessThanEntity(int other, float range)
-	{
-		float this_pos[3];
-		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
-
-		float other_pos[3];
-		GetEntPropVector(other, Prop_Data, "m_vecAbsOrigin", other_pos);
-
-		float sub[3];
-		SubtractVectors(this_pos, other_pos, sub);
-
-		return (GetVectorLength(sub, true) < (range * range));
-	}
-
-	public bool IsDistanceBetweenLessThanVector(const float other_pos[3], float range)
-	{
-		float this_pos[3];
-		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
-
-		float sub[3];
-		SubtractVectors(this_pos, other_pos, sub);
-
-		return (GetVectorLength(sub, true) < (range * range));
-	}
-
-	public bool IsDistanceBetweenGreaterThanEntity(int other, float range)
-	{
-		float this_pos[3];
-		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
-
-		float other_pos[3];
-		GetEntPropVector(other, Prop_Data, "m_vecAbsOrigin", other_pos);
-
-		float sub[3];
-		SubtractVectors(this_pos, other_pos, sub);
-
-		return (GetVectorLength(sub, true) > (range * range));
-	}
-
-	public bool IsDistanceBetweenGreaterThanVector(const float other_pos[3], float range)
-	{
-		float this_pos[3];
-		GetEntPropVector(this.Entity, Prop_Data, "m_vecAbsOrigin", this_pos);
-
-		float sub[3];
-		SubtractVectors(this_pos, other_pos, sub);
-
-		return (GetVectorLength(sub, true) > (range * range));
-	}
+	//public native bool IsThreatAimingTowardMe(int threat, float cosTolerance = 0.8);
+	//public native bool IsThreatFiringAtMe(int threat);
 
 #if defined GAME_L4D2
 	public native float Get2DRangeToEntity(int entity);
@@ -2280,7 +2334,10 @@ methodmap Path < Handle
 		public native get();
 	}
 
-	public native bool IsValid();
+	property bool Valid
+	{
+		public native get();
+	}
 
 	property Segment FirstSegment
 	{

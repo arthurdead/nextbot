@@ -150,6 +150,11 @@
 				"library"	"server"
 				"linux"		"@_ZN8CNavArea14m_openListTailE"
 			}
+			"CNavArea::s_nCurrVisTestCounter"
+			{
+				"library"	"server"
+				"linux"		"@_ZN8CNavArea21s_nCurrVisTestCounterE"
+			}
 			"CBaseEntity::MyNPCPointer"
 			{
 				"library" "server"
@@ -574,6 +579,10 @@
 			"CBaseEntity::Touch"
 			{
 				"linux" "103"
+			}
+			"CBaseEntity::IsCombatItem"
+			{
+				"linux" "86"
 			}
 		}
 		"Signatures"

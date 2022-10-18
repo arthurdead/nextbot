@@ -206,6 +206,9 @@ ConVar path_expensive_optimize("path_expensive_optimize", "0");
 
 #if SOURCE_ENGINE == SE_TF2
 ConVar *tf_nav_combat_decay_rate = nullptr;
+ConVar *tf_nav_combat_build_rate = nullptr;
+ConVar *tf_select_ambush_areas_max_enemy_exposure_area = nullptr;
+ConVar *tf_select_ambush_areas_close_range = nullptr;
 #endif
 
 int sizeofNextBotCombatCharacter = 0;
@@ -314,6 +317,7 @@ int CBaseEntityEyePosition = -1;
 int CBaseEntitySpawn = -1;
 
 int m_vecAbsOriginOffset = -1;
+int m_vecViewOffsetOffset = -1;
 int m_iTeamNumOffset = -1;
 int m_vecAbsVelocityOffset = -1;
 int m_vecVelocityOffset = -1;
@@ -550,6 +554,7 @@ int m_pPhysicsObjectOffset = -1;
 int CBaseEntityPostConstructor = -1;
 int CBaseEntityPhysicsSolidMaskForEntity = -1;
 int CBaseEntityTouch = -1;
+int CBaseEntityIsCombatItem = -1;
 
 class CBaseEntity : public IServerEntity
 {
@@ -598,6 +603,23 @@ public:
 	Vector EyePosition()
 	{
 		return call_vfunc<Vector>(this, CBaseEntityEyePosition);
+	}
+
+	const Vector& GetViewOffset( void )
+	{
+		if(m_vecViewOffsetOffset == -1) {
+			sm_datatable_info_t info{};
+			datamap_t *pMap = gamehelpers->GetDataMap(this);
+			gamehelpers->FindDataMapInfo(pMap, "m_vecViewOffset", &info);
+			m_vecViewOffsetOffset = info.actual_offset;
+		}
+
+		return *(Vector *)((unsigned char *)this + m_vecViewOffsetOffset);
+	}
+
+	Vector EyePosition_nonvirtual( void )
+	{ 
+		return GetAbsOrigin() + GetViewOffset();
 	}
 
 	CBasePlayer *GetPlayer()
@@ -1274,6 +1296,11 @@ public:
 		call_vfunc<void, CBaseEntity, CBaseEntity *>(this, CBaseEntityTouch, pOther);
 	}
 
+	bool IsCombatItem()
+	{
+		return call_vfunc<bool, CBaseEntity>(this, CBaseEntityIsCombatItem);
+	}
+
 	bool IsPhysicsProp()
 	{
 		if(ClassMatches("physics_prop") ||
@@ -1932,13 +1959,98 @@ enum
 	TF_TEAM_COUNT
 };
 
+enum TFNavAttributeType
+{
+	TF_NAV_INVALID						= 0x00000000,
+
+	// Also look for NAV_MESH_NAV_BLOCKER (w/ nav_debug_blocked ConVar).
+	TF_NAV_BLOCKED						= 0x00000001,			// blocked for some TF-specific reason
+	TF_NAV_SPAWN_ROOM_RED				= 0x00000002,
+	TF_NAV_SPAWN_ROOM_BLUE				= 0x00000004,
+	TF_NAV_SPAWN_ROOM_EXIT				= 0x00000008,
+	TF_NAV_HAS_AMMO						= 0x00000010,
+	TF_NAV_HAS_HEALTH					= 0x00000020,
+	TF_NAV_CONTROL_POINT				= 0x00000040,
+
+	TF_NAV_BLUE_SENTRY_DANGER			= 0x00000080,			// sentry can potentially fire upon enemies in this area
+	TF_NAV_RED_SENTRY_DANGER			= 0x00000100,
+
+	TF_NAV_BLUE_SETUP_GATE				= 0x00000800,			// this area is blocked until the setup period is over
+	TF_NAV_RED_SETUP_GATE				= 0x00001000,			// this area is blocked until the setup period is over
+	TF_NAV_BLOCKED_AFTER_POINT_CAPTURE	= 0x00002000,			// this area becomes blocked after the first point is capped
+	TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE  = 0x00004000,			// this area is blocked until the first point is capped, then is unblocked
+	TF_NAV_BLUE_ONE_WAY_DOOR			= 0x00008000,
+	TF_NAV_RED_ONE_WAY_DOOR				= 0x00010000,
+
+ 	TF_NAV_WITH_SECOND_POINT			= 0x00020000,			// modifier for BLOCKED_*_POINT_CAPTURE
+ 	TF_NAV_WITH_THIRD_POINT				= 0x00040000,			// modifier for BLOCKED_*_POINT_CAPTURE
+  	TF_NAV_WITH_FOURTH_POINT			= 0x00080000,			// modifier for BLOCKED_*_POINT_CAPTURE
+ 	TF_NAV_WITH_FIFTH_POINT				= 0x00100000,			// modifier for BLOCKED_*_POINT_CAPTURE
+
+	TF_NAV_SNIPER_SPOT					= 0x00200000,			// this is a good place for a sniper to lurk
+	TF_NAV_SENTRY_SPOT					= 0x00400000,			// this is a good place to build a sentry
+
+	TF_NAV_ESCAPE_ROUTE					= 0x00800000,			// for Raid mode
+	TF_NAV_ESCAPE_ROUTE_VISIBLE			= 0x01000000,			// all areas that have visibility to the escape route
+
+	TF_NAV_NO_SPAWNING					= 0x02000000,			// don't spawn bots in this area
+
+ 	TF_NAV_RESCUE_CLOSET				= 0x04000000,			// for respawning friends in Raid mode
+
+ 	TF_NAV_BOMB_CAN_DROP_HERE			= 0x08000000,			// the bomb can be dropped here and reached by the invaders in MvM
+
+	TF_NAV_DOOR_NEVER_BLOCKS			= 0x10000000,
+	TF_NAV_DOOR_ALWAYS_BLOCKS			= 0x20000000,
+
+	TF_NAV_UNBLOCKABLE					= 0x40000000,			// this area cannot be blocked
+
+	// save/load these manually set flags, and don't clear them between rounds
+	TF_NAV_PERSISTENT_ATTRIBUTES		= TF_NAV_SNIPER_SPOT | TF_NAV_SENTRY_SPOT | TF_NAV_NO_SPAWNING | TF_NAV_BLUE_SETUP_GATE | TF_NAV_RED_SETUP_GATE | TF_NAV_BLOCKED_AFTER_POINT_CAPTURE | TF_NAV_BLOCKED_UNTIL_POINT_CAPTURE | TF_NAV_BLUE_ONE_WAY_DOOR | TF_NAV_RED_ONE_WAY_DOOR | TF_NAV_DOOR_NEVER_BLOCKS | TF_NAV_DOOR_ALWAYS_BLOCKS | TF_NAV_UNBLOCKABLE | TF_NAV_WITH_SECOND_POINT | TF_NAV_WITH_THIRD_POINT | TF_NAV_WITH_FOURTH_POINT | TF_NAV_WITH_FIFTH_POINT | TF_NAV_RESCUE_CLOSET
+};
+
 class CTFNavArea : public CNavArea
 {
 public:
-	bool HasAttributeTF( int flags ) const { return ( m_attributeFlags & flags ) ? true : false; }
-	float GetCombatIntensity( void ) const;
-	bool IsInCombat( void ) const { return GetCombatIntensity() > 0.01f; }
-	
+	float GetIncursionDistance( int team ) const;				// return travel distance from the team's active spawn room to this area, -1 for invalid
+	CTFNavArea *GetNextIncursionArea( int team ) const;			// return adjacent area with largest increase in incursion distance
+	bool IsReachableByTeam( int team ) const;					// return true if the given team can reach this area
+	void CollectPriorIncursionAreas( int team, CUtlVector< CTFNavArea * > *priorVector );	// populate 'priorVector' with a collection of adjacent areas that have a lower incursion distance that this area
+	void CollectNextIncursionAreas( int team, CUtlVector< CTFNavArea * > *priorVector );	// populate 'priorVector' with a collection of adjacent areas that have a higher incursion distance that this area
+
+	const CUtlVector< CTFNavArea * > &GetEnemyInvasionAreaVector( int myTeam ) const;	// given OUR team index, return list of areas the enemy is invading from
+	bool IsAwayFromInvasionAreas( int myTeam, float safetyRange = 1000.0f ) const;		// return true if this area is at least safetyRange units away from all invasion areas
+
+	void SetAttributeTF( int flags );
+	void ClearAttributeTF( int flags );
+	bool HasAttributeTF( int flags ) const;
+
+	void AddPotentiallyVisibleActor( CBaseCombatCharacter *who );
+	void RemovePotentiallyVisibleActor( CBaseCombatCharacter *who );
+	void ClearAllPotentiallyVisibleActors( void );
+	bool IsPotentiallyVisibleToActor( CBaseCombatCharacter *who ) const;	// return true if the given actor has potential visibility to this area
+
+	class IForEachPotentiallyVisibleActor
+	{
+	public:
+		virtual bool Inspect( CBaseCombatCharacter *who ) = 0;
+	};
+	bool ForEachPotentiallyVisibleActor( IForEachPotentiallyVisibleActor &func, int team = TEAM_ANY );
+
+	void OnCombat( void );										// invoked when combat happens in/near this area
+	bool IsInCombat( void ) const;								// return true if this area has seen combat recently
+	float GetCombatIntensity( void ) const;						// 1 = in active combat, 0 = quiet
+
+	// Raid mode -------------------------------------------------
+	void AddToWanderCount( int count );
+	void SetWanderCount( int count );
+	int GetWanderCount( void ) const;
+
+	bool IsValidForWanderingPopulation( void ) const;
+	// Raid mode -------------------------------------------------
+
+	// Distance for MvM bomb delivery
+	float GetTravelDistanceToBombTarget( void ) const;
+
 	float m_distanceFromSpawnRoom[ TF_TEAM_COUNT ];
 	CUtlVector< CTFNavArea * > m_invasionAreaVector[ TF_TEAM_COUNT ];	// use our team as index to get list of areas the enemy is invading from
 	unsigned int m_invasionSearchMarker;
@@ -1960,6 +2072,401 @@ public:
 	float m_distanceToBombTarget;
 };
 
+enum RecomputeReasonType
+{
+	RESET,
+	SETUP_FINISHED,
+	POINT_CAPTURED,
+	POINT_UNLOCKED,
+	BLOCKED_STATUS_CHANGED,
+	MAP_LOGIC
+};
+
+class CTFNavMesh : public CNavMesh
+{
+public:
+	bool IsSentryGunHere( CTFNavArea *area ) const;						// return true if a Sentry Gun has been built in the given area
+
+	// populate the given "ambushVector" with good areas to lurk in ambush for the invading enemy team
+	void CollectAmbushAreas( CUtlVector< CTFNavArea * > *ambushVector, CTFNavArea *startArea, int teamToAmbush, float searchRadius, float incursionTolerance = 300.0f ) const;
+
+	// populate the given vector with areas that are just outside of the given team's spawn room(s)
+	void CollectSpawnRoomThresholdAreas( CUtlVector< CTFNavArea * > *spawnExitAreaVector, int team ) const;
+
+	// populate the given vector with areas that have a bomb travel distance within the given range
+	void CollectAreaWithinBombTravelRange( CUtlVector< CTFNavArea * > *spawnExitAreaVector, float minTravel, float maxTravel ) const;
+
+	const CUtlVector< CTFNavArea * > *GetSetupGateDefenseAreas( void ) const;	// return vector of areas that are good for defending enemies coming out of the blue setup gates
+	const CUtlVector< CTFNavArea * > *GetControlPointAreas( int pointIndex ) const;		// return vector of areas overlapping the given control point
+	CTFNavArea *GetControlPointCenterArea( int pointIndex ) const;				// return area overlapping the center of the given control point
+	const CUtlVector< CTFNavArea * > *GetSpawnRoomAreas( int team ) const;		// return vector of areas within the given team spawn room(s)
+	const CUtlVector< CTFNavArea * > *GetSpawnRoomExitAreas( int team ) const;	// return vector of areas where the given team exits their spawn room(s)
+
+	CountdownTimer m_recomputeInternalDataTimer;			// if started, when counts down recompute internal data to give various map logic time to complete
+	RecomputeReasonType m_recomputeReason;
+	int m_recomputeReasonWhichPoint;
+
+	// Array of areas with sentry danger attributes set.
+	CUtlVector< CTFNavArea * > m_sentryAreas;
+
+	CUtlVector< CTFNavArea * > m_setupGateDefenseAreaVector;
+
+	CUtlVector< CTFNavArea * > m_controlPointAreaVector[ MAX_CONTROL_POINTS ];
+	CTFNavArea *m_controlPointCenterAreaVector[ MAX_CONTROL_POINTS ];
+
+	CUtlVector< CTFNavArea * > m_redSpawnRoomAreaVector;
+	CUtlVector< CTFNavArea * > m_blueSpawnRoomAreaVector;
+
+	CUtlVector< CTFNavArea * > m_redSpawnRoomExitAreaVector;
+	CUtlVector< CTFNavArea * > m_blueSpawnRoomExitAreaVector;
+
+	CountdownTimer m_watchCartTimer;
+
+	int m_priorBotCount;
+};
+
+inline int GetEnemyTeam( int team )
+{
+	if ( team == TF_TEAM_RED )
+		return TF_TEAM_BLUE;
+
+	if ( team == TF_TEAM_BLUE )
+		return TF_TEAM_RED;
+
+	// no enemy team
+	return team;
+}
+
+class ScanSelectAmbushAreas
+{
+public:
+	ScanSelectAmbushAreas( CUtlVector< CTFNavArea * > *ambushAreaVector, int teamToAmbush, float enemyIncursionLimit )
+	{
+		m_ambushAreaVector = ambushAreaVector;
+		m_teamToAmbush = teamToAmbush;
+		m_enemyIncursionLimit = enemyIncursionLimit;
+	}
+
+	bool operator() ( CNavArea *baseArea )
+	{
+		CTFNavArea *area = static_cast< CTFNavArea * >( baseArea );
+
+		// no drop-downs or jumps
+		if ( area->GetParent() && !area->GetParent()->IsContiguous( area ) )
+			return false;
+
+		float enemyIncursionDistanceAtArea = area->GetIncursionDistance( m_teamToAmbush );
+
+		if ( enemyIncursionDistanceAtArea > m_enemyIncursionLimit )
+			return false;
+
+		int wallCount = 0;
+		int dir;
+		for( dir=0; dir<NUM_DIRECTIONS; ++dir )
+		{
+			if ( area->GetAdjacentCount( (NavDirType)dir ) == 0 )
+			{
+				// wall (or dropoff) on this side
+				++wallCount;
+			}
+		}
+
+		if ( wallCount >= 1 )
+		{
+			// good cover, are we also right next to enemy incursion areas?
+			const CUtlVector< CTFNavArea * > &invasionVector = area->GetEnemyInvasionAreaVector( GetEnemyTeam( m_teamToAmbush ) );
+
+			// don't use areas that are in plain sight of large amounts of incoming enemy space
+			NavAreaCollector collector( true );
+			area->ForAllPotentiallyVisibleAreas( collector );
+
+			float totalVisibleThreatArea = 0.0f;
+			FOR_EACH_VEC( collector.m_area, it )
+			{
+				CTFNavArea *visArea = static_cast< CTFNavArea * >( collector.m_area[ it ] );
+
+				if ( visArea->GetIncursionDistance( m_teamToAmbush ) < enemyIncursionDistanceAtArea )
+				{
+					totalVisibleThreatArea += visArea->GetSizeX() * visArea->GetSizeY();
+				}
+			}
+
+			if ( totalVisibleThreatArea > tf_select_ambush_areas_max_enemy_exposure_area->GetFloat() )
+			{
+				// too exposed
+				return true;
+			}
+
+			float nearRangeSq = tf_select_ambush_areas_close_range->GetFloat();
+			nearRangeSq *= nearRangeSq;
+
+			FOR_EACH_VEC( invasionVector, it )
+			{
+				CTFNavArea *invasionArea = invasionVector[ it ];
+
+				if ( invasionArea->GetIncursionDistance( m_teamToAmbush ) < enemyIncursionDistanceAtArea )
+				{
+					// the enemy will go through invasionArea before they reach the candidate area
+					float rangeSq = ( invasionArea->GetCenter() - area->GetCenter() ).LengthSqr();
+					if ( rangeSq < nearRangeSq )
+					{
+						// there is at least one nearby invasion area
+						m_ambushAreaVector->AddToTail( area );
+						break;
+					}
+				}
+			}
+		}
+
+		return true;
+	}
+
+	int m_teamToAmbush;
+	float m_enemyIncursionLimit;
+	CUtlVector< CTFNavArea * > *m_ambushAreaVector;
+};
+
+void CTFNavMesh::CollectAmbushAreas( CUtlVector< CTFNavArea * > *ambushVector, CTFNavArea *startArea, int teamToAmbush, float searchRadius, float incursionTolerance ) const
+{
+	ScanSelectAmbushAreas selector( ambushVector, teamToAmbush, startArea->GetIncursionDistance( teamToAmbush ) + incursionTolerance );
+	SearchSurroundingAreas( startArea, startArea->GetCenter(), selector, searchRadius );
+}
+
+void CTFNavMesh::CollectSpawnRoomThresholdAreas( CUtlVector< CTFNavArea * > *spawnExitAreaVector, int team ) const
+{
+	const CUtlVector< CTFNavArea * > *exitAreaVector = GetSpawnRoomExitAreas( team );
+
+	if ( !exitAreaVector )
+		return;
+
+	for( int i=0; i<exitAreaVector->Count(); ++i )
+	{
+		CTFNavArea *area = static_cast< CTFNavArea * >( (*TheNavAreas)[ i ] );
+
+		// find largest non-spawn-room area connected to this exit
+		CTFNavArea *exitArea = NULL;
+		float exitAreaSize = 0.0f;
+
+		for( int dir=0; dir<NUM_DIRECTIONS; ++dir )
+		{
+			const NavConnectVector *adjConnect = area->GetAdjacentAreas( (NavDirType)dir );
+
+			for( int j=0; j<adjConnect->Count(); ++j )
+			{
+				CTFNavArea *adjArea = (CTFNavArea *)adjConnect->Element(j).area;
+
+				if ( !adjArea->HasAttributeTF( TF_NAV_SPAWN_ROOM_RED | TF_NAV_SPAWN_ROOM_BLUE | TF_NAV_SPAWN_ROOM_EXIT ) )
+				{
+					// this area is outside of the spawn room
+					float size = adjArea->GetSizeX() * adjArea->GetSizeY();
+					if ( size > exitAreaSize )
+					{
+						exitArea = adjArea;
+						exitAreaSize = size;
+					}
+				}
+			}
+		}
+
+		if ( exitArea )
+		{
+			spawnExitAreaVector->AddToTail( exitArea );
+		}
+	}
+}
+
+void CTFNavMesh::CollectAreaWithinBombTravelRange( CUtlVector< CTFNavArea * > *spawnExitAreaVector, float minTravel, float maxTravel ) const
+{
+	for( int i=0; i<TheNavAreas->Count(); ++i )
+	{
+		CTFNavArea *area = static_cast< CTFNavArea * >( (*TheNavAreas)[ i ] );
+
+		float travelDistance = area->GetTravelDistanceToBombTarget();
+
+		if ( travelDistance >= minTravel && travelDistance <= maxTravel )
+		{
+			spawnExitAreaVector->AddToTail( area );
+		}
+	}
+}
+
+inline const CUtlVector< CTFNavArea * > *CTFNavMesh::GetSpawnRoomAreas( int team ) const
+{
+	if ( team == TF_TEAM_RED )
+	{
+		return &m_redSpawnRoomAreaVector;
+	}
+
+	if ( team == TF_TEAM_BLUE )
+	{
+		return &m_blueSpawnRoomAreaVector;
+	}
+
+	return NULL;
+}
+
+inline const CUtlVector< CTFNavArea * > *CTFNavMesh::GetSpawnRoomExitAreas( int team ) const
+{
+	if ( team == TF_TEAM_RED )
+	{
+		return &m_redSpawnRoomExitAreaVector;
+	}
+
+	if ( team == TF_TEAM_BLUE )
+	{
+		return &m_blueSpawnRoomExitAreaVector;
+	}
+
+	return NULL;
+}
+
+inline const CUtlVector< CTFNavArea * > *CTFNavMesh::GetControlPointAreas( int pointIndex ) const
+{
+	if ( pointIndex < 0 || pointIndex >= MAX_CONTROL_POINTS )
+	{
+		return NULL;
+	}
+
+	return &m_controlPointAreaVector[ pointIndex ];
+}
+
+inline CTFNavArea *CTFNavMesh::GetControlPointCenterArea( int pointIndex ) const
+{
+	if ( pointIndex < 0 || pointIndex >= MAX_CONTROL_POINTS )
+	{
+		return NULL;
+	}
+
+	return m_controlPointCenterAreaVector[ pointIndex ];
+}
+
+inline const CUtlVector< CTFNavArea * > *CTFNavMesh::GetSetupGateDefenseAreas( void ) const
+{
+	return &m_setupGateDefenseAreaVector;
+}
+
+void CTFNavArea::OnCombat( void )
+{
+	m_combatIntensity += tf_nav_combat_build_rate->GetFloat();
+	if ( m_combatIntensity > 1.0f )
+	{
+		m_combatIntensity = 1.0f;
+	}
+
+	m_combatTimer.Start();
+}
+
+CTFNavArea *CTFNavArea::GetNextIncursionArea( int team ) const
+{
+	CTFNavArea *nextIncursionArea = NULL;
+	float nextIncursionDistance = GetIncursionDistance( team );
+
+	for( int dir=0; dir<NUM_DIRECTIONS; ++dir )
+	{
+		const NavConnectVector *adjVector = GetAdjacentAreas( (NavDirType)dir );
+		FOR_EACH_VEC( (*adjVector), bit )
+		{
+			CTFNavArea *adjArea = static_cast< CTFNavArea * >( (*adjVector)[ bit ].area );
+
+			if ( adjArea->GetIncursionDistance( team ) > nextIncursionDistance )
+			{
+				nextIncursionArea = adjArea;
+				nextIncursionDistance = adjArea->GetIncursionDistance( team );
+			}
+		}
+	}
+
+	return nextIncursionArea;
+}
+
+void CTFNavArea::CollectPriorIncursionAreas( int team, CUtlVector< CTFNavArea * > *priorVector )
+{
+	float myIncursionDistance = GetIncursionDistance( team );
+	
+	priorVector->RemoveAll();
+
+	for( int dir=0; dir<NUM_DIRECTIONS; ++dir )
+	{
+		const NavConnectVector *adjVector = GetAdjacentAreas( (NavDirType)dir );
+		FOR_EACH_VEC( (*adjVector), bit )
+		{
+			CTFNavArea *adjArea = static_cast< CTFNavArea * >( (*adjVector)[ bit ].area );
+
+			if ( adjArea->GetIncursionDistance( team ) < myIncursionDistance )
+			{
+				priorVector->AddToTail( adjArea );
+			}
+		}
+	}
+}
+
+void CTFNavArea::CollectNextIncursionAreas( int team, CUtlVector< CTFNavArea * > *priorVector )
+{
+	float myIncursionDistance = GetIncursionDistance( team );
+
+	priorVector->RemoveAll();
+
+	for( int dir=0; dir<NUM_DIRECTIONS; ++dir )
+	{
+		const NavConnectVector *adjVector = GetAdjacentAreas( (NavDirType)dir );
+		FOR_EACH_VEC( (*adjVector), bit )
+		{
+			CTFNavArea *adjArea = static_cast< CTFNavArea * >( (*adjVector)[ bit ].area );
+
+			if ( adjArea->GetIncursionDistance( team ) > myIncursionDistance )
+			{
+				priorVector->AddToTail( adjArea );
+			}
+		}
+	}
+}
+
+bool CTFNavArea::IsAwayFromInvasionAreas( int myTeam, float safetyRange ) const
+{
+	const CUtlVector< CTFNavArea * > &invasionVector = GetEnemyInvasionAreaVector( myTeam );
+	FOR_EACH_VEC( invasionVector, vit )
+	{
+		CTFNavArea *invasionArea = invasionVector[ vit ];
+
+		if ( ( invasionArea->GetCenter() - GetCenter() ).IsLengthLessThan( safetyRange ) )
+		{
+			// too close to incoming enemy route to snipe
+			return false;
+		}			
+	}
+
+	return true;
+}
+
+bool CTFNavArea::IsValidForWanderingPopulation( void ) const
+{
+	if ( HasAttributeTF( TF_NAV_BLOCKED | TF_NAV_SPAWN_ROOM_RED | TF_NAV_SPAWN_ROOM_BLUE | TF_NAV_NO_SPAWNING | TF_NAV_RESCUE_CLOSET ) )
+		return false;
+		
+	return true;
+}
+
+/*void CTFNavArea::AddPotentiallyVisibleActor( CBaseCombatCharacter *who )
+{
+	if ( who == NULL )
+	{
+		return;
+	}
+
+	int team = who->GetTeamNumber();
+	if ( team < 0 || team >= TF_TEAM_COUNT )
+		return;
+
+	CTFBot *bot = ToTFBot( who );
+	if ( bot && bot->HasAttribute( CTFBot::IS_NPC ) )
+		return;
+
+	if ( m_potentiallyVisibleActor[ team ].Find( who ) == m_potentiallyVisibleActor[ team ].InvalidIndex() )
+	{
+		m_potentiallyVisibleActor[ team ].AddToTail( who );
+	}
+}*/
+
 float CTFNavArea::GetCombatIntensity( void ) const
 {
 	if ( !m_combatTimer.HasStarted() )
@@ -1975,6 +2482,133 @@ float CTFNavArea::GetCombatIntensity( void ) const
 	}
 
 	return actualIntensity;
+}
+
+bool CTFNavArea::IsInCombat( void ) const
+{
+	return GetCombatIntensity() > 0.01f;
+}
+
+inline float CTFNavArea::GetTravelDistanceToBombTarget( void ) const
+{
+	return m_distanceToBombTarget;
+}
+
+inline void CTFNavArea::AddToWanderCount( int count )
+{
+	m_wanderCount += count;
+}
+
+inline void CTFNavArea::SetWanderCount( int count )
+{
+	m_wanderCount = count;
+}
+
+inline int CTFNavArea::GetWanderCount( void ) const
+{
+	return m_wanderCount;
+}
+
+inline bool CTFNavArea::IsPotentiallyVisibleToActor( CBaseCombatCharacter *who ) const
+{
+	if ( who == NULL )
+		return false;
+
+	int team = who->GetTeamNumber();
+	if ( team < 0 || team >= TF_TEAM_COUNT )
+		return false;
+
+	return m_potentiallyVisibleActor[ team ].Find( who ) != m_potentiallyVisibleActor[ team ].InvalidIndex();
+}
+
+inline bool CTFNavArea::ForEachPotentiallyVisibleActor( CTFNavArea::IForEachPotentiallyVisibleActor &func, int team )
+{
+	if ( team == TEAM_ANY )
+	{
+		for( int t=0; t<TF_TEAM_COUNT; ++t )
+		{
+			for( int i=0; i<m_potentiallyVisibleActor[ t ].Count(); ++i )
+			{
+				CBaseCombatCharacter *who = m_potentiallyVisibleActor[ t ][ i ];
+
+				if ( who && func.Inspect( who ) == false )
+				{
+					return false;
+				}
+			}
+		}
+	}
+	else if ( team >= 0 && team < TF_TEAM_COUNT )
+	{
+		for( int i=0; i<m_potentiallyVisibleActor[ team ].Count(); ++i )
+		{
+			CBaseCombatCharacter *who = m_potentiallyVisibleActor[ team ][ i ];
+
+			if ( who && func.Inspect( who ) == false )
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+inline void CTFNavArea::RemovePotentiallyVisibleActor( CBaseCombatCharacter *who )
+{
+	for( int i=0; i<TF_TEAM_COUNT; ++i )
+		m_potentiallyVisibleActor[i].FindAndRemove( who );
+}
+
+inline void CTFNavArea::ClearAllPotentiallyVisibleActors( void )
+{
+	for( int i=0; i<TF_TEAM_COUNT; ++i )
+		m_potentiallyVisibleActor[i].RemoveAll();
+}
+
+inline float CTFNavArea::GetIncursionDistance( int team ) const
+{
+	if ( team < 0 || team >= TF_TEAM_COUNT )
+	{
+		return -1.0f;
+	}
+
+	return m_distanceFromSpawnRoom[ team ];
+}
+
+inline bool CTFNavArea::IsReachableByTeam( int team ) const
+{
+	if ( team < 0 || team >= TF_TEAM_COUNT )
+	{
+		return false;
+	}
+
+	return m_distanceFromSpawnRoom[ team ] >= 0.0f;
+}
+
+inline const CUtlVector< CTFNavArea * > &CTFNavArea::GetEnemyInvasionAreaVector( int myTeam ) const
+{
+	if ( myTeam < 0 || myTeam >= TF_TEAM_COUNT )
+	{
+		myTeam = 0;
+	}
+
+	return m_invasionAreaVector[ myTeam ];
+}
+
+inline void CTFNavArea::SetAttributeTF( int flags )
+{
+	m_attributeFlags |= flags;
+}
+
+inline void CTFNavArea::ClearAttributeTF( int flags )
+{
+	m_attributeFlags &= ~flags;
+}
+
+inline bool CTFNavArea::HasAttributeTF( int flags ) const
+{
+	return ( m_attributeFlags & flags ) ? true : false;
 }
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 class TerrorNavArea : public CNavArea
@@ -2033,6 +2667,32 @@ bool CNavArea::IsBlocked( int teamID, bool ignoreNavBlockers ) const
 	return m_isBlocked[ teamIdx ];
 }
 #endif
+
+bool CNavArea::IsContiguous( const CNavArea *other ) const
+{
+	//VPROF_BUDGET( "CNavArea::IsContiguous", "NextBot" );
+
+	// find which side it is connected on
+	int dir;
+	for( dir=0; dir<NUM_DIRECTIONS; ++dir )
+	{
+		if ( IsConnected( other, (NavDirType)dir ) )
+			break;
+	}
+
+	if ( dir == NUM_DIRECTIONS )
+		return false;
+
+	Vector myEdge;
+	float halfWidth;
+	ComputePortal( other, (NavDirType)dir, &myEdge, &halfWidth );
+
+	Vector otherEdge;
+	other->ComputePortal( this, OppositeDirection( (NavDirType)dir ), &otherEdge, &halfWidth );
+
+	// must use stepheight because rough terrain can have gaps/cracks between adjacent nav areas
+	return ( myEdge - otherEdge ).IsLengthLessThan( StepHeight );
+}
 
 void CNavArea::DecayDanger( void )
 {
@@ -2525,6 +3185,7 @@ void CNavArea::RemoveFromOpenList( void )
 unsigned int *CNavArea::m_masterMarker = NULL;
 CNavArea **CNavArea::m_openList = NULL;
 CNavArea **CNavArea::m_openListTail = NULL;
+uint32 *CNavArea::s_nCurrVisTestCounter = NULL;
 
 #if SOURCE_ENGINE == SE_TF2
 CNavArea *CNavMesh::GetNearestNavArea( const Vector &pos, bool anyZ, float maxDist, bool checkLOS, bool checkGround, int team ) const
@@ -3204,7 +3865,7 @@ class ILocomotion : public INextBotComponent
 public:
 	virtual ~ILocomotion() = 0;
 
-	virtual void Reset( void )
+	virtual void Reset( void ) override
 	{
 		INextBotComponent::Reset();
 
@@ -3417,10 +4078,10 @@ class IBody : public INextBotComponent
 {
 public:
 	IBody( INextBot *bot, bool reg ) : INextBotComponent( bot, reg ) { }
-	virtual ~IBody() {}
+	virtual ~IBody() override {}
 
-	virtual void Reset( void )  { INextBotComponent::Reset(); }			// reset to initial state
-	virtual void Update( void )  {  }										// update internal state
+	virtual void Reset( void ) override  { INextBotComponent::Reset(); }			// reset to initial state
+	virtual void Update( void ) override {  }										// update internal state
 
 	/**
 	 * Move the bot to a new position.
@@ -3735,6 +4396,8 @@ enum QueryResultType
 	ANSWER_UNDEFINED
 };
 
+static_assert(sizeof(QueryResultType) == sizeof(cell_t));
+
 #if SOURCE_ENGINE == SE_TF2
 class CKnownEntity;
 #endif
@@ -3744,37 +4407,37 @@ class IContextualQuery
 public:
 	virtual ~IContextualQuery() {}
 
-	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const { return ANSWER_UNDEFINED; }
-	virtual QueryResultType			ShouldHurry( const INextBot *me ) const { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			ShouldPickUp( INextBot *me, CBaseEntity *item ) { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			ShouldHurry( INextBot *me ) { return ANSWER_UNDEFINED; }
 #if SOURCE_ENGINE == SE_TF2
-	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const { return ANSWER_UNDEFINED; }
-	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			ShouldRetreat( INextBot *me ) { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			ShouldAttack( INextBot *me, CKnownEntity *them ) { return ANSWER_UNDEFINED; }
 #endif
-	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const { return ANSWER_UNDEFINED; }
+	virtual QueryResultType			IsHindrance( INextBot *me, CBaseEntity *blocker ) { return ANSWER_UNDEFINED; }
 
-	virtual Vector					SelectTargetPoint( const INextBot *me, CBaseCombatCharacter *subject ) const { return vec3_origin; }
+	virtual Vector					SelectTargetPoint( INextBot *me, CBaseCombatCharacter *subject ) { return vec3_origin; }
 
 	/**
 	 * Allow bot to approve of positions game movement tries to put him into.
 	 * This is most useful for bots derived from CBasePlayer that go through
 	 * the player movement system.
 	 */
-	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const { return ANSWER_UNDEFINED; }
+	virtual QueryResultType IsPositionAllowed( INextBot *me, const Vector &pos ) { return ANSWER_UNDEFINED; }
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual PathFollower * QueryCurrentPath( const INextBot * ) const { return NULL; }
+	virtual PathFollower * QueryCurrentPath( INextBot * ) { return NULL; }
 #endif
 	
 #if SOURCE_ENGINE == SE_TF2
-	virtual const CKnownEntity *	SelectMoreDangerousThreat( const INextBot *me, 
+	virtual CKnownEntity *	SelectMoreDangerousThreat( INextBot *me, 
 															   CBaseCombatCharacter *subject,
-															   const CKnownEntity *threat1, 
-															   const CKnownEntity *threat2 ) const { return NULL; }
+															   CKnownEntity *threat1, 
+															   CKnownEntity *threat2 ) { return NULL; }
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( const INextBot *me, 
+	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( INextBot *me, 
 															   CBaseCombatCharacter *subject,
 															   CBaseCombatCharacter *threat1, 
-															   CBaseCombatCharacter *threat2 ) const { return NULL; }
+															   CBaseCombatCharacter *threat2 ) { return NULL; }
 #endif
 };
 
@@ -3783,11 +4446,11 @@ class IIntention : public INextBotComponent, public IContextualQuery
 public:
 	IIntention( INextBot *bot, bool reg ) : INextBotComponent( bot, reg ) { }
 	
-	virtual QueryResultType			ShouldPickUp( const INextBot *me, CBaseEntity *item ) const
+	virtual QueryResultType			ShouldPickUp( INextBot *me, CBaseEntity *item ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3800,11 +4463,11 @@ public:
 		}	
 		return ANSWER_UNDEFINED;
 	}
-	virtual QueryResultType			ShouldHurry( const INextBot *me ) const
+	virtual QueryResultType			ShouldHurry( INextBot *me ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3818,11 +4481,11 @@ public:
 		return ANSWER_UNDEFINED;
 	}
 #if SOURCE_ENGINE == SE_TF2
-	virtual QueryResultType			ShouldRetreat( const INextBot *me ) const
+	virtual QueryResultType			ShouldRetreat( INextBot *me ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3835,11 +4498,11 @@ public:
 		}	
 		return ANSWER_UNDEFINED;
 	}
-	virtual QueryResultType			ShouldAttack( const INextBot *me, const CKnownEntity *them ) const
+	virtual QueryResultType			ShouldAttack( INextBot *me, CKnownEntity *them ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3853,11 +4516,11 @@ public:
 		return ANSWER_UNDEFINED;
 	}
 #endif
-	virtual QueryResultType			IsHindrance( const INextBot *me, CBaseEntity *blocker ) const
+	virtual QueryResultType			IsHindrance( INextBot *me, CBaseEntity *blocker ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3871,11 +4534,11 @@ public:
 		return ANSWER_UNDEFINED;
 	}
 
-	virtual Vector					SelectTargetPoint( const INextBot *me, CBaseCombatCharacter *subject ) const
+	virtual Vector					SelectTargetPoint( INextBot *me, CBaseCombatCharacter *subject ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3901,11 +4564,11 @@ public:
 	 * This is most useful for bots derived from CBasePlayer that go through
 	 * the player movement system.
 	 */
-	virtual QueryResultType IsPositionAllowed( const INextBot *me, const Vector &pos ) const
+	virtual QueryResultType IsPositionAllowed( INextBot *me, const Vector &pos ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3920,11 +4583,11 @@ public:
 	}
 
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual PathFollower * QueryCurrentPath( const INextBot *me ) const
+	virtual PathFollower * QueryCurrentPath( INextBot *me ) override
 	{
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -3941,10 +4604,10 @@ public:
 #endif
 	
 #if SOURCE_ENGINE == SE_TF2
-	virtual const CKnownEntity *	SelectMoreDangerousThreat( const INextBot *me, 
+	virtual CKnownEntity *	SelectMoreDangerousThreat( INextBot *me, 
 															   CBaseCombatCharacter *subject,
-															   const CKnownEntity *threat1, 
-															   const CKnownEntity *threat2 ) const
+															   CKnownEntity *threat1, 
+															   CKnownEntity *threat2 ) override
 	{
 		if ( !threat1 || threat1->IsObsolete() )
 		{
@@ -3960,11 +4623,11 @@ public:
 
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
-				const CKnownEntity *result = query->SelectMoreDangerousThreat( me, subject, threat1, threat2 );
+				 CKnownEntity *result = query->SelectMoreDangerousThreat( me, subject, threat1, threat2 );
 				if ( result )
 				{
 					return result;
@@ -3984,10 +4647,10 @@ public:
 		return threat2;
 	}
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( const INextBot *me, 
+	virtual CBaseCombatCharacter *	SelectMoreDangerousThreat( INextBot *me, 
 															   CBaseCombatCharacter *subject,
 															   CBaseCombatCharacter *threat1, 
-															   CBaseCombatCharacter *threat2 ) const
+															   CBaseCombatCharacter *threat2 ) override
 	{
 		if ( !threat1 )
 		{
@@ -4003,7 +4666,7 @@ public:
 
 		for ( INextBotEventResponder *sub = FirstContainedResponder(); sub; sub = NextContainedResponder( sub ) )
 		{
-			const IContextualQuery *query = dynamic_cast< const IContextualQuery * >( sub );
+			 IContextualQuery *query = dynamic_cast< IContextualQuery * >( sub );
 			if ( query )
 			{
 				// return the response of the first responder that gives a definitive answer
@@ -4998,6 +5661,14 @@ struct SPActionEntryFuncs
 	spfunc_t actemote = nullptr;
 	spfunc_t pickup = nullptr;
 
+	spfunc_t hurry = nullptr;
+	spfunc_t retreat = nullptr;
+	spfunc_t attack = nullptr;
+	spfunc_t hinder = nullptr;
+	spfunc_t targetpoint = nullptr;
+	spfunc_t posallow = nullptr;
+	spfunc_t dangertreat = nullptr;
+
 	void plugin_unloaded(IdentityToken_t *pId)
 	{
 		cleanup_func(onstart, pId);
@@ -5039,6 +5710,14 @@ struct SPActionEntryFuncs
 		cleanup_func(wepfired, pId);
 		cleanup_func(actemote, pId);
 		cleanup_func(pickup, pId);
+
+		cleanup_func(hurry, pId);
+		cleanup_func(retreat, pId);
+		cleanup_func(attack, pId);
+		cleanup_func(hinder, pId);
+		cleanup_func(targetpoint, pId);
+		cleanup_func(posallow, pId);
+		cleanup_func(dangertreat, pId);
 	}
 
 	using member_func_t = spfunc_t (this_t::*);
@@ -5119,6 +5798,20 @@ struct SPActionEntryFuncs
 			return &this_t::actemote;
 		} else if(name == "OnPickUp"sv) {
 			return &this_t::pickup;
+		} else if(name == "ShouldHurry"sv) {
+			return &this_t::hurry;
+		} else if(name == "ShouldRetreat"sv) {
+			return &this_t::retreat;
+		} else if(name == "ShouldAttack"sv) {
+			return &this_t::attack;
+		} else if(name == "IsHindrance"sv) {
+			return &this_t::hinder;
+		} else if(name == "SelectTargetPoint"sv) {
+			return &this_t::targetpoint;
+		} else if(name == "IsPositionAllowed"sv) {
+			return &this_t::posallow;
+		} else if(name == "SelectMoreDangerousThreat"sv) {
+			return &this_t::dangertreat;
 		}
 		
 		return nullptr;
@@ -5400,7 +6093,7 @@ class SPAction : public Action<SPActor>
 public:
 	using BaseClass = Action<SPActor>;
 
-	virtual const char *GetName( void ) const { return name.c_str(); }
+	virtual const char *GetName( void ) const override { return name.c_str(); }
 
 	static void initvars_base_impl(cell_t *&vars, SPActionResult &result)
 	{
@@ -5420,7 +6113,7 @@ public:
 		*vars = (cell_t)result.m_priority;
 	}
 
-	static void varstoresult_base_impl(const cell_t *&vars, SPActionResult &result)
+	static void varstoresult_base_impl(const cell_t *&vars, SPActionResult &result, IPluginFunction *func)
 	{
 		result.m_action = (SPAction *)*vars;
 		++vars;
@@ -5431,11 +6124,22 @@ public:
 		vars += RESVARS_REASON_SIZE_IN_CELL;
 
 		result.set_reason(std::move(reason));
+
+		if(result.m_action == nullptr) {
+			switch(result.m_type) {
+				case CHANGE_TO:
+				func->GetParentContext()->BlamePluginError(func, "returned BEHAVIOR_CHANGE_TO but new action is null");
+				break;
+				case SUSPEND_FOR:
+				func->GetParentContext()->BlamePluginError(func, "returned BEHAVIOR_SUSPEND_FOR but new action is null");
+				break;
+			}
+		}
 	}
 
-	static void varstoresult_event_impl(const cell_t *&vars, SPEventDesiredResult &result)
+	static void varstoresult_event_impl(const cell_t *&vars, SPEventDesiredResult &result, IPluginFunction *func)
 	{
-		varstoresult_base_impl((const cell_t *&)vars, (SPActionResult &)result);
+		varstoresult_base_impl((const cell_t *&)vars, (SPActionResult &)result, func);
 
 		result.m_priority = (EventResultPriorityType)*vars;
 	}
@@ -5452,19 +6156,19 @@ public:
 		initvars_event_impl((cell_t *&)vars_tmp, (SPEventDesiredResult &)result);
 	}
 
-	static void varstoresult_base(const cell_t *vars, SPActionResult &result)
+	static void varstoresult_base(const cell_t *vars, SPActionResult &result, IPluginFunction *func)
 	{
 		const cell_t *vars_tmp{vars};
-		varstoresult_base_impl((const cell_t *&)vars_tmp, (SPActionResult &)result);
+		varstoresult_base_impl((const cell_t *&)vars_tmp, (SPActionResult &)result, func);
 	}
 
-	static void varstoresult_event(const cell_t *vars, SPEventDesiredResult &result)
+	static void varstoresult_event(const cell_t *vars, SPEventDesiredResult &result, IPluginFunction *func)
 	{
 		const cell_t *vars_tmp{vars};
-		varstoresult_event_impl((const cell_t *&)vars_tmp, (SPEventDesiredResult &)result);
+		varstoresult_event_impl((const cell_t *&)vars_tmp, (SPEventDesiredResult &)result, func);
 	}
 
-	virtual ~SPAction()
+	virtual ~SPAction() override
 	{
 		if(entry) {
 			entry->on_destroyed(this);
@@ -5502,7 +6206,7 @@ public:
 		return *tmp;
 	}
 
-	virtual BaseClass *InitialContainedAction(SPActor *me)
+	virtual BaseClass *InitialContainedAction(SPActor *me) override
 	{
 		if(!entry) {
 			return nullptr;
@@ -5523,7 +6227,7 @@ public:
 		return act;
 	}
 	
-	virtual SPActionResult::BaseClass OnStart(SPActor *me, BaseClass *priorAction)
+	virtual SPActionResult::BaseClass OnStart(SPActor *me, BaseClass *priorAction) override
 	{
 		if(!entry) {
 			return Done("missing entry");
@@ -5546,12 +6250,12 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_base(resvars, result);
+		varstoresult_base(resvars, result, func);
 		
 		return result;
 	}
 	
-	virtual SPActionResult::BaseClass Update(SPActor *me, float interval)
+	virtual SPActionResult::BaseClass Update(SPActor *me, float interval) override
 	{
 		if(!entry) {
 			return Done("missing entry");
@@ -5574,12 +6278,12 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_base(resvars, result);
+		varstoresult_base(resvars, result, func);
 		
 		return result;
 	}
 	
-	virtual SPActionResult::BaseClass OnSuspend(SPActor *me, BaseClass *interruptingAction)
+	virtual SPActionResult::BaseClass OnSuspend(SPActor *me, BaseClass *interruptingAction) override
 	{
 		if(!entry) {
 			return Done("missing entry");
@@ -5602,12 +6306,12 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_base(resvars, result);
+		varstoresult_base(resvars, result, func);
 		
 		return result;
 	}
 	
-	virtual SPActionResult::BaseClass OnResume(SPActor *me, BaseClass *interruptingAction)
+	virtual SPActionResult::BaseClass OnResume(SPActor *me, BaseClass *interruptingAction) override
 	{
 		if(!entry) {
 			return Done("missing entry");
@@ -5630,12 +6334,12 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_base(resvars, result);
+		varstoresult_base(resvars, result, func);
 		
 		return result;
 	}
 	
-	virtual void OnEnd(SPActor *me, BaseClass *nextAction)
+	virtual void OnEnd(SPActor *me, BaseClass *nextAction) override
 	{
 		if(!entry) {
 			return;
@@ -5654,7 +6358,7 @@ public:
 		func->Execute(nullptr);
 	}
 	
-	virtual SPEventDesiredResult::BaseClass OnLeaveGround(SPActor *me, CBaseEntity *ground )
+	virtual SPEventDesiredResult::BaseClass OnLeaveGround(SPActor *me, CBaseEntity *ground ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5677,11 +6381,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnLandOnGround(SPActor *me, CBaseEntity *ground )
+	virtual SPEventDesiredResult::BaseClass OnLandOnGround(SPActor *me, CBaseEntity *ground ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5704,11 +6408,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnContact(SPActor *me, CBaseEntity *other, CGameTrace *trace = NULL )
+	virtual SPEventDesiredResult::BaseClass OnContact(SPActor *me, CBaseEntity *other, CGameTrace *trace = NULL ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5731,11 +6435,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnMoveToSuccess(SPActor *me, const Path *path )
+	virtual SPEventDesiredResult::BaseClass OnMoveToSuccess(SPActor *me, const Path *path ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5757,11 +6461,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnMoveToFailure(SPActor *me, const Path *path, MoveToFailureType reason )
+	virtual SPEventDesiredResult::BaseClass OnMoveToFailure(SPActor *me, const Path *path, MoveToFailureType reason ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5784,11 +6488,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnStuck(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnStuck(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5810,11 +6514,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnUnStuck(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnUnStuck(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5836,12 +6540,15 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnPostureChanged(SPActor *me )											{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnAnimationActivityComplete(SPActor *me, int activity )
+	virtual SPEventDesiredResult::BaseClass OnPostureChanged(SPActor *me ) override
+	{
+		return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry");
+	}
+	virtual SPEventDesiredResult::BaseClass OnAnimationActivityComplete(SPActor *me, int activity ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5864,11 +6571,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnAnimationActivityInterrupted(SPActor *me, int activity )
+	virtual SPEventDesiredResult::BaseClass OnAnimationActivityInterrupted(SPActor *me, int activity ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5891,11 +6598,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnAnimationEvent(SPActor *me, animevent_t *event )
+	virtual SPEventDesiredResult::BaseClass OnAnimationEvent(SPActor *me, animevent_t *event ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5922,11 +6629,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnIgnite(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnIgnite(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5948,11 +6655,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnInjured(SPActor *me, const CTakeDamageInfo &info )
+	virtual SPEventDesiredResult::BaseClass OnInjured(SPActor *me, const CTakeDamageInfo &info ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -5988,11 +6695,11 @@ public:
 		func->Execute((cell_t *)&result.m_type);
 		delete[] spdmginfo;
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnKilled(SPActor *me, const CTakeDamageInfo &info )
+	virtual SPEventDesiredResult::BaseClass OnKilled(SPActor *me, const CTakeDamageInfo &info ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6028,11 +6735,11 @@ public:
 		func->Execute((cell_t *)&result.m_type);
 		delete[] spdmginfo;
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnOtherKilled(SPActor *me, CBaseCombatCharacter *victim, const CTakeDamageInfo &info )
+	virtual SPEventDesiredResult::BaseClass OnOtherKilled(SPActor *me, CBaseCombatCharacter *victim, const CTakeDamageInfo &info ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6069,11 +6776,11 @@ public:
 		func->Execute((cell_t *)&result.m_type);
 		delete[] spdmginfo;
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnSight(SPActor *me, CBaseEntity *subject )
+	virtual SPEventDesiredResult::BaseClass OnSight(SPActor *me, CBaseEntity *subject ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6096,11 +6803,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnLostSight(SPActor *me, CBaseEntity *subject )
+	virtual SPEventDesiredResult::BaseClass OnLostSight(SPActor *me, CBaseEntity *subject ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6123,11 +6830,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnSound(SPActor *me, CBaseEntity *source, const Vector &pos, KeyValues *keys )
+	virtual SPEventDesiredResult::BaseClass OnSound(SPActor *me, CBaseEntity *source, const Vector &pos, KeyValues *keys ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6152,11 +6859,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnSpokeConcept(SPActor *me, CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response )
+	virtual SPEventDesiredResult::BaseClass OnSpokeConcept(SPActor *me, CBaseCombatCharacter *who, AIConcept_t concept, AI_Response *response ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6164,7 +6871,7 @@ public:
 
 		return TryContinue();
 	}
-	virtual SPEventDesiredResult::BaseClass OnWeaponFired(SPActor *me, CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon )
+	virtual SPEventDesiredResult::BaseClass OnWeaponFired(SPActor *me, CBaseCombatCharacter *whoFired, CBaseCombatWeapon *weapon ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6188,12 +6895,15 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnNavAreaChanged(SPActor *me, CNavArea *newArea, CNavArea *oldArea )		{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnModelChanged(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnNavAreaChanged(SPActor *me, CNavArea *newArea, CNavArea *oldArea ) override
+	{
+		return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry");
+	}
+	virtual SPEventDesiredResult::BaseClass OnModelChanged(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6215,11 +6925,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnPickUp(SPActor *me, CBaseEntity *item, CBaseCombatCharacter *giver )
+	virtual SPEventDesiredResult::BaseClass OnPickUp(SPActor *me, CBaseEntity *item, CBaseCombatCharacter *giver ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6242,11 +6952,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnDrop(SPActor *me, CBaseEntity *item )
+	virtual SPEventDesiredResult::BaseClass OnDrop(SPActor *me, CBaseEntity *item ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6269,11 +6979,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnActorEmoted(SPActor *me, CBaseCombatCharacter *emoter, int emote )
+	virtual SPEventDesiredResult::BaseClass OnActorEmoted(SPActor *me, CBaseCombatCharacter *emoter, int emote ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6297,20 +7007,20 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
 
-	virtual SPEventDesiredResult::BaseClass OnCommandAttack(SPActor *me, CBaseEntity *victim )						{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnCommandApproach(SPActor *me, const Vector &pos, float range )			{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnCommandApproach(SPActor *me, CBaseEntity *goal )						{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnCommandRetreat(SPActor *me, CBaseEntity *threat, float range )			{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnCommandPause(SPActor *me, float duration )								{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnCommandResume(SPActor *me )											{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
-	virtual SPEventDesiredResult::BaseClass OnCommandString(SPActor *me, const char *command )						{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandAttack(SPActor *me, CBaseEntity *victim ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandApproach(SPActor *me, const Vector &pos, float range ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandApproach(SPActor *me, CBaseEntity *goal ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandRetreat(SPActor *me, CBaseEntity *threat, float range ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandPause(SPActor *me, float duration ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandResume(SPActor *me ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandString(SPActor *me, const char *command ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
 
-	virtual SPEventDesiredResult::BaseClass OnShoved(SPActor *me, CBaseEntity *pusher )
+	virtual SPEventDesiredResult::BaseClass OnShoved(SPActor *me, CBaseEntity *pusher ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6333,11 +7043,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnBlinded(SPActor *me, CBaseEntity *blinder )
+	virtual SPEventDesiredResult::BaseClass OnBlinded(SPActor *me, CBaseEntity *blinder ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6360,11 +7070,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnTerritoryContested(SPActor *me, int territoryID )
+	virtual SPEventDesiredResult::BaseClass OnTerritoryContested(SPActor *me, int territoryID ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6387,11 +7097,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnTerritoryCaptured(SPActor *me, int territoryID )
+	virtual SPEventDesiredResult::BaseClass OnTerritoryCaptured(SPActor *me, int territoryID ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6414,11 +7124,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnTerritoryLost(SPActor *me, int territoryID )
+	virtual SPEventDesiredResult::BaseClass OnTerritoryLost(SPActor *me, int territoryID ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6441,11 +7151,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnWin(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnWin(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6467,11 +7177,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnLose(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnLose(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6493,12 +7203,12 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
 
-	virtual SPEventDesiredResult::BaseClass OnThreatChanged(SPActor *me, CBaseEntity * territoryID )
+	virtual SPEventDesiredResult::BaseClass OnThreatChanged(SPActor *me, CBaseEntity * territoryID ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6521,11 +7231,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnEnteredSpit(SPActor *me )
+	virtual SPEventDesiredResult::BaseClass OnEnteredSpit(SPActor *me ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6547,11 +7257,11 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnHitByVomitJar(SPActor *me, CBaseEntity * territoryID )
+	virtual SPEventDesiredResult::BaseClass OnHitByVomitJar(SPActor *me, CBaseEntity * territoryID ) override
 	{
 		if(!entry) {
 			return TryDone(RESULT_CRITICAL, "missing entry");
@@ -6574,11 +7284,178 @@ public:
 		func->PushArray(resvars, RESVARS_SIZE_IN_CELL, SM_PARAM_COPYBACK);
 		func->Execute((cell_t *)&result.m_type);
 		
-		varstoresult_event(resvars, result);
+		varstoresult_event(resvars, result, func);
 		
 		return result;
 	}
-	virtual SPEventDesiredResult::BaseClass OnCommandAssault(SPActor *me )														{ return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+	virtual SPEventDesiredResult::BaseClass OnCommandAssault(SPActor *me ) override { return entry ? TryContinue() : TryDone(RESULT_CRITICAL, "missing entry"); }
+
+	virtual QueryResultType ShouldPickUp(INextBot *me, CBaseEntity *item) override
+	{
+		if(!entry) {
+			return ANSWER_NO;
+		}
+
+		return ANSWER_UNDEFINED;
+	}
+
+	virtual QueryResultType ShouldHurry(INextBot *me) override
+	{
+		if(!entry) {
+			return ANSWER_NO;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::hurry);
+		
+		if(!func) {
+			return ANSWER_UNDEFINED;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		QueryResultType res;
+		func->Execute((cell_t *)&res);
+
+		return res;
+	}
+
+	virtual QueryResultType ShouldRetreat(INextBot *me) override
+	{
+		if(!entry) {
+			return ANSWER_YES;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::retreat);
+		
+		if(!func) {
+			return ANSWER_UNDEFINED;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		QueryResultType res;
+		func->Execute((cell_t *)&res);
+
+		return res;
+	}
+
+	virtual QueryResultType ShouldAttack(INextBot *me, CKnownEntity *them) override
+	{
+		if(!entry) {
+			return ANSWER_NO;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::attack);
+		
+		if(!func) {
+			return ANSWER_UNDEFINED;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		func->PushCell((cell_t)them);
+		QueryResultType res;
+		func->Execute((cell_t *)&res);
+
+		return res;
+	}
+
+	virtual QueryResultType IsHindrance(INextBot *me, CBaseEntity *blocker) override
+	{
+		if(!entry) {
+			return ANSWER_YES;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::hinder);
+		
+		if(!func) {
+			return ANSWER_UNDEFINED;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		func->PushCell(gamehelpers->EntityToBCompatRef(blocker));
+		QueryResultType res;
+		func->Execute((cell_t *)&res);
+
+		return res;
+	}
+
+	virtual Vector SelectTargetPoint(INextBot *me, CBaseCombatCharacter *subject) override
+	{
+		if(!entry) {
+			return vec3_origin;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::targetpoint);
+		
+		if(!func) {
+			return vec3_origin;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
+		cell_t cvec[3]{0};
+		func->PushArray(cvec, 3, SM_PARAM_COPYBACK);
+		func->Execute(nullptr);
+
+		Vector res{sp_ctof(cvec[0]),sp_ctof(cvec[1]),sp_ctof(cvec[2])};
+
+		return res;
+	}
+
+	virtual QueryResultType IsPositionAllowed(INextBot *me, const Vector &pos) override
+	{
+		if(!entry) {
+			return ANSWER_NO;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::posallow);
+		
+		if(!func) {
+			return ANSWER_UNDEFINED;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		cell_t cvec[3]{sp_ftoc(pos.x),sp_ftoc(pos.y),sp_ftoc(pos.z)};
+		func->PushArray(cvec, 3, 0);
+		QueryResultType res;
+		func->Execute((cell_t *)&res);
+
+		return res;
+	}
+
+	virtual CKnownEntity *SelectMoreDangerousThreat(INextBot *me, CBaseCombatCharacter *subject, CKnownEntity *threat1, CKnownEntity *threat2) override
+	{
+		if(!entry) {
+			return nullptr;
+		}
+
+		IPluginFunction *func = get_entry_func(&SPActionEntryFuncs::dangertreat);
+		
+		if(!func) {
+			return nullptr;
+		}
+
+		func->PushCell((cell_t)this);
+		func->PushCell((cell_t)me);
+		func->PushCell(gamehelpers->EntityToBCompatRef(me->GetEntity()));
+		func->PushCell(gamehelpers->EntityToBCompatRef(subject));
+		func->PushCell((cell_t)threat1);
+		func->PushCell((cell_t)threat2);
+		CKnownEntity *res;
+		func->Execute((cell_t *)&res);
+
+		return res;
+	}
 };
 
 SPAction *SPActionEntry::create()
@@ -6658,7 +7535,6 @@ public:
 		IPluginNextBotComponent::plugin_unloaded(pId);
 		
 		cleanup_func(initact, pId);
-		cleanup_func(ishinder, pId);
 	}
 	
 	using member_func_t = spfunc_t (this_t::*);
@@ -6667,8 +7543,6 @@ public:
 	{
 		if(name == "InitialContainedAction"sv) {
 			return &this_t::initact;
-		} else if(name == "IsHindrance"sv) {
-			return &this_t::ishinder;
 		}
 
 		return nullptr;
@@ -6700,31 +7574,6 @@ public:
 		return act;
 	}
 	
-	virtual QueryResultType IsHindrance( const INextBot *me, CBaseEntity *blocker ) const override
-	{
-		QueryResultType result = IIntention::IsHindrance(me, blocker);
-		if(result != ANSWER_UNDEFINED) {
-			return result;
-		}
-		
-		if(ishinder) {
-			ishinder->PushCell((cell_t)this);
-			ishinder->PushCell((cell_t)me);
-			if(blocker != IS_ANY_HINDRANCE_POSSIBLE) {
-				ishinder->PushCell(gamehelpers->EntityToBCompatRef(blocker));
-			} else {
-				ishinder->PushCell((cell_t)IS_ANY_HINDRANCE_POSSIBLE);
-			}
-			QueryResultType res = ANSWER_UNDEFINED;
-			ishinder->Execute((cell_t *)&res);
-			if(res != ANSWER_UNDEFINED) {
-				return res;
-			}
-		}
-		
-		return ANSWER_UNDEFINED;
-	}
-	
 	virtual void Reset( void ) override
 	{
 		IIntention::Reset();
@@ -6745,7 +7594,12 @@ public:
 			m_behavior->Update( (SPActor *)GetBot()->GetEntity() , GetUpdateInterval() );
 		}
 	}
-	
+
+	QueryResultType IsPositionAllowed( INextBot *meBot, const Vector &pos ) override
+	{
+		return ANSWER_YES;
+	}
+
 	virtual INextBotEventResponder *FirstContainedResponder( void ) const override { return m_behavior; }
 	virtual INextBotEventResponder *NextContainedResponder( INextBotEventResponder *current ) const override { return NULL; }
 	
@@ -6753,7 +7607,6 @@ public:
 	std::string name{};
 	
 	spfunc_t initact = nullptr;
-	spfunc_t ishinder = nullptr;
 
 	bool hooked_remove{false};
 };
@@ -7078,6 +7931,26 @@ bool CTraceFilterSkipClassname::ShouldHitEntity( IHandleEntity *pHandleEntity, i
 bool CTraceFilterSimple::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
 {
 	return call_mfunc<bool, CTraceFilterSimple, IHandleEntity *, int>(this, CTraceFilterSimpleShouldHitEntity, pHandleEntity, contentsMask);
+}
+
+CTraceFilterChain::CTraceFilterChain( ITraceFilter *pTraceFilter1, ITraceFilter *pTraceFilter2 )
+{
+	m_pTraceFilter1 = pTraceFilter1;
+	m_pTraceFilter2 = pTraceFilter2;
+}
+
+bool CTraceFilterChain::ShouldHitEntity( IHandleEntity *pHandleEntity, int contentsMask )
+{
+	bool bResult1 = true;
+	bool bResult2 = true;
+
+	if ( m_pTraceFilter1 )
+		bResult1 = m_pTraceFilter1->ShouldHitEntity( pHandleEntity, contentsMask );
+
+	if ( m_pTraceFilter2 )
+		bResult2 = m_pTraceFilter2->ShouldHitEntity( pHandleEntity, contentsMask );
+
+	return ( bResult1 && bResult2 );
 }
 
 class NextBotTraceFilterIgnoreActors : public CTraceFilterSimple
@@ -7787,7 +8660,7 @@ public:
 		m_me = me;
 	}
 
-	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask )
+	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask ) override
 	{
 		if ( CTraceFilterSimple::ShouldHitEntity( pServerEntity, contentsMask ) )
 		{
@@ -7815,7 +8688,7 @@ public:
 		m_when = when;
 	}
 
-	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask )
+	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask ) override
 	{
 		CBaseEntity *entity = EntityFromEntityHandle( pServerEntity );
 
@@ -9063,7 +9936,7 @@ public:
 		CBaseCombatCharacter *pEntity = bot->GetEntity();
 
 		AngleVectors(pEntity->EyeAngles(), &viewVector);
-		eyePos = pEntity->WorldSpaceCenter();
+		eyePos = pEntity->EyePosition_nonvirtual();
 
 		if(last_activity != ACT_INVALID && !IsActivity(last_activity)) {
 			if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
@@ -9079,11 +9952,13 @@ public:
 			if(pEntity->GetSequeceFinished()) {
 				Activity act = current_act[1].act;
 
-				if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-					DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
-				}
+				if(act != ACT_INVALID) {
+					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
+					}
 
-				bot->OnAnimationActivityComplete(act);
+					bot->OnAnimationActivityComplete(act);
+				}
 
 				if(act == ACT_TRANSITION && current_posture != desired_posture) {
 					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
@@ -9120,14 +9995,13 @@ public:
 			if(pEntity->GetSequeceFinished()) {
 				Activity act = current_act[0].act;
 
-				if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-					DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
+				if(act != ACT_INVALID) {
+					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
+					}
+
+					bot->OnAnimationActivityComplete(act);
 				}
-
-				bot->OnAnimationActivityComplete(act);
-
-				current_act[0].seq = SelectAnimationSequence(current_act[0].real_act);
-				pEntity->ResetSequence(current_act[0].seq);
 			}
 		}
 
@@ -9966,12 +10840,12 @@ public:
 	{
 	}
 
-	virtual TraceType_t	GetTraceType() const
+	virtual TraceType_t	GetTraceType() const override
 	{
 		return TRACE_ENTITIES_ONLY;
 	}
 
-	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask )
+	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask ) override
 	{
 		if ( CTraceFilterSimple::ShouldHitEntity( pServerEntity, contentsMask ) )
 		{
@@ -11888,6 +12762,13 @@ cell_t CTFNavAreaInCombatget(IPluginContext *pContext, const cell_t *params)
 	return area->IsInCombat();
 }
 
+cell_t CTFNavAreaOnCombat(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	area->OnCombat();
+	return 0;
+}
+
 cell_t CTFNavAreaCombatIntensityget(IPluginContext *pContext, const cell_t *params)
 {
 	CTFNavArea *area = (CTFNavArea *)params[1];
@@ -11899,6 +12780,97 @@ cell_t CTFNavAreaHasAttributeTF(IPluginContext *pContext, const cell_t *params)
 	CTFNavArea *area = (CTFNavArea *)params[1];
 	return area->HasAttributeTF((int)params[2]);
 }
+
+cell_t CTFNavAreaClearAttributeTF(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	area->ClearAttributeTF((int)params[2]);
+	return 0;
+}
+
+cell_t CTFNavAreaSetAttributeTF(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	area->SetAttributeTF((int)params[2]);
+	return 0;
+}
+
+cell_t CTFNavAreaValidForWanderingPopulationget(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return area->IsValidForWanderingPopulation();
+}
+
+cell_t CTFNavAreaTravelDistanceToBombTargetget(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return sp_ftoc(area->GetTravelDistanceToBombTarget());
+}
+
+cell_t CTFNavAreaWanderCountget(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return area->GetWanderCount();
+}
+
+cell_t CTFNavAreaWanderCountset(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	area->SetWanderCount(params[2]);
+	return 0;
+}
+
+cell_t CTFNavAreaAddToWanderCount(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	area->AddToWanderCount(params[2]);
+	return 0;
+}
+
+cell_t CTFNavAreaGetIncursionDistance(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return sp_ftoc(area->GetIncursionDistance((int)params[2]));
+}
+
+cell_t CTFNavAreaGetNextIncursionArea(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return (cell_t)area->GetNextIncursionArea((int)params[2]);
+}
+
+cell_t CTFNavAreaIsAwayFromInvasionAreas(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return area->IsAwayFromInvasionAreas((int)params[2], sp_ctof(params[3]));
+}
+
+cell_t CTFNavAreaIsReachableByTeam(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+	return area->IsReachableByTeam((int)params[2]);
+}
+
+cell_t CTFNavAreaIsPotentiallyVisibleToActor(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return area->IsPotentiallyVisibleToActor(pCombat);
+}
+
+cell_t CTFNavAreaGetEnemyInvasionAreaVector(IPluginContext *pContext, const cell_t *params);
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 cell_t TerrorNavAreaGetSpawnAttributes(IPluginContext *pContext, const cell_t *params)
 {
@@ -12111,10 +13083,54 @@ cell_t CNavAreaHasAvoidanceObstacle(IPluginContext *pContext, const cell_t *para
 	return area->HasAvoidanceObstacle(sp_ctof(params[2]));
 }
 
+cell_t CNavAreaIsEntirelyVisible(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+
+	cell_t *value = nullptr;
+	pContext->LocalToPhysAddr(params[2], &value);
+	Vector goal = Vector(sp_ctof(value[0]), sp_ctof(value[1]), sp_ctof(value[2]));
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+
+	return area->IsEntirelyVisible(goal, pSubject);
+}
+
+cell_t CNavAreaIsPartiallyVisible(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+
+	cell_t *value = nullptr;
+	pContext->LocalToPhysAddr(params[2], &value);
+	Vector goal = Vector(sp_ctof(value[0]), sp_ctof(value[1]), sp_ctof(value[2]));
+
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+
+	return area->IsPartiallyVisible(goal, pSubject);
+}
+
+cell_t CNavAreaIsPotentiallyVisible(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsPotentiallyVisible((CNavArea *)params[2]);
+}
+
 cell_t CNavAreaIsPotentiallyVisibleToTeam(IPluginContext *pContext, const cell_t *params)
 {
 	CNavArea *area = (CNavArea *)params[1];
 	return area->IsPotentiallyVisibleToTeam(params[2]);
+}
+
+cell_t CNavAreaIsCompletelyVisible(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsCompletelyVisible((CNavArea *)params[2]);
+}
+
+cell_t CNavAreaIsCompletelyVisibleToTeam(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *area = (CNavArea *)params[1];
+	return area->IsCompletelyVisibleToTeam(params[2]);
 }
 
 cell_t CNavAreaGetZ(IPluginContext *pContext, const cell_t *params)
@@ -12288,6 +13304,12 @@ cell_t INextBotBodyInterfaceget(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *bot = (INextBot *)params[1];
 	return (cell_t)bot->GetBodyInterface();
+}
+
+cell_t INextBotIntentionInterfaceget(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	return (cell_t)bot->GetIntentionInterface();
 }
 
 cell_t INextBotCurrentPathget(IPluginContext *pContext, const cell_t *params)
@@ -12479,6 +13501,225 @@ cell_t INextBotGetRangeSquaredToVector(IPluginContext *pContext, const cell_t *p
 	return sp_ftoc(bot->GetRangeSquaredTo(vec));
 }
 
+cell_t INextBotGetDistanceBetweenEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return sp_ftoc((bot->GetPosition() - pEntity->GetAbsOrigin()).Length());
+}
+
+cell_t INextBotGetDistanceBetweenVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return sp_ftoc((bot->GetPosition() - vec).Length());
+}
+
+cell_t INextBotIsDistanceBetweenLessThanEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return (bot->GetPosition() - pEntity->GetAbsOrigin()).IsLengthLessThan(sp_ctof(params[3]));
+}
+
+cell_t INextBotIsDistanceBetweenLessThanVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return (bot->GetPosition() - vec).IsLengthLessThan(sp_ctof(params[3]));
+}
+
+cell_t INextBotIsDistanceBetweenGreaterThanEntity(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+	
+	return (bot->GetPosition() - pEntity->GetAbsOrigin()).IsLengthGreaterThan(sp_ctof(params[3]));
+}
+
+cell_t INextBotIsDistanceBetweenGreaterThanVector(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+	
+	return (bot->GetPosition() - vec).IsLengthGreaterThan(sp_ctof(params[3]));
+}
+
+cell_t INextBotIsEntityBetweenTargetAndSelf(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+	
+	CBaseEntity *other = gamehelpers->ReferenceToEntity(params[2]);
+	if(!other)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	CBaseEntity *target = gamehelpers->ReferenceToEntity(params[3]);
+	if(!target)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+	
+	Vector toTarget = target->GetAbsOrigin() - bot->GetPosition();
+	float rangeToTarget = toTarget.NormalizeInPlace();
+
+	Vector toOther = other->GetAbsOrigin() - bot->GetPosition();
+	float rangeToOther = toOther.NormalizeInPlace();
+
+	return rangeToOther < rangeToTarget && DotProduct( toTarget, toOther ) > 0.7071f;
+}
+
+class CTraceFilterIgnoreFriendlyCombatItems : public CTraceFilterSimple
+{
+public:
+	DECLARE_CLASS( CTraceFilterIgnoreFriendlyCombatItems, CTraceFilterSimple );
+
+	CTraceFilterIgnoreFriendlyCombatItems( const IHandleEntity *passentity, int collisionGroup, int iIgnoreTeam, bool bIsProjectile = false )
+		: CTraceFilterSimple( passentity, collisionGroup ), m_iIgnoreTeam( iIgnoreTeam )
+	{
+		m_bCallerIsProjectile = bIsProjectile;
+	}
+
+	virtual bool ShouldHitEntity( IHandleEntity *pServerEntity, int contentsMask )
+	{
+		CBaseEntity *pEntity = EntityFromEntityHandle( pServerEntity );
+
+// 		if ( ( pEntity->MyCombatCharacterPointer() || pEntity->MyCombatWeaponPointer() ) && pEntity->GetTeamNumber() == m_iIgnoreTeam )
+// 			return false;
+// 
+// 		if ( pEntity->IsPlayer() && pEntity->GetTeamNumber() == m_iIgnoreTeam )
+// 			return false;
+
+		if ( pEntity->IsCombatItem() )
+		{
+			if ( pEntity->GetTeamNumber() == m_iIgnoreTeam )
+				return false;
+
+			// If source is a enemy projectile, be explicit, otherwise we fail a "IsTransparent" test downstream
+			if ( m_bCallerIsProjectile )
+				return true;
+		}
+
+		return BaseClass::ShouldHitEntity( pServerEntity, contentsMask );
+	}
+
+	int m_iIgnoreTeam;
+	bool m_bCallerIsProjectile;
+};
+
+bool IsLineOfFireClear( INextBot *bot, const Vector &from, const Vector &to )
+{
+	CBaseEntity *pEntity = bot->GetEntity();
+
+	trace_t trace;
+	NextBotTraceFilterIgnoreActors botFilter( NULL, COLLISION_GROUP_NONE );
+	CTraceFilterIgnoreFriendlyCombatItems ignoreFriendlyCombatFilter( pEntity, COLLISION_GROUP_NONE, pEntity->GetTeamNumber() );
+	CTraceFilterChain filter( &botFilter, &ignoreFriendlyCombatFilter );
+
+	UTIL_TraceLine( from, to, MASK_SOLID_BRUSHONLY, &filter, &trace );
+
+	return !trace.DidHit();
+}
+
+bool IsLineOfFireClear( INextBot *bot, const Vector &from, CBaseEntity *who )
+{
+	CBaseEntity *pEntity = bot->GetEntity();
+
+	trace_t trace;
+	NextBotTraceFilterIgnoreActors botFilter( NULL, COLLISION_GROUP_NONE );
+	CTraceFilterIgnoreFriendlyCombatItems ignoreFriendlyCombatFilter( pEntity, COLLISION_GROUP_NONE, pEntity->GetTeamNumber() );
+	CTraceFilterChain filter( &botFilter, &ignoreFriendlyCombatFilter );
+
+	UTIL_TraceLine( from, who->WorldSpaceCenter(), MASK_SOLID_BRUSHONLY, &filter, &trace );
+
+	return !trace.DidHit() || trace.m_pEnt == who;
+}
+
+cell_t INextBotIsLineOfFireClearVec(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+
+	return ::IsLineOfFireClear( bot, bot->GetEntity()->EyePosition(), vec );
+}
+
+cell_t INextBotIsLineOfFireClearEnt(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	return ::IsLineOfFireClear( bot, bot->GetEntity()->EyePosition(), pEntity );
+}
+
+cell_t INextBotIsLineOfFireClearVecEx(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec1( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+
+	addr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	Vector vec2( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+
+	return ::IsLineOfFireClear( bot, vec1, vec2 );
+}
+
+cell_t INextBotIsLineOfFireClearEntEx(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	Vector vec( sp_ctof(addr[0]), sp_ctof(addr[1]), sp_ctof(addr[2]) );
+
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+
+	return ::IsLineOfFireClear( bot, vec, pEntity );
+}
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 cell_t INextBotGet2DRangeToEntity(IPluginContext *pContext, const cell_t *params)
 {
@@ -12554,6 +13795,35 @@ cell_t INextBotEndUpdate(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *bot = (INextBot *)params[1];
 	bot->EndUpdate();
+	return 0;
+}
+
+cell_t INextBotDoThink(IPluginContext *pContext, const cell_t *params)
+{
+	INextBot *bot = (INextBot *)params[1];
+
+	CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(params[2]);
+	if(!pEntity)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[2]);
+	}
+
+	CBaseCombatCharacter *pCombat = pEntity->MyCombatCharacterPointer();
+
+	if(bot->BeginUpdate()) {
+		if(pCombat) {
+			pCombat->UpdateLastKnownArea();
+		}
+
+		if(!NextBotStop->GetBool() && !(pCombat->GetFlags() & FL_FROZEN)) {
+			bot->Update();
+		}
+
+		bot->EndUpdate();
+
+		return 1;
+	}
+
 	return 0;
 }
 
@@ -13718,6 +14988,36 @@ cell_t IBodyGetHullMaxs(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
+cell_t IBodyGetEyePosition(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+
+	const Vector &ang = area->GetEyePosition();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
+cell_t IBodyGetViewVector(IPluginContext *pContext, const cell_t *params)
+{
+	IBody *area = (IBody *)params[1];
+
+	const Vector &ang = area->GetViewVector();
+	
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+	addr[0] = sp_ftoc(ang.x);
+	addr[1] = sp_ftoc(ang.y);
+	addr[2] = sp_ftoc(ang.z);
+	
+	return 0;
+}
+
 cell_t INextBotGetPosition(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *area = (INextBot *)params[1];
@@ -14602,7 +15902,7 @@ public:
 		: callback(callbacl_), data(data_)
 	{}
 	
-	virtual bool Inspect( const CKnownEntity &known )
+	virtual bool Inspect( const CKnownEntity &known ) override
 	{
 		cell_t res = 0;
 		callback->PushCell((cell_t)&known);
@@ -14642,7 +15942,7 @@ public:
 		: callback(callbacl_), data(data_)
 	{}
 	
-	virtual bool IsAllowed( CBaseEntity *known )
+	virtual bool IsAllowed( CBaseEntity *known ) override
 	{
 		cell_t res = 0;
 		callback->PushCell(gamehelpers->EntityToBCompatRef(known));
@@ -14754,7 +16054,7 @@ public:
 		: callback(callbacl_), data(data_)
 	{}
 	
-	virtual bool IsAllowed( CBaseEntity *known )
+	virtual bool IsAllowed( CBaseEntity *known ) override
 	{
 		cell_t res = 0;
 		callback->PushCell(gamehelpers->EntityToBCompatRef(known));
@@ -15348,7 +16648,7 @@ public:
 		nbcustomap.erase(ref);
 	}
 	
-	virtual void plugin_unloaded(IdentityToken_t *pId)
+	virtual void plugin_unloaded(IdentityToken_t *pId) override
 	{
 		IPluginNextBotComponent::plugin_unloaded(pId);
 		
@@ -15611,9 +16911,13 @@ cell_t IIntentionCustomResetBehavior(IPluginContext *pContext, const cell_t *par
 {
 	IIntentionCustom *obj = (IIntentionCustom *)params[1];
 	SPAction *act = (SPAction *)params[2];
-	
-	obj->m_behavior->Reset(act);
-	
+
+	if(obj->m_behavior) {
+		obj->m_behavior->Reset(act);
+	} else {
+		obj->m_behavior = new SPBehavior( act, obj->name.c_str() );
+	}
+
 	return 0;
 }
 
@@ -15627,6 +16931,110 @@ cell_t IIntentionCustomset_name(IPluginContext *pContext, const cell_t *params)
 	obj->name = nameptr;
 	
 	return 0;
+}
+
+cell_t IIntentionShouldHurry(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+
+	return obj->ShouldHurry(bot);
+}
+
+cell_t IIntentionShouldRetreat(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+
+	return obj->ShouldRetreat(bot);
+}
+
+cell_t IIntentionShouldAttack(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+	CKnownEntity *them = (CKnownEntity *)params[3];
+
+	return obj->ShouldAttack(bot, them);
+}
+
+cell_t IIntentionIsHindrance(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+
+	return obj->IsHindrance(bot, pSubject);
+}
+
+cell_t IIntentionSelectTargetPoint(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[4], &addr);
+
+	Vector vec = obj->SelectTargetPoint(bot, pCombat);
+
+	addr[0] = sp_ftoc(vec.x);
+	addr[1] = sp_ftoc(vec.y);
+	addr[2] = sp_ftoc(vec.z);
+
+	return 0;
+}
+
+cell_t IIntentionIsPositionAllowed(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+
+	cell_t *addr = nullptr;
+	pContext->LocalToPhysAddr(params[3], &addr);
+	Vector pos{sp_ctof(addr[0]),sp_ctof(addr[1]),sp_ctof(addr[2])};
+
+	return obj->IsPositionAllowed(bot, pos);
+}
+
+cell_t IIntentionSelectMoreDangerousThreat(IPluginContext *pContext, const cell_t *params)
+{
+	IIntention *obj = (IIntention *)params[1];
+	INextBot *bot = (INextBot *)params[2];
+	CBaseEntity *pSubject = gamehelpers->ReferenceToEntity(params[3]);
+	if(!pSubject)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+
+	CBaseCombatCharacter *pCombat = pSubject->MyCombatCharacterPointer();
+	if(!pCombat)
+	{
+		return pContext->ThrowNativeError("Invalid Entity Reference/Index %i", params[3]);
+	}
+
+	return (cell_t)obj->SelectMoreDangerousThreat(bot, pCombat, (CKnownEntity *)params[4], (CKnownEntity *)params[5]);
+}
+
+cell_t BehaviorActionActorget(IPluginContext *pContext, const cell_t *params)
+{
+	Action<NextBotCombatCharacter> *obj{(Action<NextBotCombatCharacter> *)params[1]};
+	NextBotCombatCharacter *pSubject{obj->GetActor()};
+	return pSubject ? gamehelpers->EntityToBCompatRef(pSubject) : -1;
 }
 
 cell_t BehaviorActionset_data(IPluginContext *pContext, const cell_t *params)
@@ -15695,6 +17103,97 @@ cell_t GetNavAreaFromVector(IPluginContext *pContext, const cell_t *params)
 	
 	return (cell_t)(*TheNavAreas)[idx];
 }
+
+class SPSearchSurroundingAreasFunctor : public ISearchSurroundingAreasFunctor
+{
+public:
+	bool operator() ( CNavArea *area, CNavArea *priorArea, float travelDistanceSoFar ) override
+	{
+		if(execute) {
+			execute->PushCell((cell_t)area);
+			execute->PushCell((cell_t)priorArea);
+			execute->PushFloat(travelDistanceSoFar);
+			execute->PushCell(data);
+			cell_t res{0};
+			execute->Execute(&res);
+			return res;
+		}
+
+		return false;
+	}
+
+	bool ShouldSearch( CNavArea *adjArea, CNavArea *currentArea, float travelDistanceSoFar ) override
+	{
+		if(should) {
+			should->PushCell((cell_t)adjArea);
+			should->PushCell((cell_t)currentArea);
+			should->PushFloat(travelDistanceSoFar);
+			should->PushCell(data);
+			cell_t res{0};
+			should->Execute(&res);
+			return res;
+		}
+
+		return ISearchSurroundingAreasFunctor::ShouldSearch(adjArea, currentArea, travelDistanceSoFar);
+	}
+
+	void IterateAdjacentAreas( CNavArea *area, CNavArea *priorArea, float travelDistanceSoFar ) override
+	{
+		ISearchSurroundingAreasFunctor::IterateAdjacentAreas(area, priorArea, travelDistanceSoFar);
+	}
+
+	void PostSearch( void ) override
+	{
+		if(post) {
+			post->PushCell(data);
+			post->Execute(nullptr);
+		}
+
+		ISearchSurroundingAreasFunctor::PostSearch();
+	}
+
+	IPluginFunction *execute{nullptr};
+	IPluginFunction *should{nullptr};
+	IPluginFunction *iter{nullptr};
+	IPluginFunction *post{nullptr};
+	cell_t data{0};
+};
+
+cell_t SearchSurroundingAreasNative(IPluginContext *pContext, const cell_t *params)
+{
+	CNavArea *startArea = (CNavArea *)params[1];
+
+	cell_t *addr;
+	pContext->LocalToPhysAddr(params[2], &addr);
+
+	SPSearchSurroundingAreasFunctor func{};
+	func.execute = pContext->GetFunctionById(*addr);
+	++addr;
+	func.should = pContext->GetFunctionById(*addr);
+	++addr;
+	func.iter = pContext->GetFunctionById(*addr);
+	++addr;
+	func.post = pContext->GetFunctionById(*addr);
+	++addr;
+
+	func.data = params[4];
+
+	SearchSurroundingAreas(startArea, func, sp_ctof(params[3]));
+	return 0;
+}
+
+cell_t CTFNavMeshGetControlPointCenterArea(IPluginContext *pContext, const cell_t *params)
+{
+	return (cell_t)((CTFNavMesh *)TheNavMesh)->GetControlPointCenterArea(params[1]);
+}
+
+cell_t CTFNavMeshCollectAmbushAreas(IPluginContext *pContext, const cell_t *params);
+cell_t CTFNavMeshCollectSpawnRoomThresholdAreas(IPluginContext *pContext, const cell_t *params);
+cell_t CTFNavMeshCollectAreaWithinBombTravelRange(IPluginContext *pContext, const cell_t *params);
+cell_t CTFNavMeshGetSetupGateDefenseAreas(IPluginContext *pContext, const cell_t *params);
+cell_t CTFNavMeshGetControlPointAreas(IPluginContext *pContext, const cell_t *params);
+cell_t CTFNavMeshGetSpawnRoomAreas(IPluginContext *pContext, const cell_t *params);
+cell_t CTFNavMeshGetSpawnRoomExitAreas(IPluginContext *pContext, const cell_t *params);
 
 cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params);
 cell_t CollectAllBots(IPluginContext *pContext, const cell_t *params);
@@ -16076,7 +17575,7 @@ sp_nativeinfo_t natives[] =
 	{"Path.Memory.get", PathMemoryget},
 	{"Path.Length.get", PathLengthget},
 	{"Path.Age.get", PathAgeget},
-	{"Path.IsValid", PathIsValid},
+	{"Path.Valid.get", PathIsValid},
 	{"Path.FirstSegment.get", PathFirstSegmentget},
 	{"Path.LastSegment.get", PathLastSegmentget},
 	{"Path.NextSegment", PathNextSegment},
@@ -16136,8 +17635,22 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.GetPlayerCount", CNavAreaGetPlayerCount},
 #if SOURCE_ENGINE == SE_TF2
 	{"CTFNavArea.InCombat.get", CTFNavAreaInCombatget},
+	{"CTFNavArea.OnCombat", CTFNavAreaOnCombat},
 	{"CTFNavArea.CombatIntensity.get", CTFNavAreaCombatIntensityget},
 	{"CTFNavArea.HasAttributeTF", CTFNavAreaHasAttributeTF},
+	{"CTFNavArea.SetAttributeTF", CTFNavAreaSetAttributeTF},
+	{"CTFNavArea.ClearAttributeTF", CTFNavAreaClearAttributeTF},
+	{"CTFNavArea.ValidForWanderingPopulation.get", CTFNavAreaValidForWanderingPopulationget},
+	{"CTFNavArea.TravelDistanceToBombTarget.get", CTFNavAreaTravelDistanceToBombTargetget},
+	{"CTFNavArea.WanderCount.get", CTFNavAreaWanderCountget},
+	{"CTFNavArea.WanderCount.set", CTFNavAreaWanderCountset},
+	{"CTFNavArea.AddToWanderCount", CTFNavAreaAddToWanderCount},
+	{"CTFNavArea.GetIncursionDistance", CTFNavAreaGetIncursionDistance},
+	{"CTFNavArea.GetNextIncursionArea", CTFNavAreaGetNextIncursionArea},
+	{"CTFNavArea.IsAwayFromInvasionAreas", CTFNavAreaIsAwayFromInvasionAreas},
+	{"CTFNavArea.IsReachableByTeam", CTFNavAreaIsReachableByTeam},
+	{"CTFNavArea.IsPotentiallyVisibleToActor", CTFNavAreaIsPotentiallyVisibleToActor},
+	{"CTFNavArea.GetEnemyInvasionAreaVector", CTFNavAreaGetEnemyInvasionAreaVector},
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 	{"TerrorNavArea.GetSpawnAttributes", TerrorNavAreaGetSpawnAttributes},
 #endif
@@ -16166,6 +17679,11 @@ sp_nativeinfo_t natives[] =
 	{"CNavArea.GetZ", CNavAreaGetZ},
 	{"CNavArea.GetClosestPointOnArea", CNavAreaGetClosestPointOnArea},
 	{"CNavArea.IsBlocked", CNavAreaIsBlocked},
+	{"CNavArea.IsEntirelyVisible", CNavAreaIsEntirelyVisible},
+	{"CNavArea.IsPartiallyVisible", CNavAreaIsPartiallyVisible},
+	{"CNavArea.IsPotentiallyVisible", CNavAreaIsPotentiallyVisible},
+	{"CNavArea.IsCompletelyVisible", CNavAreaIsCompletelyVisible},
+	{"CNavArea.IsCompletelyVisibleToTeam", CNavAreaIsCompletelyVisibleToTeam},
 	{"CNavLadder.Length.get", CNavLadderLengthget},
 	{"ILocomotion.StepHeight.get", ILocomotionStepHeightget},
 	{"ILocomotion.MaxJumpHeight.get", ILocomotionMaxJumpHeightget},
@@ -16222,6 +17740,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.LocomotionInterface.get", INextBotLocomotionInterfaceget},
 	{"INextBot.VisionInterface.get", INextBotVisionInterfaceget},
 	{"INextBot.BodyInterface.get", INextBotBodyInterfaceget},
+	{"INextBot.IntentionInterface.get", INextBotIntentionInterfaceget},
 	{"INextBot.CurrentPath.get", INextBotCurrentPathget},
 	{"INextBot.AllocateCustomLocomotion", INextBotAllocateCustomLocomotion},
 	{"INextBot.AllocateFlyingLocomotion", INextBotAllocateFlyingLocomotion},
@@ -16242,6 +17761,18 @@ sp_nativeinfo_t natives[] =
 	{"INextBot.GetRangeToVector", INextBotGetRangeToVector},
 	{"INextBot.GetRangeSquaredToEntity", INextBotGetRangeSquaredToEntity},
 	{"INextBot.GetRangeSquaredToVector", INextBotGetRangeSquaredToVector},
+	{"INextBot.DoThink", INextBotDoThink},
+	{"INextBot.GetDistanceBetweenEntity", INextBotGetDistanceBetweenEntity},
+	{"INextBot.GetDistanceBetweenVector", INextBotGetDistanceBetweenVector},
+	{"INextBot.IsDistanceBetweenLessThanEntity", INextBotIsDistanceBetweenLessThanEntity},
+	{"INextBot.IsDistanceBetweenLessThanVector", INextBotIsDistanceBetweenLessThanVector},
+	{"INextBot.IsDistanceBetweenGreaterThanEntity", INextBotIsDistanceBetweenGreaterThanEntity},
+	{"INextBot.IsDistanceBetweenGreaterThanVector", INextBotIsDistanceBetweenGreaterThanVector},
+	{"INextBot.IsLineOfFireClearVec", INextBotIsLineOfFireClearVec},
+	{"INextBot.IsLineOfFireClearEnt", INextBotIsLineOfFireClearEnt},
+	{"INextBot.IsLineOfFireClearVecEx", INextBotIsLineOfFireClearVecEx},
+	{"INextBot.IsLineOfFireClearEntEx", INextBotIsLineOfFireClearEntEx},
+	{"INextBot.IsEntityBetweenTargetAndSelf", INextBotIsEntityBetweenTargetAndSelf},
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	{"INextBot.Get2DRangeToEntity", INextBotGet2DRangeToEntity},
 	{"INextBot.Get2DRangeToVector", INextBotGet2DRangeToVector},
@@ -16436,6 +17967,8 @@ sp_nativeinfo_t natives[] =
 #endif
 	{"IBody.GetHullMins", IBodyGetHullMins},
 	{"IBody.GetHullMaxs", IBodyGetHullMaxs},
+	{"IBody.GetEyePosition", IBodyGetEyePosition},
+	{"IBody.GetViewVector", IBodyGetViewVector},
 	{"IBody.SetPosition", IBodySetPosition},
 	{"IBody.PostureMobile.get", IBodyIsPostureMobile},
 	{"IBody.PostureChanging.get", IBodyIsPostureChanging},
@@ -16474,9 +18007,9 @@ sp_nativeinfo_t natives[] =
 	{"CKnownEntity.WasEverVisible.get", CKnownEntityWasEverVisibleget},
 	{"CKnownEntity.VisibilityStatus.get", CKnownEntityVisibilityStatusset},
 	{"CKnownEntity.MarkLastKnownPositionAsSeen", CKnownEntityMarkLastKnownPositionAsSeen},
-	{"CKnownEntity.IsVisibleInFOVNow", CKnownEntityIsVisibleInFOVNow},
-	{"CKnownEntity.IsVisibleRecently", CKnownEntityIsVisibleRecently},
-	{"CKnownEntity.IsObsolete", CKnownEntityIsObsolete},
+	{"CKnownEntity.VisibleInFOVNow.get", CKnownEntityIsVisibleInFOVNow},
+	{"CKnownEntity.VisibleRecently.get", CKnownEntityIsVisibleRecently},
+	{"CKnownEntity.Obsolete.get", CKnownEntityIsObsolete},
 	{"CKnownEntity.Is", CKnownEntityIs},
 	{"CKnownEntity.IsEqual", CKnownEntityIsEqual},
 	{"CKnownEntity.Destroy", CKnownEntityDestroy},
@@ -16513,6 +18046,7 @@ sp_nativeinfo_t natives[] =
 	{"GetNavAreaFromVector", GetNavAreaFromVector},
 	{"DirectionBetweenEntityVector", DirectionBetweenEntityVector},
 	{"CollectSurroundingAreas", CollectSurroundingAreasNative},
+	{"SearchSurroundingAreas", SearchSurroundingAreasNative},
 	{"EntityVisibleEnt", EntityVisibleEnt},
 	{"EntityVisibleVec", EntityVisibleVec},
 	{"CombatCharacterIsHiddenByFogVec", CombatCharacterIsHiddenByFogVec},
@@ -16534,6 +18068,24 @@ sp_nativeinfo_t natives[] =
 	{"CombatCharacterIsAbleToSeeEnt", CombatCharacterIsAbleToSeeEnt},
 	{"CombatCharacterDisposition", CombatCharacterDisposition},
 	{"CollectAllBots", CollectAllBots},
+	{"IIntention.ShouldHurry", IIntentionShouldHurry},
+	{"IIntention.ShouldRetreat", IIntentionShouldRetreat},
+	{"IIntention.ShouldAttack", IIntentionShouldAttack},
+	{"IIntention.IsHindrance", IIntentionIsHindrance},
+	{"IIntention.SelectTargetPoint", IIntentionSelectTargetPoint},
+	{"IIntention.IsPositionAllowed", IIntentionIsPositionAllowed},
+	{"IIntention.SelectMoreDangerousThreat", IIntentionSelectMoreDangerousThreat},
+	{"BehaviorAction.Actor.get", BehaviorActionActorget},
+#if SOURCE_ENGINE == SE_TF2
+	{"CTFNavMesh.CollectAmbushAreas", CTFNavMeshCollectAmbushAreas},
+	{"CTFNavMesh.CollectSpawnRoomThresholdAreas", CTFNavMeshCollectSpawnRoomThresholdAreas},
+	{"CTFNavMesh.CollectAreaWithinBombTravelRange", CTFNavMeshCollectAreaWithinBombTravelRange},
+	{"CTFNavMesh.GetSetupGateDefenseAreas", CTFNavMeshGetSetupGateDefenseAreas},
+	{"CTFNavMesh.GetControlPointAreas", CTFNavMeshGetControlPointAreas},
+	{"CTFNavMesh.GetControlPointCenterArea", CTFNavMeshGetControlPointCenterArea},
+	{"CTFNavMesh.GetSpawnRoomAreas", CTFNavMeshGetSpawnRoomAreas},
+	{"CTFNavMesh.GetSpawnRoomExitAreas", CTFNavMeshGetSpawnRoomExitAreas},
+#endif
 	{NULL, NULL}
 };
 
@@ -16549,6 +18101,9 @@ bool Sample::SDK_OnMetamodLoad(ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	ConVar_Register(0, this);
 #if SOURCE_ENGINE == SE_TF2
 	tf_nav_combat_decay_rate = g_pCVar->FindVar("tf_nav_combat_decay_rate");
+	tf_nav_combat_build_rate = g_pCVar->FindVar("tf_nav_combat_build_rate");
+	tf_select_ambush_areas_close_range = g_pCVar->FindVar("tf_select_ambush_areas_close_range");
+	tf_select_ambush_areas_max_enemy_exposure_area = g_pCVar->FindVar("tf_select_ambush_areas_max_enemy_exposure_area");
 #endif
 	nb_last_area_update_tolerance = g_pCVar->FindVar("nb_last_area_update_tolerance");
 	NextBotStop = g_pCVar->FindVar("nb_stop");
@@ -17287,7 +18842,7 @@ public:
 			vecJumpVel[2] *= flMaxSpeed / flJumpSpeed;
 		}
 
-		GetBot()->SetPosition(vecMyPos);
+		DriveTo(vecMyPos);
 		SetVelocity(vecJumpVel);
 		return true;
 	}
@@ -17934,6 +19489,170 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 
 #include "funnyfile.h"
 
+cell_t CTFNavMeshGetSpawnRoomExitAreas(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	const CUtlVector<CTFNavArea *> &ambushVector{*((CTFNavMesh *)TheNavMesh)->GetSpawnRoomExitAreas(params[2])};
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
+cell_t CTFNavMeshGetSpawnRoomAreas(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	const CUtlVector<CTFNavArea *> &ambushVector{*((CTFNavMesh *)TheNavMesh)->GetSpawnRoomAreas(params[2])};
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
+cell_t CTFNavMeshGetControlPointAreas(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	const CUtlVector<CTFNavArea *> &ambushVector{*((CTFNavMesh *)TheNavMesh)->GetControlPointAreas(params[2])};
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
+cell_t CTFNavMeshGetSetupGateDefenseAreas(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	const CUtlVector<CTFNavArea *> &ambushVector{*((CTFNavMesh *)TheNavMesh)->GetSetupGateDefenseAreas()};
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
+cell_t CTFNavMeshCollectAreaWithinBombTravelRange(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	CUtlVector<CTFNavArea *> ambushVector{};
+	((CTFNavMesh *)TheNavMesh)->CollectAreaWithinBombTravelRange(&ambushVector, sp_ctof(params[2]), sp_ctof(params[3]));
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
+cell_t CTFNavMeshCollectSpawnRoomThresholdAreas(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	CUtlVector<CTFNavArea *> ambushVector{};
+	((CTFNavMesh *)TheNavMesh)->CollectSpawnRoomThresholdAreas(&ambushVector, params[2]);
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
+cell_t CTFNavMeshCollectAmbushAreas(IPluginContext *pContext, const cell_t *params)
+{
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[1], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[1], err);
+	}
+
+	CUtlVector<CTFNavArea *> ambushVector{};
+	((CTFNavMesh *)TheNavMesh)->CollectAmbushAreas(&ambushVector, (CTFNavArea *)params[2], params[3], sp_ctof(params[4]), sp_ctof(params[5]));
+
+	size_t len = ambushVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		*obj->at(i) = (cell_t)ambushVector[i];
+	}
+
+	return 0;
+}
+
 cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params)
 {
 	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
@@ -17981,6 +19700,33 @@ cell_t CollectAllBots(IPluginContext *pContext, const cell_t *params)
 		if(pEntity->IsPlayer()) {
 			continue;
 		}
+
+		*obj->at(i) = (cell_t)bot;
+	}
+
+	return 0;
+}
+
+cell_t CTFNavAreaGetEnemyInvasionAreaVector(IPluginContext *pContext, const cell_t *params)
+{
+	CTFNavArea *area = (CTFNavArea *)params[1];
+
+	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
+	
+	ICellArray *obj = nullptr;
+	HandleError err = ((HandleSystemHack *)handlesys)->ReadCoreHandle(params[3], arraylist_handle, &security, (void **)&obj);
+	if(err != HandleError_None)
+	{
+		return pContext->ThrowNativeError("Invalid Handle %x (error: %d)", params[3], err);
+	}
+
+	const CUtlVector< CTFNavArea * > &priorVector{area->GetEnemyInvasionAreaVector(params[2])};
+
+	size_t len = priorVector.Count();
+	obj->resize(len);
+
+	for(size_t i{0}; i < len; ++i) {
+		CTFNavArea *bot = priorVector[i];
 
 		*obj->at(i) = (cell_t)bot;
 	}
@@ -18131,6 +19877,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetOffset("CBaseEntity::BloodColor", &CBaseEntityBloodColor);
 	g_pGameConf->GetOffset("CBaseEntity::PhysicsSolidMaskForEntity", &CBaseEntityPhysicsSolidMaskForEntity);
 	g_pGameConf->GetOffset("CBaseEntity::Touch", &CBaseEntityTouch);
+	g_pGameConf->GetOffset("CBaseEntity::IsCombatItem", &CBaseEntityIsCombatItem);
 	g_pGameConf->GetOffset("CBaseEntity::ShouldCollide", &CBaseEntityShouldCollide);
 #if SOURCE_ENGINE == SE_TF2
 	g_pGameConf->GetOffset("CBaseCombatCharacter::GetBossType", &CBaseCombatCharacterGetBossType);
@@ -18203,6 +19950,7 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_pGameConf->GetMemSig("CNavArea::m_masterMarker", (void **)&CNavArea::m_masterMarker);
 	g_pGameConf->GetMemSig("CNavArea::m_openList", (void **)&CNavArea::m_openList);
 	g_pGameConf->GetMemSig("CNavArea::m_openListTail", (void **)&CNavArea::m_openListTail);
+	g_pGameConf->GetMemSig("CNavArea::s_nCurrVisTestCounter", (void **)&CNavArea::s_nCurrVisTestCounter);
 	
 #if SOURCE_ENGINE == SE_TF2
 	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_STATIC(HookIsAuthoritative), false);
