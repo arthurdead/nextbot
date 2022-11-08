@@ -120,10 +120,15 @@
 				"library" "server"
 				"linux" "@_ZN13NDebugOverlay8TriangleERK6VectorS2_S2_iiiibf"
 			}
-			"NDebugOverlay::Circle"
+			"NDebugOverlay::Circle(QAngle)"
 			{
 				"library" "server"
 				"linux" "@_ZN13NDebugOverlay6CircleERK6VectorRK6QAnglefiiiibf"
+			}
+			"NDebugOverlay::Circle(float)"
+			{
+				"library" "server"
+				"linux" "@_ZN13NDebugOverlay6CircleERK6Vectorfiiiibf"
 			}
 			"CBaseEntity::CalcAbsolutePosition"
 			{
@@ -347,6 +352,10 @@
 			"CBaseEntity::MyCombatCharacterPointer"
 			{
 				"linux" "72"
+			}
+			"CBaseEntity::GetBaseAnimating"
+			{
+				"linux" "51"
 			}
 			"CBaseEntity::WorldSpaceCenter"
 			{
@@ -636,6 +645,16 @@
 			{
 				"library" "server"
 				"linux" "@_ZN23NextBotGroundLocomotion14TraverseLadderEv"
+			}
+			"CTFNavMesh::CollectBuiltObjects"
+			{
+				"library" "server"
+				"linux" "@_ZN10CTFNavMesh19CollectBuiltObjectsEP10CUtlVectorIP11CBaseObject10CUtlMemoryIS2_iEEi"
+			}
+			"NextBotTraversableTraceFilter::NextBotTraversableTraceFilter"
+			{
+				"library" "server"
+				"linux" "@_ZN29NextBotTraversableTraceFilterC1EP8INextBotN11ILocomotion16TraverseWhenTypeE"
 			}
 		}
 	}

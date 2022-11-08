@@ -40,9 +40,14 @@ enum Activity
 };
 #endif
 
-#define	CONTENTS_BLOCKLOS 0x40
+#define	CONTENTS_BLOCKLOS CONTENTS_MIST
+
 #define CONTENTS_REDTEAM CONTENTS_TEAM1
 #define CONTENTS_BLUETEAM CONTENTS_TEAM2
+
+#define CONTENTS_HALLOWEENTEAM CONTENTS_UNUSED5
+#define CONTENTS_UNASSIGNEDTEAM CONTENTS_UNUSED6
+
 #define MASK_BLOCKLOS (CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_BLOCKLOS)
 #define MASK_BLOCKLOS_AND_NPCS (MASK_BLOCKLOS|CONTENTS_MONSTER)
 
@@ -53,6 +58,7 @@ enum Activity
 #endif
 
 #define STEP_HEIGHT 18.0
+#define HUMAN_EYE_HEIGHT 62.0
 
 #define BEHAVIOR_REASON_MAX 64
 
@@ -212,9 +218,6 @@ typeset nb_funcs_t
 	//INextBotCustom.ShouldTouch
 	function MRESReturn (INextBotCustom custom, INextBot bot, int other, bool &result);
 
-	//IIntentionCustom.InitialContainedAction
-	function BehaviorAction (int entity);
-
 	//GameLocomotionCustom.TraverseLadder
 	function MRESReturn (GameLocomotionCustom locomotion, bool &result);
 
@@ -324,6 +327,10 @@ typeset nb_funcs_t
 
 	//BehaviorAction.SelectMoreDangerousThreat
 	function CKnownEntity (CustomBehaviorAction action, INextBot bot, int entity, int subject, CKnownEntity threat1, CKnownEntity threat2);
+
+	//GameVisionCustom.IsIgnored
+	//GameVisionCustom.IsVisibleEntityNoticed
+	function bool (GameVisionCustom vision, int subject);
 };
 
 enum Disposition_t 
@@ -779,6 +786,11 @@ methodmap ILocomotion < INextBotComponent
 		public native get();
 	}
 
+	property bool DidJustJump
+	{
+		public native get();
+	}
+
 	property bool Scrambling
 	{
 		public native get();
@@ -909,6 +921,11 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 		public native set(float height);
 	}
 
+	property bool ResolvePlayerCollisions
+	{
+		public native set(bool height);
+	}
+
 	property bool AllowFacing
 	{
 		public native set(bool value);
@@ -988,6 +1005,11 @@ methodmap GameLocomotion < ILocomotion
 		public native get();
 	}
 #endif
+
+	property bool DidJustJump
+	{
+		public native get();
+	}
 
 	property float MaxYawRate
 	{
@@ -1078,6 +1100,11 @@ methodmap GameLocomotionCustom < GameLocomotion
 	property float TraversableSlopeLimit
 	{
 		public native set(float height);
+	}
+
+	property bool ResolvePlayerCollisions
+	{
+		public native set(bool height);
 	}
 
 	public native void set_function(const char[] name, Function func);
@@ -1366,6 +1393,20 @@ methodmap AnyLocomotion < ILocomotion
 				view_as<GameLocomotionCustom>(this).TraversableSlopeLimit = height;
 			} else if(type == Locomotion_FlyingCustom) {
 				view_as<NextBotFlyingLocomotion>(this).TraversableSlopeLimit = height;
+			}
+		}
+	}
+
+	property bool ResolvePlayerCollisions
+	{
+		public set(bool height)
+		{
+			LocomotionType type = this.Type;
+
+			if(type == Locomotion_GroundCustom) {
+				view_as<GameLocomotionCustom>(this).ResolvePlayerCollisions = height;
+			} else if(type == Locomotion_FlyingCustom) {
+				view_as<NextBotFlyingLocomotion>(this).ResolvePlayerCollisions = height;
 			}
 		}
 	}
@@ -1808,6 +1849,31 @@ enum ArousalType
 	INTENSE
 };
 
+enum LookAtPriorityType
+{
+	BORING,
+	INTERESTING,
+	IMPORTANT,
+	CRITICAL,
+	MANDATORY
+};
+
+methodmap INextBotReply
+{
+	public native INextBotReply();
+
+	public native void set_function(const char[] name, Function func);
+
+	public native void set_data(const char[] name, any data);
+	public native any get_data(const char[] name);
+	public native bool has_data(const char[] name);
+	
+	public native void set_data_array(const char[] name, const any[] data, int len);
+	public native void get_data_array(const char[] name, any[] data, int len);
+};
+
+#define INextBotReply_Null (view_as<INextBotReply>(Address_Null))
+
 methodmap IBody < INextBotComponent
 {
 	property float HullWidth
@@ -1841,6 +1907,14 @@ methodmap IBody < INextBotComponent
 		public native get();
 	}
 #endif
+
+	property bool HeadAimingOnTarget
+	{
+		public native get();
+	}
+
+	public native void AimHeadTowardsVec(const float lookAtPos[3], LookAtPriorityType priority = BORING, float duration = 0.0, INextBotReply replyWhenAimed = INextBotReply_Null, const char[] reason = NULL_STRING);
+	public native void AimHeadTowardsEnt(int subject, LookAtPriorityType priority = BORING, float duration = 0.0, INextBotReply replyWhenAimed = INextBotReply_Null, const char[] reason = NULL_STRING);
 
 	public native void GetEyePosition(float vec[3]);
 	public native void GetViewVector(float vec[3]);
@@ -1902,42 +1976,28 @@ methodmap IBody < INextBotComponent
 
 methodmap IBodyCustom < IBody
 {
-	property float HullWidth
-	{
-		public native set(float height);
-	}
-
-	property float LieHullHeight
-	{
-		public native set(float height);
-	}
-
-	property float StandHullHeight
-	{
-		public native set(float height);
-	}
-
-	property float CrouchHullHeight
-	{
-		public native set(float height);
-	}
-
-	property int SolidMask
-	{
-		public native set(int height);
-	}
-
-#if defined GAME_TF2
-	property int CollisionGroup
-	{
-		public native set(int height);
-	}
-#endif
-
 	property int Sequence
 	{
 		public native get();
 	}
+
+	property bool HeadAsAngles
+	{
+		public native set(bool val);
+	}
+
+	property bool ViewAsHead
+	{
+		public native set(bool val);
+	}
+
+	public native bool StartSequence(int sequence, Activity act = ACT_INVALID, ActivityType flags = NO_ACTIVITY_FLAGS);
+
+	public native void GetHeadAngles(float vec[3]);
+
+	public native void SetAngles(const float vec[3], bool correct=false);
+
+	public native void ResetActivityFlags();
 
 	public native void set_function(const char[] name, Function func);
 
@@ -2000,6 +2060,8 @@ methodmap IIntentionCustom < IIntention
 	public native void set_name(const char[] name);
 	
 	public native void set_function(const char[] name, Function func);
+	public native Function get_function(const char[] name, Handle &pl = null);
+	public native bool has_function(const char[] name);
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -2029,7 +2091,7 @@ enum NextBotDebugType
 	NEXTBOT_DEBUG_ALL	= 0xFFFF
 };
 
-typedef allocintent_func_t = function BehaviorAction (int entity);
+typedef allocintent_func_t = function BehaviorAction (IIntentionCustom intention, INextBot bot, int entity);
 
 methodmap INextBot < INextBotEventResponder
 {
@@ -2061,6 +2123,11 @@ methodmap INextBot < INextBotEventResponder
 	}
 
 	property PathFollower CurrentPath
+	{
+		public native get();
+	}
+
+	property INextBotCustom Custom
 	{
 		public native get();
 	}
@@ -2168,6 +2235,8 @@ methodmap INextBotCustom
 	}
 
 	public native void set_function(const char[] name, Function func);
+	public native Function get_function(const char[] name, Handle &pl = null);
+	public native bool has_function(const char[] name);
 	
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
@@ -2176,6 +2245,8 @@ methodmap INextBotCustom
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
 };
+
+#define INextBotCustom_Null (view_as<INextBotCustom>(Address_Null))
 
 enum SegmentType
 {
@@ -2479,88 +2550,23 @@ native int GetInfectedSize();
 #endif
 
 #if defined datamaps_included
-static Address datamaps_allocatenextbot(int size_modifier, any data)
-{ return AllocateNextBotCombatCharacter(size_modifier); }
+native CustomDatamap register_nextbot_factory(const char[] classname, const char[] name, const char[] clientnet = NULL_STRING, CustomSendtable &table = null, CustomEntityFactory &factory = null);
 
-#if defined GAME_L4D2
-static Address datamaps_allocateinfectednextbot(int size_modifier, int data)
-{ return AllocateInfectedNextBotCombatCharacter(size_modifier, data); }
-#endif
-
-stock CustomDatamap __register_nb_factory_based(const char[] classname, const char[] name, const char[] clientnet, const char[] based, CustomSendtable &table = null, CustomEntityFactory &factory = null)
-{
-	char netname[64];
-	netname[0] = 'C';
-	strcopy(netname[1], sizeof(netname)-1, name);
-
-	factory = EntityFactoryDictionary.register_based_name(classname, based);
-	table = CustomSendtable.from_factory(factory);
-	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
-		table.override_with(clientnet);
-	}
-	table.set_network_name(netname);
-	CustomDatamap datamap = CustomDatamap.from_factory(factory);
-	datamap.set_name(netname);
-
-	return datamap;
-}
-
-stock CustomDatamap __register_nb_factory_func(const char[] classname, const char[] name, const char[] clientnet, entityalloc_func_t alloc, int size, any data, CustomSendtable &table = null, CustomEntityFactory &factory = null)
-{
-	char netname[64];
-	netname[0] = 'C';
-	strcopy(netname[1], sizeof(netname)-1, name);
-
-	factory = EntityFactoryDictionary.register_function(classname, alloc, size, data);
-	table = CustomSendtable.from_factory(factory);
-	if(!IsNullString(clientnet) && clientnet[0] != '\0') {
-		table.override_with(clientnet);
-	}
-	CustomDatamap datamap = CustomDatamap.from_factory(factory);
-	datamap.set_name(netname);
-
-	return datamap;
-}
-
-stock CustomDatamap register_nextbot_factory(const char[] classname, const char[] name, const char[] clientnet = NULL_STRING, CustomSendtable &table = null, CustomEntityFactory &factory = null)
-{ return __register_nb_factory_func(classname, name, clientnet, datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table, factory); }
+native CustomDatamap register_basenpc_nextbot_factory(const char[] classname, const char[] name, CustomSendtable &table = null, CustomEntityFactory &factory = null);
 
 #if defined GAME_TF2
-stock CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name, CustomEntityFactory &factory = null)
-{
-	CustomSendtable table;
-	CustomDatamap datamap = register_nextbot_factory(classname, name, "CTFTankBoss", table, factory);
-	table.set_name("DT_TFBaseBoss");
-	table.set_network_name("CTFBaseBoss");
-	table.add_prop_float("m_lastHealthPercentage", 0.0, 1.0, 11, SPROP_NOSCALE);
-	return datamap;
-}
-
-stock CustomDatamap register_robot_nextbot_factory(const char[] classname, const char[] name, CustomEntityFactory &factory = null)
-{
-	int m_iHealth_offset = FindSendPropInfo("CTFRobotDestruction_Robot", "m_iHealth");
-	int m_iMaxHealth_offset = FindSendPropInfo("CTFRobotDestruction_Robot", "m_iMaxHealth");
-	CustomSendtable table;
-	CustomDatamap datamap = register_nextbot_factory(classname, name, "CTFRobotDestruction_Robot", table, factory);
-	table.set_name("DT_TFRobotDestruction_Robot");
-	table.set_network_name("CTFRobotDestruction_Robot");
-	table.add_prop_int("m_iHealth", 4, -1, SPROP_VARINT, m_iHealth_offset);
-	table.add_prop_int("m_iMaxHealth", 4, -1, SPROP_VARINT, m_iMaxHealth_offset);
-	table.add_prop_int("m_eType", 4, -1, SPROP_VARINT, -1);
-	return datamap;
-}
+native CustomDatamap register_tankboss_nextbot_factory(const char[] classname, const char[] name, CustomSendtable &table = null, CustomEntityFactory &factory = null);
+native CustomDatamap register_robot_nextbot_factory(const char[] classname, const char[] name, CustomSendtable &table = null, CustomEntityFactory &factory = null);
 #endif
 
 #if defined GAME_L4D2
 #if defined _moreinfected_inc_
-stock CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, ZombieClassType cls = ZombieClass_Common)
+native CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, ZombieClassType cls = ZombieClass_Common, CustomSendtable &table = null, CustomEntityFactory &factory = null);
 #else
-stock CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, int cls = 0)
+native CustomDatamap register_infected_nextbot_factory(const char[] classname, cosnt char[] name, int cls = 0, CustomSendtable &table = null, CustomEntityFactory &factory = null);
 #endif
-{ return __register_nb_factory_func(classname, name, NULL_STRING, datamaps_allocateinfectednextbot, GetInfectedSize(), cls); }
 
-stock CustomDatamap register_infected_factory(const char[] classname, cosnt char[] name)
-{ return __register_nb_factory_based(classname, name, NULL_STRING, "infected"); }
+native CustomDatamap register_infected_factory(const char[] classname, cosnt char[] name, CustomSendtable &table = null, CustomEntityFactory &factory = null);
 #endif
 #endif
 
