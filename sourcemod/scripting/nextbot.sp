@@ -52,7 +52,7 @@ stock CustomDatamap __register_nb_factory_based(Handle plugin, const char[] clas
 	netname[0] = 'C';
 	strcopy(netname[1], sizeof(netname)-1, name);
 
-	CustomEntityFactory old_factory = EntityFactoryDictionary.register_based_name(classname, based);
+	CustomEntityFactory old_factory = EntityFactoryDictionary.register_based(classname, based);
 	factory = view_as<CustomEntityFactory>(CloneHandle(old_factory, plugin));
 	delete old_factory;
 

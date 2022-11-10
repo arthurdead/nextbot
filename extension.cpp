@@ -5422,7 +5422,20 @@ void **infectedvtable = nullptr;
 
 class NextBotCombatCharacterInfected;
 
-std::unordered_map<NextBotCombatCharacterInfected *, int> nbinfectclsmap{};
+struct nbinfectinfo_t
+{
+	int cls;
+	std::vector<int> hookids{};
+
+	void remove_hooks()
+	{
+		for(int id : hookids) {
+			SH_REMOVE_HOOK_ID(id);
+		}
+	}
+};
+
+std::unordered_map<NextBotCombatCharacterInfected *, nbinfectinfo_t> nbinfectclsmap{};
 
 class NextBotCombatCharacterInfected : public NextBotCombatCharacter
 {
@@ -5511,7 +5524,12 @@ public:
 	
 	int GetDesiredClass()
 	{
-		return nbinfectclsmap[this];
+		auto it{nbinfectclsmap.find(this)};
+		if(it == nbinfectclsmap.end()) {
+			return 0;
+		}
+
+		return it->second.cls;
 	}
 	
 	#define NBINFECT_MAGIC_NUMBER 69
@@ -5531,15 +5549,16 @@ public:
 		RETURN_META_VALUE(MRES_SUPERCEDE, 4);
 	}
 	
-	void dtor()
+	void removed()
 	{
 		NextBotCombatCharacterInfected *pEntity = META_IFACEPTR(NextBotCombatCharacterInfected);
-		nbinfectclsmap.erase(this);
-		SH_REMOVE_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::dtor), false);
-		SH_REMOVE_MANUALHOOK(MyInfectedPointer, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
-		SH_REMOVE_MANUALHOOK(CanBeA, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookCanBeA), false);
-		SH_REMOVE_MANUALHOOK(GetClass, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookGetClass), false);
-		SH_REMOVE_MANUALHOOK(Classify, pEntity, SH_MEMBER(this, &NextBotCombatCharacterInfected::HookClassify), false);
+
+		auto it{nbinfectclsmap.find(pEntity)};
+		if(it != nbinfectclsmap.end()) {
+			it->second.remove_hooks();
+			nbinfectclsmap.erase(it);
+		}
+
 		RETURN_META(MRES_HANDLED);
 	}
 	
@@ -5547,7 +5566,7 @@ public:
 	{
 		NextBotCombatCharacterInfected *bytes = (NextBotCombatCharacterInfected *)engine->PvAllocEntPrivateData(sizeofInfected + size_modifier);
 		call_mfunc<void>(bytes, NextBotCombatCharacterCTOR);
-		
+
 		static void **fakeinfectvtbl = nullptr;
 		if(!fakeinfectvtbl) {
 			void *infectfuncs[] =
@@ -5599,17 +5618,19 @@ public:
 				fakeinfectvtbl[i++] = infectfuncs[j];
 			}
 		}
-		
-		nbinfectclsmap.emplace(std::pair<NextBotCombatCharacterInfected *, int>{bytes, cls});
-		
+
 		(*(void ***)bytes) = fakeinfectvtbl;
-		
-		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::dtor), false);
-		SH_ADD_MANUALHOOK(MyInfectedPointer, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false);
-		SH_ADD_MANUALHOOK(CanBeA, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookCanBeA), false);
-		SH_ADD_MANUALHOOK(GetClass, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookGetClass), false);
-		SH_ADD_MANUALHOOK(Classify, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookClassify), false);
-		
+
+		nbinfectinfo_t info{};
+		info.cls = cls;
+		info.hookids.emplace_back(SH_ADD_MANUALHOOK(UpdateOnRemove, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::removed), false));
+		info.hookids.emplace_back(SH_ADD_MANUALHOOK(MyInfectedPointer, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookMyInfectedPointer), false));
+		info.hookids.emplace_back(SH_ADD_MANUALHOOK(CanBeA, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookCanBeA), false));
+		info.hookids.emplace_back(SH_ADD_MANUALHOOK(GetClass, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookGetClass), false));
+		info.hookids.emplace_back(SH_ADD_MANUALHOOK(Classify, bytes, SH_MEMBER(bytes, &NextBotCombatCharacterInfected::HookClassify), false));
+
+		nbinfectclsmap.emplace(bytes, std::move(info));
+
 		return bytes;
 	}
 };
@@ -6074,6 +6095,10 @@ public:
 				}
 			}
 		}
+
+		for(int id : hookids) {
+			SH_REMOVE_HOOK_ID(id);
+		}
 	}
 	
 	cell_t handle_set_function(IPluginContext *pContext, const cell_t *params)
@@ -6169,6 +6194,8 @@ public:
 	{ return data; }
 
 	spvarmap_t data{};
+
+	std::vector<int> hookids{};
 };
 
 class IPluginNextBotComponentArbitraryFuncs : public IPluginNextBotComponent
@@ -7830,69 +7857,69 @@ class INextBotGeneric : public INextBot
 public:
 	struct vars_t
 	{
+		std::vector<int> hookids{};
+
 		EHANDLE m_lastAttacker{};
 		bool m_didModelChange = false;
-		CBaseEntity *pEntity = nullptr;
+		int ref = INVALID_EHANDLE_INDEX;
 	};
-	
+
 	unsigned char *vars_ptr()
 	{ return (((unsigned char *)this) + sizeof(INextBot)); }
 	vars_t &getvars()
 	{ return *(vars_t *)vars_ptr(); }
-	
+
 	void dtor()
 	{
 		SH_REMOVE_MANUALHOOK(GenericDtor, this, SH_MEMBER(this, &INextBotGeneric::dtor), false);
-		
+
 		getvars().~vars_t();
-		
+
 		RETURN_META(MRES_HANDLED);
 	}
-	
+
 	CBaseCombatCharacter *HookGetEntity( void )
 	{
-		RETURN_META_VALUE(MRES_SUPERCEDE, (CBaseCombatCharacter *)getvars().pEntity);
+		CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(getvars().ref);
+		RETURN_META_VALUE(MRES_SUPERCEDE, pEntity->MyCombatCharacterPointer());
 	}
+
 	class NextBotCombatCharacter *HookGetNextBotCombatCharacter( void )
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, nullptr);
 	}
-	
-	void HookEntityDtor()
+
+	void HookEntityRemoved()
 	{
-		CBaseEntity *pEntity = META_IFACEPTR(CBaseEntity);
-		
-		SH_REMOVE_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(this, &INextBotGeneric::HookEntityDtor), false);
-		SH_REMOVE_MANUALHOOK(MyNextBotPointer, pEntity, SH_MEMBER(this, &INextBotGeneric::HookMyNextBotPointer), false);
-		SH_REMOVE_MANUALHOOK(PerformCustomPhysics, pEntity, SH_MEMBER(this, &INextBotGeneric::HookPerformCustomPhysics), false);
-		SH_REMOVE_MANUALHOOK(IsAreaTraversable, pEntity, SH_MEMBER(this, &INextBotGeneric::HookIsAreaTraversable), false);
-		//SH_REMOVE_MANUALHOOK(Spawn, pEntity, SH_MEMBER(this, &INextBotGeneric::HookSpawn), true);
-		
+		for(int id : getvars().hookids) {
+			SH_REMOVE_HOOK_ID(id);
+		}
+
 		delete this;
-		
+
 		RETURN_META(MRES_HANDLED);
 	}
-	
+
 	INextBot *HookMyNextBotPointer()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, this);
 	}
-	
+
 	bool HookIsAreaTraversable(const CNavArea *area);
-	
+
 	void HookPerformCustomPhysics( Vector *pNewPosition, Vector *pNewVelocity, QAngle *pNewAngles, QAngle *pNewAngVelocity );
-	
+
 	void HookSpawn()
 	{
 		CBaseEntity *pEntity = META_IFACEPTR(CBaseEntity);
-		
+
 		Reset();
-		
+
 		pEntity->SetMoveType(MOVETYPE_CUSTOM);
-		
+
 		RETURN_META(MRES_HANDLED);
 	}
-	
+
 	static INextBotGeneric *create(CBaseEntity *pEntity);
 };
 
@@ -7901,10 +7928,13 @@ void INextBotGeneric::HookPerformCustomPhysics( Vector *pNewPosition, Vector *pN
 	ILocomotion *mover = GetLocomotionInterface();
 	if ( mover )
 	{
-		// hack to keep ground entity from being NULL'd when Z velocity is positive
-		getvars().pEntity->SetGroundEntity( mover->GetGround() );
+		CBaseEntity *pEntity = gamehelpers->ReferenceToEntity(getvars().ref);
+		if(pEntity) {
+			// hack to keep ground entity from being NULL'd when Z velocity is positive
+			pEntity->SetGroundEntity( mover->GetGround() );
+		}
 	}
-	
+
 	RETURN_META(MRES_SUPERCEDE);
 }
 
@@ -8582,60 +8612,39 @@ public:
 
 	virtual void remove_hooks(ILocomotion *bytes)
 	{
-		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
-
-		if(type != Locomotion_FlyingCustom) {
-			SH_REMOVE_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookReset), true);
-			SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
-			SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
+		for(int id : hookids) {
+			SH_REMOVE_HOOK_ID(id);
 		}
-
-		SH_REMOVE_HOOK(ILocomotion, GetRunSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetRunSpeed), false);
-		SH_REMOVE_HOOK(ILocomotion, GetWalkSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetWalkSpeed), false);
-
-		SH_REMOVE_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
-		SH_REMOVE_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false);
-		SH_REMOVE_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetDeathDropHeight), false);
-#if SOURCE_ENGINE == SE_TF2
-		SH_REMOVE_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxAcceleration), false);
-		SH_REMOVE_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxDeceleration), false);
-#endif
-		SH_REMOVE_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetSpeedLimit), false);
-		SH_REMOVE_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetTraversableSlopeLimit), false);
-		
-		SH_REMOVE_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false);
-		SH_REMOVE_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false);
-		SH_REMOVE_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false);
-		SH_REMOVE_HOOK(ILocomotion, IsEntityTraversable, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookIsEntityTraversable), false);
+		hookids.clear();
 	}
 
 	virtual void add_hooks(ILocomotion *bytes)
 	{
-		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false);
+		hookids.emplace_back(SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::dtor), false));
 
 		if(type != Locomotion_FlyingCustom) {
-			SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookReset), true);
-			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false);
-			SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false);
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookReset), true));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookUpdate), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbUpToLedge), false));
 		}
 
-		SH_ADD_HOOK(ILocomotion, GetRunSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetRunSpeed), false);
-		SH_ADD_HOOK(ILocomotion, GetWalkSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetWalkSpeed), false);
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetRunSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetRunSpeed), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetWalkSpeed, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetWalkSpeed), false));
 
-		SH_ADD_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false);
-		SH_ADD_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false);
-		SH_ADD_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetDeathDropHeight), false);
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetMaxJumpHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxJumpHeight), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetStepHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetStepHeight), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetDeathDropHeight, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetDeathDropHeight), false));
 #if SOURCE_ENGINE == SE_TF2
-		SH_ADD_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxAcceleration), false);
-		SH_ADD_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxDeceleration), false);
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetMaxAcceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxAcceleration), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetMaxDeceleration, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetMaxDeceleration), false));
 #endif
-		SH_ADD_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetSpeedLimit), false);
-		SH_ADD_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetTraversableSlopeLimit), false);
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetSpeedLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetSpeedLimit), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetTraversableSlopeLimit, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookGetTraversableSlopeLimit), false));
 		
-		SH_ADD_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false);
-		SH_ADD_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false);
-		SH_ADD_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false);
-		SH_ADD_HOOK(ILocomotion, IsEntityTraversable, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookIsEntityTraversable), false);
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, ClimbLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookClimbLadder), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, DescendLadder, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookDescendLadder), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, ShouldCollideWith, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookShouldCollideWith), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, IsEntityTraversable, bytes, SH_MEMBER(this, &customlocomotion_base_vars_t::HookIsEntityTraversable), false));
 	}
 	
 	void dtor()
@@ -8760,17 +8769,17 @@ SH_DECL_HOOK0(NextBotGroundLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
 #define GameLocomotion NextBotGroundLocomotion
 #define GameLocomotionCustom NextBotGroundLocomotionCustom
 #define SH_ADD_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
-	SH_ADD_HOOK(NextBotGroundLocomotion, x2, x3, x4, x5);
+	SH_ADD_HOOK(NextBotGroundLocomotion, x2, x3, x4, x5)
 #define SH_REMOVE_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
-	SH_REMOVE_HOOK(NextBotGroundLocomotion, x2, x3, x4, x5);
+	SH_REMOVE_HOOK(NextBotGroundLocomotion, x2, x3, x4, x5)
 #elif SOURCE_ENGINE == SE_LEFT4DEAD2
 SH_DECL_HOOK0(ZombieBotLocomotion, GetMaxYawRate, SH_NOATTRIB, 0, float);
 #define GameLocomotion ZombieBotLocomotion
 #define GameLocomotionCustom ZombieBotLocomotionCustom
 #define SH_ADD_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
-	SH_ADD_HOOK(ZombieBotLocomotion, x2, x3, x4, x5);
+	SH_ADD_HOOK(ZombieBotLocomotion, x2, x3, x4, x5)
 #define SH_REMOVE_HOOK_GAMELOCOMOTION(x2, x3, x4, x5) \
-	SH_REMOVE_HOOK(ZombieBotLocomotion, x2, x3, x4, x5);
+	SH_REMOVE_HOOK(ZombieBotLocomotion, x2, x3, x4, x5)
 #endif
 
 class GameLocomotionCustom;
@@ -8836,13 +8845,6 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 	virtual void remove_hooks(ILocomotion *loc) override
 	{
 		customlocomotion_base_vars_t::remove_hooks(loc);
-		
-		GameLocomotion *gameloc = (GameLocomotion *)loc;
-		
-		SH_REMOVE_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
-
-		SH_REMOVE_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowardsPre), false);
-		SH_REMOVE_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowardsPost), true);
 	}
 	
 	virtual void add_hooks(ILocomotion *loc) override
@@ -8851,10 +8853,10 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 		
 		GameLocomotion *gameloc = (GameLocomotion *)loc;
 		
-		SH_ADD_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false);
+		hookids.emplace_back(SH_ADD_HOOK_GAMELOCOMOTION(GetMaxYawRate, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookGetMaxYawRate), false));
 
-		SH_ADD_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowardsPre), false);
-		SH_ADD_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowardsPost), true);
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowardsPre), false));
+		hookids.emplace_back(SH_ADD_HOOK(ILocomotion, FaceTowards, gameloc, SH_MEMBER(this, &customlocomotion_vars_t::HookFaceTowardsPost), true));
 	}
 };
 
@@ -8877,20 +8879,14 @@ public:
 
 			NextBotGroundLocomotion *loc{(NextBotGroundLocomotion *)bytes};
 
-			SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, loc, SH_MEMBER(this, &vars_t::HookGetGravity), false);
-			SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, loc, SH_MEMBER(this, &vars_t::HookGetFrictionForward), false);
-			SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, loc, SH_MEMBER(this, &vars_t::HookGetFrictionSideways), false);
+			hookids.emplace_back(SH_ADD_HOOK(NextBotGroundLocomotion, GetGravity, loc, SH_MEMBER(this, &vars_t::HookGetGravity), false));
+			hookids.emplace_back(SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionForward, loc, SH_MEMBER(this, &vars_t::HookGetFrictionForward), false));
+			hookids.emplace_back(SH_ADD_HOOK(NextBotGroundLocomotion, GetFrictionSideways, loc, SH_MEMBER(this, &vars_t::HookGetFrictionSideways), false));
 		}
 
 		virtual void remove_hooks(ILocomotion *bytes) override
 		{
 			customlocomotion_vars_t::remove_hooks(bytes);
-
-			NextBotGroundLocomotion *loc{(NextBotGroundLocomotion *)bytes};
-
-			SH_REMOVE_HOOK(NextBotGroundLocomotion, GetGravity, loc, SH_MEMBER(this, &vars_t::HookGetGravity), false);
-			SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionForward, loc, SH_MEMBER(this, &vars_t::HookGetFrictionForward), false);
-			SH_REMOVE_HOOK(NextBotGroundLocomotion, GetFrictionSideways, loc, SH_MEMBER(this, &vars_t::HookGetFrictionSideways), false);
 		}
 
 		float HookGetGravity()
@@ -9118,6 +9114,8 @@ public:
 		vars_t()
 			: customlocomotion_base_vars_t{Locomotion_FlyingCustom} {}
 
+		std::vector<int> entity_hookids{};
+
 		spfunc_t limitpitch = nullptr;
 
 		virtual void plugin_unloaded(IdentityToken_t *pId) override
@@ -9146,58 +9144,43 @@ public:
 
 			CNextBotFlyingLocomotion *loc{(CNextBotFlyingLocomotion *)bytes};
 
-			SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &vars_t::HookClimbUpToLedge), false);
-			SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &vars_t::HookClimbUpToLedge), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false));
 
-			SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
-			SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), true);
-			SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
-			SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
-			SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false);
-			SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false);
-			SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
-			SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
-			SH_ADD_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
-			SH_ADD_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false);
-			SH_ADD_HOOK(ILocomotion, IsAbleToJumpAcrossGaps, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToJumpAcrossGaps), false);
-			SH_ADD_HOOK(ILocomotion, IsRunning, bytes, SH_MEMBER(this, &vars_t::HookIsRunning), false);
-			SH_ADD_HOOK(ILocomotion, GetGround, bytes, SH_MEMBER(this, &vars_t::HookGetGround), false);
-			SH_ADD_HOOK(ILocomotion, OnLeaveGround, bytes, SH_MEMBER(this, &vars_t::HookOnLeaveGround), false);
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), true));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, IsAbleToJumpAcrossGaps, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToJumpAcrossGaps), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, IsRunning, bytes, SH_MEMBER(this, &vars_t::HookIsRunning), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, GetGround, bytes, SH_MEMBER(this, &vars_t::HookGetGround), false));
+			hookids.emplace_back(SH_ADD_HOOK(ILocomotion, OnLeaveGround, bytes, SH_MEMBER(this, &vars_t::HookOnLeaveGround), false));
 
 			CBaseEntity *pEntity = bytes->GetBot()->GetEntity();
 
 			CBaseCombatCharacter *pCC = pEntity->MyCombatCharacterPointer();
 			if(pCC) {
-				SH_ADD_MANUALHOOK(UpdateLastKnownArea, pCC, SH_MEMBER(this, &vars_t::HookUpdateLastKnownArea), false);
+				entity_hookids.emplace_back(SH_ADD_MANUALHOOK(UpdateLastKnownArea, pCC, SH_MEMBER(this, &vars_t::HookUpdateLastKnownArea), false));
 			}
 
-			SH_ADD_MANUALHOOK(Deflected, pEntity, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookDeflected), false);
-			SH_ADD_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &vars_t::HookUpdateOnRemove), false);
+			entity_hookids.emplace_back(SH_ADD_MANUALHOOK(Deflected, pEntity, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookDeflected), false));
+			entity_hookids.emplace_back(SH_ADD_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &vars_t::HookUpdateOnRemove), false));
 		}
 
 		virtual void remove_hooks(ILocomotion *bytes) override
 		{
 			customlocomotion_base_vars_t::remove_hooks(bytes);
 
-			CNextBotFlyingLocomotion *loc{(CNextBotFlyingLocomotion *)bytes};
-
-			SH_REMOVE_HOOK(ILocomotion, Update, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookUpdate), false);
-			SH_REMOVE_HOOK(ILocomotion, ClimbUpToLedge, bytes, SH_MEMBER(this, &vars_t::HookClimbUpToLedge), false);
-
-			SH_REMOVE_HOOK(ILocomotion, Reset, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookReset), false);
-			SH_REMOVE_HOOK(ILocomotion, Approach, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookApproach), true);
-			SH_REMOVE_HOOK(ILocomotion, FaceTowards, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookFaceTowards), false);
-			SH_REMOVE_HOOK(ILocomotion, SetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookSetDesiredSpeed), false);
-			SH_REMOVE_HOOK(ILocomotion, GetDesiredSpeed, bytes, SH_MEMBER(this, &vars_t::HookGetDesiredSpeed), false);
-			SH_REMOVE_HOOK(ILocomotion, GetGroundNormal, bytes, SH_MEMBER(this, &vars_t::HookGetGroundNormal), false);
-			SH_REMOVE_HOOK(ILocomotion, GetVelocity, bytes, SH_MEMBER(this, &vars_t::HookGetVelocity), false);
-			SH_REMOVE_HOOK(ILocomotion, GetFeet, bytes, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookGetFeet), false);
-			SH_REMOVE_HOOK(ILocomotion, IsOnGround, bytes, SH_MEMBER(this, &vars_t::HookIsOnGround), false);
-			SH_REMOVE_HOOK(ILocomotion, IsRunning, bytes, SH_MEMBER(this, &vars_t::HookIsRunning), false);
-			SH_REMOVE_HOOK(ILocomotion, IsAbleToClimb, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToClimb), false);
-			SH_REMOVE_HOOK(ILocomotion, IsAbleToJumpAcrossGaps, bytes, SH_MEMBER(this, &vars_t::HookIsAbleToJumpAcrossGaps), false);
-			SH_REMOVE_HOOK(ILocomotion, GetGround, bytes, SH_MEMBER(this, &vars_t::HookGetGround), false);
-			SH_REMOVE_HOOK(ILocomotion, OnLeaveGround, bytes, SH_MEMBER(this, &vars_t::HookOnLeaveGround), false);
+			for(int id : entity_hookids) {
+				SH_REMOVE_HOOK_ID(id);
+			}
+			entity_hookids.clear();
 		}
 
 		bool HookClimbUpToLedge( const Vector &landingGoal, const Vector &landingForward, CBaseEntity *obstacle )
@@ -9238,18 +9221,10 @@ public:
 
 		void HookUpdateOnRemove()
 		{
-			CBaseEntity *pThis = META_IFACEPTR(CBaseEntity);
-
-			CBaseCombatCharacter *pCC = pThis->MyCombatCharacterPointer();
-			if(pCC) {
-				SH_REMOVE_MANUALHOOK(UpdateLastKnownArea, pCC, SH_MEMBER(this, &vars_t::HookUpdateLastKnownArea), false);
+			for(int id : entity_hookids) {
+				SH_REMOVE_HOOK_ID(id);
 			}
-
-			INextBot *bot = pThis->MyNextBotPointer();
-			ILocomotion *loc = bot->GetLocomotionInterface();
-
-			SH_REMOVE_MANUALHOOK(Deflected, pThis, SH_MEMBER((CNextBotFlyingLocomotion *)loc, &CNextBotFlyingLocomotion::HookDeflected), false);
-			SH_REMOVE_MANUALHOOK(UpdateOnRemove, pThis, SH_MEMBER(this, &vars_t::HookUpdateOnRemove), false);
+			entity_hookids.clear();
 
 			RETURN_META(MRES_HANDLED);
 		}
@@ -10135,26 +10110,28 @@ INextBotGeneric *INextBotGeneric::create(CBaseEntity *pEntity)
 	call_mfunc<void>(bytes, INextBotCTOR);
 
 	new (bytes->vars_ptr()) vars_t();
-	
-	bytes->getvars().pEntity = pEntity;
-	
-	SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &INextBotGeneric::dtor), false);
-	
-	SH_ADD_HOOK(INextBot, GetEntity, bytes, SH_MEMBER(bytes, &INextBotGeneric::HookGetEntity), false);
-	SH_ADD_HOOK(INextBot, GetNextBotCombatCharacter, bytes, SH_MEMBER(bytes, &INextBotGeneric::HookGetNextBotCombatCharacter), false);
-	
-	SH_ADD_MANUALHOOK(GenericDtor, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookEntityDtor), false);
-	SH_ADD_MANUALHOOK(MyNextBotPointer, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookMyNextBotPointer), false);
-	SH_ADD_MANUALHOOK(PerformCustomPhysics, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookPerformCustomPhysics), false);
-	//SH_ADD_MANUALHOOK(Spawn, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookSpawn), true);
-	
+
+	bytes->getvars().ref = gamehelpers->EntityToReference(pEntity);
+
+	std::vector<int> &hookids{bytes->getvars().hookids};
+
+	hookids.emplace_back(SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(bytes, &INextBotGeneric::dtor), false));
+
+	hookids.emplace_back(SH_ADD_HOOK(INextBot, GetEntity, bytes, SH_MEMBER(bytes, &INextBotGeneric::HookGetEntity), false));
+	hookids.emplace_back(SH_ADD_HOOK(INextBot, GetNextBotCombatCharacter, bytes, SH_MEMBER(bytes, &INextBotGeneric::HookGetNextBotCombatCharacter), false));
+
+	hookids.emplace_back(SH_ADD_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookEntityRemoved), false));
+	hookids.emplace_back(SH_ADD_MANUALHOOK(MyNextBotPointer, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookMyNextBotPointer), false));
+	hookids.emplace_back(SH_ADD_MANUALHOOK(PerformCustomPhysics, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookPerformCustomPhysics), false));
+	//hookids.emplace_back(SH_ADD_MANUALHOOK(Spawn, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookSpawn), true));
+
 	if(pEntity->MyCombatCharacterPointer()) {
-		SH_ADD_MANUALHOOK(IsAreaTraversable, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookIsAreaTraversable), false);
+		hookids.emplace_back(SH_ADD_MANUALHOOK(IsAreaTraversable, pEntity, SH_MEMBER(bytes, &INextBotGeneric::HookIsAreaTraversable), false));
 	}
-	
+
 	bytes->Reset();
 	pEntity->SetMoveType(MOVETYPE_CUSTOM);
-	
+
 	return bytes;
 }
 
@@ -11597,39 +11574,35 @@ public:
 
 	virtual void remove_hooks(IVision *bytes)
 	{
-		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customvision_base_vars_t::dtor), false);
-	
-		SH_REMOVE_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMaxVisionRange), false);
-		SH_REMOVE_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMinRecognizeTime), false);
-		SH_REMOVE_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetDefaultFieldOfView), false);
-		SH_REMOVE_HOOK(IVision, IsIgnored, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookIsIgnored), false);
-		SH_REMOVE_HOOK(IVision, IsVisibleEntityNoticed, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookIsVisibleEntityNoticed), false);
-		SH_REMOVE_HOOK(IVision, CollectPotentiallyVisibleEntities, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookCollectPotentiallyVisibleEntities), true);
+		for(int id : hookids) {
+			SH_REMOVE_HOOK_ID(id);
+		}
+		hookids.clear();
 	}
 
 	virtual void add_hooks(IVision *bytes)
 	{
-		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customvision_base_vars_t::dtor), false);
-	
-		SH_ADD_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMaxVisionRange), false);
-		SH_ADD_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMinRecognizeTime), false);
-		SH_ADD_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetDefaultFieldOfView), false);
-		SH_ADD_HOOK(IVision, IsIgnored, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookIsIgnored), false);
-		SH_ADD_HOOK(IVision, IsVisibleEntityNoticed, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookIsVisibleEntityNoticed), false);
-		SH_ADD_HOOK(IVision, CollectPotentiallyVisibleEntities, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookCollectPotentiallyVisibleEntities), true);
+		hookids.emplace_back(SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &customvision_base_vars_t::dtor), false));
+
+		hookids.emplace_back(SH_ADD_HOOK(IVision, GetMaxVisionRange, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMaxVisionRange), false));
+		hookids.emplace_back(SH_ADD_HOOK(IVision, GetMinRecognizeTime, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetMinRecognizeTime), false));
+		hookids.emplace_back(SH_ADD_HOOK(IVision, GetDefaultFieldOfView, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookGetDefaultFieldOfView), false));
+		hookids.emplace_back(SH_ADD_HOOK(IVision, IsIgnored, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookIsIgnored), false));
+		hookids.emplace_back(SH_ADD_HOOK(IVision, IsVisibleEntityNoticed, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookIsVisibleEntityNoticed), false));
+		hookids.emplace_back(SH_ADD_HOOK(IVision, CollectPotentiallyVisibleEntities, bytes, SH_MEMBER(this, &customvision_base_vars_t::HookCollectPotentiallyVisibleEntities), true));
 	}
 
 	void dtor()
 	{
 		IVision *loc = META_IFACEPTR(IVision);
-		
+
 		remove_hooks(loc);
-		
+
 		this->~customvision_base_vars_t();
-		
+
 		RETURN_META(MRES_HANDLED);
 	}
-	
+
 	float HookGetMaxVisionRange() { RETURN_META_VALUE(MRES_SUPERCEDE, maxrange); }
 	float HookGetMinRecognizeTime() { RETURN_META_VALUE(MRES_SUPERCEDE, minreco); }
 	float HookGetDefaultFieldOfView() { RETURN_META_VALUE(MRES_SUPERCEDE, deffov); }
@@ -12326,9 +12299,16 @@ struct pathfollower_vars_t
 {
 	virtual ~pathfollower_vars_t() {}
 
-	virtual void dtor(PathFollower *bytes) {}
+	virtual void dtor(PathFollower *bytes)
+	{
+		for(int id : hookids) {
+			SH_REMOVE_HOOK_ID(id);
+		}
+	}
 
 	bool allowfacing = true;
+
+	std::vector<int> hookids{};
 };
 
 std::unordered_map<PathFollower *, unsigned char *> pathfollower_var_map{};
@@ -12406,8 +12386,6 @@ public:
 			pathfollower_var_map.erase(it);
 		}
 
-		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_STATIC(PathFollower::call_dtor<T>), false);
-
 		RETURN_META(MRES_HANDLED);
 	}
 
@@ -12416,9 +12394,9 @@ public:
 	{
 		C *bytes = (C *)calloc(1, sizeof(C) + sizeof(T));
 		call_mfunc<void>(bytes, ctor);
-		pathfollower_var_map.emplace(bytes, vars_ptr<C>(bytes));
-		new (vars_ptr<C>(bytes)) T{};
-		SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_STATIC(PathFollower::call_dtor<C>), false);
+		pathfollower_var_map.emplace(bytes, PathFollower::vars_ptr<C>(bytes));
+		new (PathFollower::vars_ptr<C>(bytes)) T{};
+		PathFollower::getvars<C, T>(bytes).hookids.emplace_back(SH_ADD_MANUALHOOK(GenericDtor, bytes, SH_STATIC(PathFollower::call_dtor<C>), false));
 		return bytes;
 	}
 
@@ -12681,11 +12659,9 @@ public:
 		m_lastPathSubject = NULL;
 		m_chaseHow = chaseHow;
 	}
-	
+
 	void dtor()
 	{
-		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &ChasePath::HookInvalidate), true);
-		
 		m_failTimer.~CountdownTimer();
 		m_throttleTimer.~CountdownTimer();
 		m_lifetimeTimer.~CountdownTimer();
@@ -12698,8 +12674,8 @@ public:
 		static_assert(std::is_base_of_v<ChasePath, C>);
 		C *bytes = (C *)PathFollower::create<C, T>();
 		bytes->ctor(chaseHow);
-		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &C::HookInvalidate), true);
 		T &vars{PathFollower::getvars<C, T>(bytes)};
+		vars.hookids.emplace_back(SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &C::HookInvalidate), true));
 		vars.pIsRepathNeeded = static_cast<IsRepathNeeded_t>(&C::IsRepathNeeded);
 		vars.pUpdate = static_cast<Update_t>(&C::Update);
 		return bytes;
@@ -13078,15 +13054,15 @@ public:
 
 	void dtor()
 	{
-		SH_REMOVE_HOOK(Path, ComputeAreaCrossing, this, SH_MEMBER(this, &DirectChasePath::HookComputeAreaCrossing), false);
+		
 	}
 
 	template <typename C = DirectChasePath, typename T = vars_t>
 	static C *create(SubjectChaseType chaseHow)
 	{
 		C *bytes = (C *)ChasePath::create<C, T>(chaseHow);
-		SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &C::HookComputeAreaCrossing), false);
 		T &vars{PathFollower::getvars<C, T>(bytes)};
+		vars.hookids.emplace_back(SH_ADD_HOOK(Path, ComputeAreaCrossing, bytes, SH_MEMBER(bytes, &C::HookComputeAreaCrossing), false));
 		vars.pComputeAreaCrossing = func_to_func<ComputeAreaCrossing_t>(&C::DoComputeAreaCrossing);
 		return bytes;
 	}
@@ -13656,10 +13632,6 @@ public:
 		m_throttleTimer.~CountdownTimer();
 		m_pathThreat.~EHANDLE();
 		m_pathThreatPos.~Vector();
-
-		SH_REMOVE_HOOK(Path, Invalidate, this, SH_MEMBER(this, &RetreatPath::HookInvalidate), true);
-		
-		RETURN_META(MRES_HANDLED);
 	}
 
 	template <typename C = RetreatPath, typename T = vars_t>
@@ -13667,7 +13639,8 @@ public:
 	{
 		C *bytes = (C *)PathFollower::create<C, T>();
 		bytes->ctor();
-		SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), true);
+		T &vars{PathFollower::getvars<C, T>(bytes)};
+		vars.hookids.emplace_back(SH_ADD_HOOK(Path, Invalidate, bytes, SH_MEMBER(bytes, &RetreatPath::HookInvalidate), true));
 		return bytes;
 	}
 
@@ -15335,17 +15308,19 @@ struct pointer_holder_t
 	IBody *body = nullptr;
 	IIntention *inte = nullptr;
 	IVision *vis = nullptr;
-	
+
+	std::vector<int> hookids{};
+
 	bool hooked_loc = false;
 	bool hooked_bod = false;
 	bool hooked_inte = false;
 	bool hooked_vis = false;
-	
+
 	INextBot *m_bot = nullptr;
-	
+
 	pointer_holder_t(INextBot *bot);
 	~pointer_holder_t();
-	
+
 	void dtor(INextBot *bot);
 
 	void HookBotDtor()
@@ -15354,86 +15329,74 @@ struct pointer_holder_t
 		dtor(bot);
 		RETURN_META(MRES_HANDLED);
 	}
-	
+
 	ILocomotion *HookGetLocomotionInterface()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, locomotion);
 	}
-	
+
 	IBody *HookGetBodyInterface()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, body);
 	}
-	
+
 	IIntention *HookGetIntentionInterface()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, inte);
 	}
-	
+
 	IVision *HookGetVisionInterface()
 	{
 		RETURN_META_VALUE(MRES_SUPERCEDE, vis);
 	}
-	
+
 	void set_locomotion(ILocomotion *loc)
 	{
 		if(!hooked_loc) {
-			SH_ADD_HOOK(INextBot, GetLocomotionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetLocomotionInterface), false);
+			hookids.emplace_back(SH_ADD_HOOK(INextBot, GetLocomotionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetLocomotionInterface), false));
 			hooked_loc = true;
 		}
-		
+
 		locomotion = loc;
 	}
-	
+
 	void set_body(IBody *loc)
 	{
 		if(!hooked_bod) {
-			SH_ADD_HOOK(INextBot, GetBodyInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetBodyInterface), false);
+			hookids.emplace_back(SH_ADD_HOOK(INextBot, GetBodyInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetBodyInterface), false));
 			hooked_bod = true;
 		}
-		
+
 		body = loc;
 	}
-	
+
 	void set_vision(IVision *loc)
 	{
 		if(!hooked_vis) {
-			SH_ADD_HOOK(INextBot, GetVisionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetVisionInterface), false);
+			hookids.emplace_back(SH_ADD_HOOK(INextBot, GetVisionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetVisionInterface), false));
 			hooked_vis = true;
 		}
-		
+
 		vis = loc;
 	}
-	
+
 	void set_intention(IIntention *loc)
 	{
 		if(!hooked_inte) {
-			SH_ADD_HOOK(INextBot, GetIntentionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetIntentionInterface), false);
+			hookids.emplace_back(SH_ADD_HOOK(INextBot, GetIntentionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetIntentionInterface), false));
 			hooked_inte = true;
 		}
-		
+
 		inte = loc;
 	}
 };
 
 void pointer_holder_t::dtor(INextBot *bot)
 {
-	if(hooked_loc) {
-		SH_REMOVE_HOOK(INextBot, GetLocomotionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetLocomotionInterface), false);
+	for(int id : hookids) {
+		SH_REMOVE_HOOK_ID(id);
 	}
-	
-	if(hooked_bod) {
-		SH_REMOVE_HOOK(INextBot, GetBodyInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetBodyInterface), false);
-	}
-	
-	if(hooked_vis) {
-		SH_REMOVE_HOOK(INextBot, GetVisionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetVisionInterface), false);
-	}
-	
-	if(hooked_inte) {
-		SH_REMOVE_HOOK(INextBot, GetIntentionInterface, m_bot, SH_MEMBER(this, &pointer_holder_t::HookGetIntentionInterface), false);
-	}
-	
+
 	delete this;
 }
 
@@ -15443,8 +15406,8 @@ pointer_holder_map_t pointermap{};
 pointer_holder_t::pointer_holder_t(INextBot *bot)
 	: m_bot{bot}
 {
-	SH_ADD_MANUALHOOK(GenericDtor, m_bot, SH_MEMBER(this, &pointer_holder_t::HookBotDtor), false);
-	
+	hookids.emplace_back(SH_ADD_MANUALHOOK(GenericDtor, m_bot, SH_MEMBER(this, &pointer_holder_t::HookBotDtor), false));
+
 	pointermap[m_bot] = this;
 }
 
@@ -15453,19 +15416,19 @@ pointer_holder_t::~pointer_holder_t()
 	if(locomotion) {
 		delete locomotion;
 	}
-	
+
 	if(body) {
 		delete body;
 	}
-	
+
 	if(vis) {
 		delete vis;
 	}
-	
+
 	if(inte) {
 		delete inte;
 	}
-	
+
 	pointermap.erase(m_bot);
 }
 #endif
@@ -16830,6 +16793,20 @@ cell_t handle_has_data(IPluginContext *pContext, const cell_t *params, spvarmap_
 	return (it != data.end() && it->second.size() > 0);
 }
 
+cell_t handle_remove_data(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
+{
+	char *name = nullptr;
+	pContext->LocalToString(params[2], &name);
+	
+	auto it{data.find(name)};
+	if(it == data.end()) {
+		return 0;
+	}
+
+	data.erase(it);
+	return 0;
+}
+
 cell_t handle_set_data_array(IPluginContext *pContext, const cell_t *params, spvarmap_t &data)
 {
 	char *name = nullptr;
@@ -16927,6 +16904,14 @@ cell_t CustomComponenthas_data(IPluginContext *pContext, const cell_t *params)
 }
 
 template <typename T>
+cell_t CustomComponentremove_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	auto &vars = locomotion->getvars();
+	return handle_remove_data(pContext, params, vars.data);
+}
+
+template <typename T>
 cell_t CustomComponentset_data_array(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
@@ -16954,6 +16939,8 @@ cell_t NextBotFlyingLocomotionget_data(IPluginContext *pContext, const cell_t *p
 { return CustomComponentget_data<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionhas_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponenthas_data<CNextBotFlyingLocomotion>(pContext, params); }
+cell_t NextBotFlyingLocomotionremove_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentremove_data<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionset_data_array(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data_array<CNextBotFlyingLocomotion>(pContext, params); }
 cell_t NextBotFlyingLocomotionget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -16971,6 +16958,8 @@ cell_t GameLocomotionCustomget_data(IPluginContext *pContext, const cell_t *para
 { return CustomComponentget_data<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomhas_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponenthas_data<GameLocomotionCustom>(pContext, params); }
+cell_t GameLocomotionCustomremove_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentremove_data<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data_array<GameLocomotionCustom>(pContext, params); }
 cell_t GameLocomotionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -16988,6 +16977,8 @@ cell_t GameVisionCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentget_data<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomhas_data(IPluginContext *pContext, const cell_t *params)
 { return CustomComponenthas_data<GameVisionCustom>(pContext, params); }
+cell_t GameVisionCustomremove_data(IPluginContext *pContext, const cell_t *params)
+{ return CustomComponentremove_data<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return CustomComponentset_data_array<GameVisionCustom>(pContext, params); }
 cell_t GameVisionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -18104,7 +18095,7 @@ public:
 	bool reactnoise = true;
 	bool reactcontact = true;
 #endif
-	
+
 	spfunc_t climbunto = nullptr;
 	spfunc_t ablebreak = nullptr;
 	spfunc_t ableblock = nullptr;
@@ -18119,27 +18110,27 @@ public:
 		: IPluginNextBotComponentArbitraryFuncs(), ref{gamehelpers->EntityToReference(pNextBot->GetEntity())}, bot{pNextBot}
 	{
 		nbcustomap.emplace(ref, this);
-		
-		SH_ADD_MANUALHOOK(GenericDtor, pNextBot, SH_MEMBER(this, &INextBotCustom::dtor), false);
-		
-		SH_ADD_HOOK(INextBot, IsAbleToBlockMovementOf, pNextBot, SH_MEMBER(this, &INextBotCustom::HookIsAbleToBlockMovementOf), false);
-		SH_ADD_HOOK(INextBot, ShouldTouch, pNextBot, SH_MEMBER(this, &INextBotCustom::HookShouldTouch), false);
-		
+
+		hookids.emplace_back(SH_ADD_MANUALHOOK(GenericDtor, pNextBot, SH_MEMBER(this, &INextBotCustom::dtor), false));
+
+		hookids.emplace_back(SH_ADD_HOOK(INextBot, IsAbleToBlockMovementOf, pNextBot, SH_MEMBER(this, &INextBotCustom::HookIsAbleToBlockMovementOf), false));
+		hookids.emplace_back(SH_ADD_HOOK(INextBot, ShouldTouch, pNextBot, SH_MEMBER(this, &INextBotCustom::HookShouldTouch), false));
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-		SH_ADD_HOOK(INextBot, IsAllowedToClimb, pNextBot, SH_MEMBER(this, &INextBotCustom::HookIsAllowedToClimb), false);
-		SH_ADD_HOOK(INextBot, ReactToSurvivorVisibility, pNextBot, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorVisibility), false);
-		SH_ADD_HOOK(INextBot, ReactToSurvivorNoise, pNextBot, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorNoise), false);
-		SH_ADD_HOOK(INextBot, ReactToSurvivorContact, pNextBot, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorContact), false);
+		hookids.emplace_back(SH_ADD_HOOK(INextBot, IsAllowedToClimb, pNextBot, SH_MEMBER(this, &INextBotCustom::HookIsAllowedToClimb), false));
+		hookids.emplace_back(SH_ADD_HOOK(INextBot, ReactToSurvivorVisibility, pNextBot, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorVisibility), false));
+		hookids.emplace_back(SH_ADD_HOOK(INextBot, ReactToSurvivorNoise, pNextBot, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorNoise), false));
+		hookids.emplace_back(SH_ADD_HOOK(INextBot, ReactToSurvivorContact, pNextBot, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorContact), false));
 #endif
 	}
-	
+
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	bool HookIsAllowedToClimb() { RETURN_META_VALUE(MRES_SUPERCEDE, allowedclimb); }
 	bool HookReactToSurvivorVisibility() { RETURN_META_VALUE(MRES_SUPERCEDE, reactvis); }
 	bool HookReactToSurvivorNoise() { RETURN_META_VALUE(MRES_SUPERCEDE, reactnoise); }
 	bool HookReactToSurvivorContact() { RETURN_META_VALUE(MRES_SUPERCEDE, reactcontact); }
 #endif
-	
+
 	bool HookIsAbleToBlockMovementOf(INextBot *botInMotion)
 	{
 		if(!ableblock) {
@@ -18158,7 +18149,7 @@ public:
 
 		RETURN_META_VALUE(mres_to_meta_res(res), should);
 	}
-	
+
 	bool HookShouldTouch(CBaseEntity *object)
 	{
 		if(!shouldtouch) {
@@ -18182,18 +18173,11 @@ public:
 	{
 		INextBot *bytes = META_IFACEPTR(INextBot);
 		
-		SH_REMOVE_MANUALHOOK(GenericDtor, bytes, SH_MEMBER(this, &INextBotCustom::dtor), false);
-		
-		SH_REMOVE_HOOK(INextBot, IsAbleToBlockMovementOf, bytes, SH_MEMBER(this, &INextBotCustom::HookIsAbleToBlockMovementOf), false);
-		SH_REMOVE_HOOK(INextBot, ShouldTouch, bytes, SH_MEMBER(this, &INextBotCustom::HookShouldTouch), false);
-		
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-		SH_REMOVE_HOOK(INextBot, IsAllowedToClimb, bytes, SH_MEMBER(this, &INextBotCustom::HookIsAllowedToClimb), false);
-		SH_REMOVE_HOOK(INextBot, ReactToSurvivorVisibility, bytes, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorVisibility), false);
-		SH_REMOVE_HOOK(INextBot, ReactToSurvivorNoise, bytes, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorNoise), false);
-		SH_REMOVE_HOOK(INextBot, ReactToSurvivorContact, bytes, SH_MEMBER(this, &INextBotCustom::HookReactToSurvivorContact), false);
-#endif
-		
+		for(int id : hookids) {
+			SH_REMOVE_HOOK_ID(id);
+		}
+		hookids.clear();
+
 		delete this;
 		
 		RETURN_META(MRES_HANDLED);
@@ -18329,6 +18313,13 @@ cell_t Componenthas_data(IPluginContext *pContext, const cell_t *params)
 }
 
 template <typename T>
+cell_t Componentremove_data(IPluginContext *pContext, const cell_t *params)
+{
+	T *locomotion = (T *)params[1];
+	return handle_remove_data(pContext, params, locomotion->get_sp_data());
+}
+
+template <typename T>
 cell_t Componentset_data_array(IPluginContext *pContext, const cell_t *params)
 {
 	T *locomotion = (T *)params[1];
@@ -18354,6 +18345,8 @@ cell_t INextBotCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomhas_data(IPluginContext *pContext, const cell_t *params)
 { return Componenthas_data<INextBotCustom>(pContext, params); }
+cell_t INextBotCustomremove_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentremove_data<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<INextBotCustom>(pContext, params); }
 cell_t INextBotCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -18597,6 +18590,8 @@ cell_t BehaviorActionget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<SPAction>(pContext, params); }
 cell_t BehaviorActionhas_data(IPluginContext *pContext, const cell_t *params)
 { return Componenthas_data<SPAction>(pContext, params); }
+cell_t BehaviorActionremove_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentremove_data<SPAction>(pContext, params); }
 cell_t BehaviorActionset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<SPAction>(pContext, params); }
 cell_t BehaviorActionget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -18620,6 +18615,8 @@ cell_t IIntentionCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomhas_data(IPluginContext *pContext, const cell_t *params)
 { return Componenthas_data<IIntentionCustom>(pContext, params); }
+cell_t IIntentionCustomremove_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentremove_data<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<IIntentionCustom>(pContext, params); }
 cell_t IIntentionCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -18637,6 +18634,8 @@ cell_t IBodyCustomget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomhas_data(IPluginContext *pContext, const cell_t *params)
 { return Componenthas_data<IBodyCustom>(pContext, params); }
+cell_t IBodyCustomremove_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentremove_data<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<IBodyCustom>(pContext, params); }
 cell_t IBodyCustomget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -18659,6 +18658,8 @@ cell_t INextBotReplyget_data(IPluginContext *pContext, const cell_t *params)
 { return Componentget_data<SPNextBotReply>(pContext, params); }
 cell_t INextBotReplyhas_data(IPluginContext *pContext, const cell_t *params)
 { return Componenthas_data<SPNextBotReply>(pContext, params); }
+cell_t INextBotReplyremove_data(IPluginContext *pContext, const cell_t *params)
+{ return Componentremove_data<SPNextBotReply>(pContext, params); }
 cell_t INextBotReplyset_data_array(IPluginContext *pContext, const cell_t *params)
 { return Componentset_data_array<SPNextBotReply>(pContext, params); }
 cell_t INextBotReplyget_data_array(IPluginContext *pContext, const cell_t *params)
@@ -19419,6 +19420,7 @@ sp_nativeinfo_t natives[] =
 	{"NextBotFlyingLocomotion.set_data", NextBotFlyingLocomotionset_data},
 	{"NextBotFlyingLocomotion.get_data", NextBotFlyingLocomotionget_data},
 	{"NextBotFlyingLocomotion.has_data", NextBotFlyingLocomotionhas_data},
+	{"NextBotFlyingLocomotion.remove_data", NextBotFlyingLocomotionremove_data},
 	{"NextBotFlyingLocomotion.set_data_array", NextBotFlyingLocomotionset_data_array},
 	{"NextBotFlyingLocomotion.get_data_array", NextBotFlyingLocomotionget_data_array},
 
@@ -19459,6 +19461,7 @@ sp_nativeinfo_t natives[] =
 	MACRO_FUNC(GameLocomotionCustom, ".set_data", set_data)
 	MACRO_FUNC(GameLocomotionCustom, ".get_data", get_data)
 	MACRO_FUNC(GameLocomotionCustom, ".has_data", has_data)
+	MACRO_FUNC(GameLocomotionCustom, ".remove_data", remove_data)
 	MACRO_FUNC(GameLocomotionCustom, ".set_data_array", set_data_array)
 	MACRO_FUNC(GameLocomotionCustom, ".get_data_array", get_data_array)
 
@@ -19466,6 +19469,7 @@ sp_nativeinfo_t natives[] =
 	MACRO_FUNC(GameVisionCustom, ".set_data", set_data)
 	MACRO_FUNC(GameVisionCustom, ".get_data", get_data)
 	MACRO_FUNC(GameVisionCustom, ".has_data", has_data)
+	MACRO_FUNC(GameVisionCustom, ".remove_data", remove_data)
 	MACRO_FUNC(GameVisionCustom, ".set_data_array", set_data_array)
 	MACRO_FUNC(GameVisionCustom, ".get_data_array", get_data_array)
 	
@@ -19475,6 +19479,7 @@ sp_nativeinfo_t natives[] =
 	{"IIntentionCustom.set_data", IIntentionCustomset_data},
 	{"IIntentionCustom.get_data", IIntentionCustomget_data},
 	{"IIntentionCustom.has_data", IIntentionCustomhas_data},
+	{"IIntentionCustom.remove_data", IIntentionCustomremove_data},
 	{"IIntentionCustom.set_data_array", IIntentionCustomset_data_array},
 	{"IIntentionCustom.get_data_array", IIntentionCustomget_data_array},
 	
@@ -19482,6 +19487,7 @@ sp_nativeinfo_t natives[] =
 	{"IBodyCustom.set_data", IBodyCustomset_data},
 	{"IBodyCustom.get_data", IBodyCustomget_data},
 	{"IBodyCustom.has_data", IBodyCustomhas_data},
+	{"IBodyCustom.remove_data", IBodyCustomremove_data},
 	{"IBodyCustom.set_data_array", IBodyCustomset_data_array},
 	{"IBodyCustom.get_data_array", IBodyCustomget_data_array},
 
@@ -19490,6 +19496,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBotReply.set_data", INextBotReplyset_data},
 	{"INextBotReply.get_data", INextBotReplyget_data},
 	{"INextBotReply.has_data", INextBotReplyhas_data},
+	{"INextBotReply.remove_data", INextBotReplyremove_data},
 	{"INextBotReply.set_data_array", INextBotReplyset_data_array},
 	{"INextBotReply.get_data_array", INextBotReplyget_data_array},
 
@@ -19499,6 +19506,7 @@ sp_nativeinfo_t natives[] =
 	{"INextBotCustom.set_data", INextBotCustomset_data},
 	{"INextBotCustom.get_data", INextBotCustomget_data},
 	{"INextBotCustom.has_data", INextBotCustomhas_data},
+	{"INextBotCustom.remove_data", INextBotCustomremove_data},
 	{"INextBotCustom.set_data_array", INextBotCustomset_data_array},
 	{"INextBotCustom.get_data_array", INextBotCustomget_data_array},
 	
@@ -19626,6 +19634,7 @@ sp_nativeinfo_t natives[] =
 	{"CustomBehaviorAction.set_data", BehaviorActionset_data},
 	{"CustomBehaviorAction.get_data", BehaviorActionget_data},
 	{"CustomBehaviorAction.has_data", BehaviorActionhas_data},
+	{"CustomBehaviorAction.remove_data", BehaviorActionremove_data},
 	{"CustomBehaviorAction.set_data_array", BehaviorActionset_data_array},
 	{"CustomBehaviorAction.get_data_array", BehaviorActionget_data_array},
 	{"CustomBehaviorAction.set_function", BehaviorActionset_function},
@@ -21513,266 +21522,878 @@ cell_t CTFNavAreaGetEnemyInvasionAreaVector(IPluginContext *pContext, const cell
 
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
-	gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen);
+	if(!gameconfs->LoadGameConfigFile("nextbot", &g_pGameConf, error, maxlen)) {
+		return false;
+	}
 
 	g_pGameConf->GetMemSig("CBaseCombatCharacter::AllocateDefaultRelationships", &CBaseCombatCharacterAllocateDefaultRelationships);
+	if(CBaseCombatCharacterAllocateDefaultRelationships == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::AllocateDefaultRelationships address");
+		return false;
+	}
 
 	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1 = -1;
 	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::1", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1);
+	if(CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1 == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::1 offset");
+		return false;
+	}
+
 	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2 = -1;
 	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::2", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2);
+	if(CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2 == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::2 offset");
+		return false;
+	}
+
 	int CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3 = -1;
 	g_pGameConf->GetOffset("CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::3", &CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3);
+	if(CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3 == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::AllocateDefaultRelationships::NUM_AI_CLASSES::3 offset");
+		return false;
+	}
 
 	g_pGameConf->GetOffset("NextBotCombatCharacter::Spawn::COLLISION_GROUP_PLAYER", &NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER);
+	if(NextBotCombatCharacterSpawnCOLLISION_GROUP_PLAYER == -1) {
+		snprintf(error, maxlen, "could not get NextBotCombatCharacter::Spawn::COLLISION_GROUP_PLAYER offset");
+		return false;
+	}
+
+	void *CCleanupDefaultRelationShipsShutdown = nullptr;
+	g_pGameConf->GetMemSig("CCleanupDefaultRelationShips::Shutdown", &CCleanupDefaultRelationShipsShutdown);
+	if(CCleanupDefaultRelationShipsShutdown == nullptr) {
+		snprintf(error, maxlen, "could not get CCleanupDefaultRelationShips::Shutdown address");
+		return false;
+	}
+
+	int CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES = -1;
+	g_pGameConf->GetOffset("CCleanupDefaultRelationShips::Shutdown::NUM_AI_CLASSES", &CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES);
+	if(CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES == -1) {
+		snprintf(error, maxlen, "could not get CCleanupDefaultRelationShips::Shutdown::NUM_AI_CLASSES offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
+	if(sizeofNextBotCombatCharacter == -1) {
+		snprintf(error, maxlen, "could not get sizeof(NextBotCombatCharacter)");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
+	if(PathCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get Path::Path address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("PathFollower::PathFollower", &PathFollowerCTOR);
+	if(PathFollowerCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get PathFollower::PathFollower address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NextBotCombatCharacter::NextBotCombatCharacter", &NextBotCombatCharacterCTOR);
+	if(NextBotCombatCharacterCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get NextBotCombatCharacter::NextBotCombatCharacter address");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
+	if(CTFPathFollowerCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get CTFPathFollower::CTFPathFollower address");
+		return false;
+	}
+#endif
+
+	g_pGameConf->GetMemSig("INextBot::INextBot", &INextBotCTOR);
+	if(INextBotCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get INextBot::INextBot address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("TheNextBots", &TheNextBotsPtr);
+	if(TheNextBotsPtr == nullptr) {
+		snprintf(error, maxlen, "could not get TheNextBots address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
+	if(PathComputePathDetails == nullptr) {
+		snprintf(error, maxlen, "could not get Path::ComputePathDetails address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
+	if(PathBuildTrivialPath == nullptr) {
+		snprintf(error, maxlen, "could not get Path::BuildTrivialPath address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("Path::FindNextOccludedNode", &PathFindNextOccludedNode);
+	if(PathFindNextOccludedNode == nullptr) {
+		snprintf(error, maxlen, "could not get Path::FindNextOccludedNode address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("Path::PostProcess", &PathPostProcess);
+	if(PathPostProcess == nullptr) {
+		snprintf(error, maxlen, "could not get Path::PostProcess address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
+	if(CNavMeshGetGroundHeight == nullptr) {
+		snprintf(error, maxlen, "could not get CNavMesh::GetGroundHeight address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);
+	if(CNavMeshGetNearestNavArea == nullptr) {
+		snprintf(error, maxlen, "could not get CNavMesh::GetNearestNavArea address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CBaseEntity::SetAbsOrigin", &CBaseEntitySetAbsOrigin);
+	if(CBaseEntitySetAbsOrigin == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseEntity::SetAbsOrigin address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("INextBot::BeginUpdate", &INextBotBeginUpdatePtr);
+	if(INextBotBeginUpdatePtr == nullptr) {
+		snprintf(error, maxlen, "could not get INextBot::BeginUpdate address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("INextBot::EndUpdate", &INextBotEndUpdatePtr);
+	if(INextBotEndUpdatePtr == nullptr) {
+		snprintf(error, maxlen, "could not get INextBot::EndUpdate address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsoluteVelocity", &CBaseEntityCalcAbsoluteVelocity);
+	if(CBaseEntityCalcAbsoluteVelocity == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseEntity::CalcAbsoluteVelocity address");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetMemSig("NextBotGroundLocomotion::NextBotGroundLocomotion", &NextBotGroundLocomotionCTOR);
+	if(NextBotGroundLocomotionCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get NextBotGroundLocomotion::NextBotGroundLocomotion address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("ILocomotion::ILocomotion", &ILocomotionCTOR);
+	if(ILocomotionCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get ILocomotion::ILocomotion address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NextBotGroundLocomotion::ResolveCollision", &NextBotGroundLocomotionResolveCollision);
+	if(NextBotGroundLocomotionResolveCollision == nullptr) {
+		snprintf(error, maxlen, "could not get NextBotGroundLocomotion::ResolveCollision address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("IVision::IVision", &IVisionCTOR);
+	if(IVisionCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get IVision::IVision address");
+		return false;
+	}
+
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	g_pGameConf->GetMemSig("ZombieBotLocomotion::ZombieBotLocomotion", &ZombieBotLocomotionCTOR);
+	if(ZombieBotLocomotionCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get ZombieBotLocomotion::ZombieBotLocomotion address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("ZombieBotVision::ZombieBotVision", &ZombieBotVisionCTOR);
+	if(ZombieBotVisionCTOR == nullptr) {
+		snprintf(error, maxlen, "could not get ZombieBotVision::ZombieBotVision address");
+		return false;
+	}
+#endif
+
+	g_pGameConf->GetMemSig("CBaseEntity::SetGroundEntity", &CBaseEntitySetGroundEntity);
+	if(CBaseEntitySetGroundEntity == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseEntity::SetGroundEntity address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CTraceFilterSimple::ShouldHitEntity", &CTraceFilterSimpleShouldHitEntity);
+	if(CTraceFilterSimpleShouldHitEntity == nullptr) {
+		snprintf(error, maxlen, "could not get CTraceFilterSimple::ShouldHitEntity address");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	g_pGameConf->GetMemSig("Path::Compute(CBaseCombatCharacter)", &PathComputeEntity);
+	if(PathComputeEntity == nullptr) {
+		snprintf(error, maxlen, "could not get Path::Compute(CBaseCombatCharacter) address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("Path::Compute(Vector)", &PathComputeVector);
+	if(PathComputeVector == nullptr) {
+		snprintf(error, maxlen, "could not get Path::Compute(Vector) address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("INextBot::IsDebugging", &INextBotIsDebuggingPtr);
+	if(INextBotIsDebuggingPtr == nullptr) {
+		snprintf(error, maxlen, "could not get INextBot::IsDebugging address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("InfectedChasePath::ComputeAreaCrossing", &InfectedChasePathComputeAreaCrossing);
+	if(InfectedChasePathComputeAreaCrossing == nullptr) {
+		snprintf(error, maxlen, "could not get InfectedChasePath::ComputeAreaCrossing address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("EntityFactoryDictionary", &EntityFactoryDictionaryPtr);
+	if(EntityFactoryDictionaryPtr == nullptr) {
+		snprintf(error, maxlen, "could not get EntityFactoryDictionary address");
+		return false;
+	}
+#endif
+
+	g_pGameConf->GetOffset("CBaseEntity::PostConstructor", &CBaseEntityPostConstructor);
+	if(CBaseEntityPostConstructor == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::PostConstructor offset");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
+	if(NDebugOverlayLine == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::Line address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
+	if(NDebugOverlayVertArrow == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::VertArrow address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::HorzArrow", &NDebugOverlayHorzArrow);
+	if(NDebugOverlayHorzArrow == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::HorzArrow address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::Triangle", &NDebugOverlayTriangle);
+	if(NDebugOverlayTriangle == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::Triangle address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::Circle(QAngle)", &NDebugOverlayCircleAng);
+	if(NDebugOverlayCircleAng == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::Circle(QAngle) address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::Circle(float)", &NDebugOverlayCircleRad);
+	if(NDebugOverlayCircleRad == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::Circle(float) address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NDebugOverlay::Cross3D", &NDebugOverlayCross3D);
+	if(NDebugOverlayCross3D == nullptr) {
+		snprintf(error, maxlen, "could not get NDebugOverlay::Cross3D address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
+	if(NavAreaBuildPathPtr == nullptr) {
+		snprintf(error, maxlen, "could not get NavAreaBuildPath address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsolutePosition", &CBaseEntityCalcAbsolutePosition);
+	if(CBaseEntityCalcAbsolutePosition == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseEntity::CalcAbsolutePosition address");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
+	if(CBaseEntityMyNextBotPointer == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::MyNextBotPointer offset");
+		return false;
+	}
+
+	int CBaseEntityPerformCustomPhysics = -1;
+	g_pGameConf->GetOffset("CBaseEntity::PerformCustomPhysics", &CBaseEntityPerformCustomPhysics);
+	if(CBaseEntityPerformCustomPhysics == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::PerformCustomPhysics offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsAreaTraversable", &CBaseCombatCharacterIsAreaTraversable);
+	if(CBaseCombatCharacterIsAreaTraversable == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsAreaTraversable offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::ClearLastKnownArea", &CBaseCombatCharacterClearLastKnownArea);
+	if(CBaseCombatCharacterClearLastKnownArea == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::ClearLastKnownArea offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::OnNavAreaChanged", &CBaseCombatCharacterOnNavAreaChanged);
+	if(CBaseCombatCharacterOnNavAreaChanged == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::OnNavAreaChanged offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::Spawn", &CBaseEntitySpawn);
+	if(CBaseEntitySpawn == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::Spawn offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
+	if(CBaseEntityEyePosition == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::EyePosition offset");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	int CBaseEntityDeflected = -1;
+	g_pGameConf->GetOffset("CBaseEntity::Deflected", &CBaseEntityDeflected);
+	if(CBaseEntityDeflected == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::Deflected offset");
+		return false;
+	}
+#endif
+
+	int CBaseEntityUpdateOnRemove = -1;
+	g_pGameConf->GetOffset("CBaseEntity::UpdateOnRemove", &CBaseEntityUpdateOnRemove);
+	if(CBaseEntityUpdateOnRemove == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::UpdateOnRemove offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
+	if(CBaseEntityMyCombatCharacterPointer == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::MyCombatCharacterPointer offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::GetBaseAnimating", &CBaseEntityGetBaseAnimating);
+	if(CBaseEntityGetBaseAnimating == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::GetBaseAnimating offset");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetOffset("CBaseEntity::IsBaseObject", &CBaseEntityIsBaseObject);
+	if(CBaseEntityIsBaseObject == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::IsBaseObject offset");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CTFNavMesh::CollectBuiltObjects", &CTFNavMeshCollectBuiltObjects);
+	if(CTFNavMeshCollectBuiltObjects == nullptr) {
+		snprintf(error, maxlen, "could not get CTFNavMesh::CollectBuiltObjects address");
+		return false;
+	}
+#endif
+
+	g_pGameConf->GetOffset("CGameRules::InitDefaultAIRelationships", &CGameRulesInitDefaultAIRelationships);
+	if(CGameRulesInitDefaultAIRelationships == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::InitDefaultAIRelationships offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::AIClassText", &CGameRulesAIClassText);
+	if(CGameRulesAIClassText == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::AIClassText offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::GetSkillLevel", &CGameRulesGetSkillLevel);
+	if(CGameRulesGetSkillLevel == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::GetSkillLevel offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::PlayerRelationship", &CGameRulesPlayerRelationship);
+	if(CGameRulesPlayerRelationship == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::PlayerRelationship offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::RefreshSkillData", &CGameRulesRefreshSkillDataOffset);
+	if(CGameRulesRefreshSkillDataOffset == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::RefreshSkillData offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::ShouldAutoAim", &CGameRulesShouldAutoAim);
+	if(CGameRulesShouldAutoAim == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::ShouldAutoAim offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::GetAutoAimScale", &CGameRulesGetAutoAimScale);
+	if(CGameRulesGetAutoAimScale == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::GetAutoAimScale offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CGameRules::ShouldCollide", &CGameRulesShouldCollideOffset);
+	if(CGameRulesShouldCollideOffset == -1) {
+		snprintf(error, maxlen, "could not get CGameRules::ShouldCollide offset");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::SetDefaultRelationship", &CBaseCombatCharacterSetDefaultRelationship);
+	if(CBaseCombatCharacterSetDefaultRelationship == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::SetDefaultRelationship address");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::Classify", &CBaseEntityClassify);
+	if(CBaseEntityClassify == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::Classify offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::IsNPC", &CBaseEntityIsNPC);
+	if(CBaseEntityIsNPC == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::IsNPC offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::HasHumanGibs", &CBaseCombatCharacterHasHumanGibs);
+	if(CBaseCombatCharacterHasHumanGibs == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::HasHumanGibs offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::HasAlienGibs", &CBaseCombatCharacterHasAlienGibs);
+	if(CBaseCombatCharacterHasAlienGibs == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::HasAlienGibs offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::BloodColor", &CBaseEntityBloodColor);
+	if(CBaseEntityBloodColor == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::BloodColor offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::PhysicsSolidMaskForEntity", &CBaseEntityPhysicsSolidMaskForEntity);
+	if(CBaseEntityPhysicsSolidMaskForEntity == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::PhysicsSolidMaskForEntity offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::Touch", &CBaseEntityTouch);
+	if(CBaseEntityTouch == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::Touch offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::IsCombatItem", &CBaseEntityIsCombatItem);
+	if(CBaseEntityIsCombatItem == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::IsCombatItem offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::ShouldCollide", &CBaseEntityShouldCollide);
+	if(CBaseEntityShouldCollide == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::ShouldCollide offset");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetBossType", &CBaseCombatCharacterGetBossType);
+	if(CBaseCombatCharacterGetBossType == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::GetBossType offset");
+		return false;
+	}
+#endif
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	g_pGameConf->GetOffset("CBaseEntity::MyInfectedPointer", &CBaseEntityMyInfectedPointer);
+	if(CBaseEntityMyInfectedPointer == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::MyInfectedPointer offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("NextBotCombatCharacter::GetNextBotCombatCharacter", &NextBotCombatCharacterGetNextBotCombatCharacter);
+	if(NextBotCombatCharacterGetNextBotCombatCharacter == -1) {
+		snprintf(error, maxlen, "could not get NextBotCombatCharacter::GetNextBotCombatCharacter offset");
+		return false;
+	}
+
+	int CBaseCombatCharacterGetClass{-1};
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetClass", &CBaseCombatCharacterGetClass);
+	if(CBaseCombatCharacterGetClass == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::GetClass offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::CanBeA", &CBaseCombatCharacterCanBeA);
+	if(CBaseCombatCharacterCanBeA == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::CanBeA offset");
+		return false;
+	}
+#endif
+
+	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
+	if(CBaseEntityWorldSpaceCenter == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::WorldSpaceCenter offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
+	if(CBaseEntityEyeAngles == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::EyeAngles offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
+	if(CBaseCombatCharacterGetLastKnownArea == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::GetLastKnownArea offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::UpdateLastKnownArea", &CBaseCombatCharacterUpdateLastKnownArea);
+	if(CBaseCombatCharacterUpdateLastKnownArea == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::UpdateLastKnownArea offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(Vector)", &CBaseCombatCharacterIsHiddenByFogVec);
+	if(CBaseCombatCharacterIsHiddenByFogVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsHiddenByFog(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(CBaseEntity)", &CBaseCombatCharacterIsHiddenByFogEnt);
+	if(CBaseCombatCharacterIsHiddenByFogEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsHiddenByFog(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(float)", &CBaseCombatCharacterIsHiddenByFogR);
+	if(CBaseCombatCharacterIsHiddenByFogR == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsHiddenByFog(float) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(Vector)", &CBaseCombatCharacterGetFogObscuredRatioVec);
+	if(CBaseCombatCharacterGetFogObscuredRatioVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::GetFogObscuredRatio(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(CBaseEntity)", &CBaseCombatCharacterGetFogObscuredRatioEnt);
+	if(CBaseCombatCharacterGetFogObscuredRatioEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::GetFogObscuredRatio(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(float)", &CBaseCombatCharacterGetFogObscuredRatioR);
+	if(CBaseCombatCharacterGetFogObscuredRatioR == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::GetFogObscuredRatio(float) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLookingTowards(CBaseEntity)", &CBaseCombatCharacterIsLookingTowardsEnt);
+	if(CBaseCombatCharacterIsLookingTowardsEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsLookingTowards(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLookingTowards(Vector)", &CBaseCombatCharacterIsLookingTowardsVec);
+	if(CBaseCombatCharacterIsLookingTowardsVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsLookingTowards(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsInFieldOfView(CBaseEntity)", &CBaseCombatCharacterIsInFieldOfViewEnt);
+	if(CBaseCombatCharacterIsInFieldOfViewEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsInFieldOfView(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsInFieldOfView(Vector)", &CBaseCombatCharacterIsInFieldOfViewVec);
+	if(CBaseCombatCharacterIsInFieldOfViewVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsInFieldOfView(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLineOfSightClear(CBaseEntity)", &CBaseCombatCharacterIsLineOfSightClearEnt);
+	if(CBaseCombatCharacterIsLineOfSightClearEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsLineOfSightClear(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLineOfSightClear(Vector)", &CBaseCombatCharacterIsLineOfSightClearVec);
+	if(CBaseCombatCharacterIsLineOfSightClearVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsLineOfSightClear(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::FVisible(Vector)", &CBaseEntityFVisibleVec);
+	if(CBaseEntityFVisibleVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::FVisible(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseEntity::FVisible(CBaseEntity)", &CBaseEntityFVisibleEnt);
+	if(CBaseEntityFVisibleEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseEntity::FVisible(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInViewCone(Vector)", &CBaseCombatCharacterFInViewConeVec);
+	if(CBaseCombatCharacterFInViewConeVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::FInViewCone(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInViewCone(CBaseEntity)", &CBaseCombatCharacterFInViewConeEnt);
+	if(CBaseCombatCharacterFInViewConeEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::FInViewCone(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInAimCone(Vector)", &CBaseCombatCharacterFInAimConeVec);
+	if(CBaseCombatCharacterFInAimConeVec == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::FInAimCone(Vector) offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::FInAimCone(CBaseEntity)", &CBaseCombatCharacterFInAimConeEnt);
+	if(CBaseCombatCharacterFInAimConeEnt == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::FInAimCone(CBaseEntity) offset");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseEntity)", &CBaseCombatCharacterIsAbleToSeeEnt);
+	if(CBaseCombatCharacterIsAbleToSeeEnt == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsAbleToSee(CBaseEntity) address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter)", &CBaseCombatCharacterIsAbleToSeeCC);
+	if(CBaseCombatCharacterIsAbleToSeeCC == nullptr) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter) address");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::IRelationType", &CBaseCombatCharacterIRelationType);
+	if(CBaseCombatCharacterIRelationType == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::IRelationType offset");
+		return false;
+	}
+
+	g_pGameConf->GetOffset("CBaseCombatCharacter::OnPursuedBy", &CBaseCombatCharacterOnPursuedBy);
+	if(CBaseCombatCharacterOnPursuedBy == -1) {
+		snprintf(error, maxlen, "could not get CBaseCombatCharacter::OnPursuedBy offset");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);
+	if(CFuncNavCostGetCostMultiplier == -1) {
+		snprintf(error, maxlen, "could not get CFuncNavCost::GetCostMultiplier offset");
+		return false;
+	}
+#endif
+
+	void **TheNavMeshPtr;
+	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMeshPtr);
+	if(TheNavMeshPtr == nullptr) {
+		snprintf(error, maxlen, "could not get TheNavMesh address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("TheNavAreas", (void **)&TheNavAreas);
+	if(TheNavAreas == nullptr) {
+		snprintf(error, maxlen, "could not get TheNavAreas address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CNavArea::m_masterMarker", (void **)&CNavArea::m_masterMarker);
+	if(CNavArea::m_masterMarker == nullptr) {
+		snprintf(error, maxlen, "could not get CNavArea::m_masterMarker address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CNavArea::m_openList", (void **)&CNavArea::m_openList);
+	if(CNavArea::m_openList == nullptr) {
+		snprintf(error, maxlen, "could not get CNavArea::m_openList address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CNavArea::m_openListTail", (void **)&CNavArea::m_openListTail);
+	if(CNavArea::m_openListTail == nullptr) {
+		snprintf(error, maxlen, "could not get CNavArea::m_openListTail address");
+		return false;
+	}
+
+	g_pGameConf->GetMemSig("CNavArea::s_nCurrVisTestCounter", (void **)&CNavArea::s_nCurrVisTestCounter);
+	if(CNavArea::s_nCurrVisTestCounter == nullptr) {
+		snprintf(error, maxlen, "could not get CNavArea::s_nCurrVisTestCounter address");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2 && 0
+	IGameConfig *game_actions_conf{nullptr};
+	gameconfs->LoadGameConfigFile("nextbot.actions.tf2", &game_actions_conf, error, maxlen);
+
+	
+
+	gameconfs->CloseGameConfigFile(game_actions_conf);
+#endif
+
+	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
+
+	pMyNPCPointer = DETOUR_CREATE_MEMBER(MyNPCPointer, "CBaseEntity::MyNPCPointer")
+	if(!pMyNPCPointer) {
+		snprintf(error, maxlen, "could not create CBaseEntity::MyNPCPointer detour");
+		return false;
+	}
+
+	pPathOptimize = DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
+	if(!pPathOptimize) {
+		snprintf(error, maxlen, "could not create Path::Optimize detour");
+		return false;
+	}
+
+	pAdjustSpeed = DETOUR_CREATE_MEMBER(AdjustSpeed, "PathFollower::AdjustSpeed")
+	if(!pAdjustSpeed) {
+		snprintf(error, maxlen, "could not create PathFollower::AdjustSpeed detour");
+		return false;
+	}
+
+	pNextBotTraversableTraceFilterCTOR = DETOUR_CREATE_MEMBER(NextBotTraversableTraceFilterCTOR, "NextBotTraversableTraceFilter::NextBotTraversableTraceFilter")
+	if(!pNextBotTraversableTraceFilterCTOR) {
+		snprintf(error, maxlen, "could not create NextBotTraversableTraceFilter::NextBotTraversableTraceFilter detour");
+		return false;
+	}
+
+#if SOURCE_ENGINE == SE_TF2
+	pApplyAccumulatedApproach = DETOUR_CREATE_MEMBER(ApplyAccumulatedApproach, "NextBotGroundLocomotion::ApplyAccumulatedApproach")
+	if(!pApplyAccumulatedApproach) {
+		snprintf(error, maxlen, "could not create NextBotGroundLocomotion::ApplyAccumulatedApproach detour");
+		return false;
+	}
+
+	pUpdatePosition = DETOUR_CREATE_MEMBER(UpdatePosition, "NextBotGroundLocomotion::UpdatePosition")
+	if(!pUpdatePosition) {
+		snprintf(error, maxlen, "could not create NextBotGroundLocomotion::UpdatePosition detour");
+		return false;
+	}
+
+	pUpdateGroundConstraint = DETOUR_CREATE_MEMBER(UpdateGroundConstraint, "NextBotGroundLocomotion::UpdateGroundConstraint")
+	if(!pUpdateGroundConstraint) {
+		snprintf(error, maxlen, "could not create NextBotGroundLocomotion::UpdateGroundConstraint detour");
+		return false;
+	}
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	pResolveZombieCollisions = DETOUR_CREATE_MEMBER(ResolveZombieCollisions, "ZombieBotLocomotion::ResolveZombieCollisions")
+	if(!pResolveZombieCollisions) {
+		snprintf(error, maxlen, "could not create ZombieBotLocomotion::ResolveZombieCollisions detour");
+		return false;
+	}
+
+	pVocalize = DETOUR_CREATE_MEMBER(Vocalize, "Infected::Vocalize")
+	if(!pVocalize) {
+		snprintf(error, maxlen, "could not create Infected::Vocalize detour");
+		return false;
+	}
+
+	pIsTankImmediatelyDangerousTo = DETOUR_CREATE_MEMBER(IsTankImmediatelyDangerousTo, "SurvivorIntention::IsTankImmediatelyDangerousTo")
+	if(!pIsTankImmediatelyDangerousTo) {
+		snprintf(error, maxlen, "could not create SurvivorIntention::IsTankImmediatelyDangerousTo detour");
+		return false;
+	}
+#endif
+
+#if SOURCE_ENGINE == SE_TF2
+	pTraverseLadder = DETOUR_CREATE_MEMBER(TraverseLadder, "NextBotGroundLocomotion::TraverseLadder")
+	if(!pTraverseLadder) {
+		snprintf(error, maxlen, "could not create NextBotGroundLocomotion::TraverseLadder detour");
+		return false;
+	}
+#elif SOURCE_ENGINE == SE_LEFT4DEAD2
+	pTraverseLadder = DETOUR_CREATE_MEMBER(TraverseLadder, "ZombieBotLocomotion::TraverseLadder")
+	if(!pTraverseLadder) {
+		snprintf(error, maxlen, "could not create ZombieBotLocomotion::TraverseLadder detour");
+		return false;
+	}
+#endif
+
+	pMyNPCPointer->EnableDetour();
+	pPathOptimize->EnableDetour();
+	pAdjustSpeed->EnableDetour();
+	pNextBotTraversableTraceFilterCTOR->EnableDetour();
+#if SOURCE_ENGINE == SE_TF2
+	pApplyAccumulatedApproach->EnableDetour();
+	pUpdatePosition->EnableDetour();
+	pUpdateGroundConstraint->EnableDetour();
+#endif
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
+	pResolveZombieCollisions->EnableDetour();
+	pVocalize->EnableDetour();
+	pIsTankImmediatelyDangerousTo->EnableDetour();
+#endif
+	pTraverseLadder->EnableDetour();
 
 	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 	SourceHook::SetMemAccess(CBaseCombatCharacterAllocateDefaultRelationships, CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3 + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 
+	SourceHook::SetMemAccess(CCleanupDefaultRelationShipsShutdown, CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
+
 	*(unsigned char *)((unsigned char *)CBaseCombatCharacterAllocateDefaultRelationships + CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES1) = (NUM_AI_CLASSES * sizeof(Relationship_t *));
 	*(unsigned char *)((unsigned char *)CBaseCombatCharacterAllocateDefaultRelationships + CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES2) = (NUM_AI_CLASSES * sizeof(Relationship_t));
 	*(unsigned char *)((unsigned char *)CBaseCombatCharacterAllocateDefaultRelationships + CBaseCombatCharacterAllocateDefaultRelationshipsNUM_AI_CLASSES3) = (NUM_AI_CLASSES * sizeof(Relationship_t *));
-
-	void *CCleanupDefaultRelationShipsShutdown = nullptr;
-	g_pGameConf->GetMemSig("CCleanupDefaultRelationShips::Shutdown", &CCleanupDefaultRelationShipsShutdown);
-
-	int CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES = -1;
-	g_pGameConf->GetOffset("CCleanupDefaultRelationShips::Shutdown::NUM_AI_CLASSES", &CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES);
-
-	SourceHook::SetMemAccess(CCleanupDefaultRelationShipsShutdown, CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
-
 	*(unsigned char *)((unsigned char *)CCleanupDefaultRelationShipsShutdown + CCleanupDefaultRelationShipsShutdownNUM_AI_CLASSES) = (NUM_AI_CLASSES * sizeof(Relationship_t *));
 
-	CDetourManager::Init(g_pSM->GetScriptingEngine(), g_pGameConf);
-
-	g_pGameConf->GetOffset("sizeof(NextBotCombatCharacter)", &sizeofNextBotCombatCharacter);
-	
-	g_pGameConf->GetMemSig("Path::Path", &PathCTOR);
-	g_pGameConf->GetMemSig("PathFollower::PathFollower", &PathFollowerCTOR);
-	g_pGameConf->GetMemSig("NextBotCombatCharacter::NextBotCombatCharacter", &NextBotCombatCharacterCTOR);
-#if SOURCE_ENGINE == SE_TF2
-	g_pGameConf->GetMemSig("CTFPathFollower::CTFPathFollower", &CTFPathFollowerCTOR);
-#endif
-	g_pGameConf->GetMemSig("INextBot::INextBot", &INextBotCTOR);
-
-	g_pGameConf->GetMemSig("TheNextBots", &TheNextBotsPtr);
-
-	g_pGameConf->GetMemSig("Path::ComputePathDetails", &PathComputePathDetails);
-	g_pGameConf->GetMemSig("Path::BuildTrivialPath", &PathBuildTrivialPath);
-	g_pGameConf->GetMemSig("Path::FindNextOccludedNode", &PathFindNextOccludedNode);
-	g_pGameConf->GetMemSig("Path::PostProcess", &PathPostProcess);
-	g_pGameConf->GetMemSig("CNavMesh::GetGroundHeight", &CNavMeshGetGroundHeight);
-	g_pGameConf->GetMemSig("CNavMesh::GetNearestNavArea", &CNavMeshGetNearestNavArea);
-	g_pGameConf->GetMemSig("CBaseEntity::SetAbsOrigin", &CBaseEntitySetAbsOrigin);
-	g_pGameConf->GetMemSig("INextBot::BeginUpdate", &INextBotBeginUpdatePtr);
-	g_pGameConf->GetMemSig("INextBot::EndUpdate", &INextBotEndUpdatePtr);
-	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsoluteVelocity", &CBaseEntityCalcAbsoluteVelocity);
-#if SOURCE_ENGINE == SE_TF2
-	g_pGameConf->GetMemSig("NextBotGroundLocomotion::NextBotGroundLocomotion", &NextBotGroundLocomotionCTOR);
-	g_pGameConf->GetMemSig("ILocomotion::ILocomotion", &ILocomotionCTOR);
-	g_pGameConf->GetMemSig("NextBotGroundLocomotion::ResolveCollision", &NextBotGroundLocomotionResolveCollision);
-	g_pGameConf->GetMemSig("IVision::IVision", &IVisionCTOR);
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	g_pGameConf->GetMemSig("ZombieBotLocomotion::ZombieBotLocomotion", &ZombieBotLocomotionCTOR);
-	g_pGameConf->GetMemSig("ZombieBotVision::ZombieBotVision", &ZombieBotVisionCTOR);
-#endif
-	g_pGameConf->GetMemSig("CBaseEntity::SetGroundEntity", &CBaseEntitySetGroundEntity);
-	g_pGameConf->GetMemSig("CTraceFilterSimple::ShouldHitEntity", &CTraceFilterSimpleShouldHitEntity);
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-	g_pGameConf->GetMemSig("Path::Compute(CBaseCombatCharacter)", &PathComputeEntity);
-	g_pGameConf->GetMemSig("Path::Compute(Vector)", &PathComputeVector);
-	g_pGameConf->GetMemSig("INextBot::IsDebugging", &INextBotIsDebuggingPtr);
-	g_pGameConf->GetMemSig("InfectedChasePath::ComputeAreaCrossing", &InfectedChasePathComputeAreaCrossing);
-	g_pGameConf->GetMemSig("EntityFactoryDictionary", &EntityFactoryDictionaryPtr);
+	SH_MANUALHOOK_RECONFIGURE(MyInfectedPointer, CBaseEntityMyInfectedPointer, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(GetClass, CBaseCombatCharacterGetClass, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(CanBeA, CBaseCombatCharacterCanBeA, 0, 0);
+#endif
 
+	SH_MANUALHOOK_RECONFIGURE(UpdateLastKnownArea, CBaseCombatCharacterUpdateLastKnownArea, 0, 0);
+
+	SH_MANUALHOOK_RECONFIGURE(MyNextBotPointer, CBaseEntityMyNextBotPointer, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(PerformCustomPhysics, CBaseEntityPerformCustomPhysics, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(IsAreaTraversable, CBaseCombatCharacterIsAreaTraversable, 0, 0);
+	SH_MANUALHOOK_RECONFIGURE(Spawn, CBaseEntitySpawn, 0, 0);
+#if SOURCE_ENGINE == SE_TF2
+	SH_MANUALHOOK_RECONFIGURE(Deflected, CBaseEntityDeflected, 0, 0);
+#endif
+	SH_MANUALHOOK_RECONFIGURE(UpdateOnRemove, CBaseEntityUpdateOnRemove, 0, 0);
+
+#if SOURCE_ENGINE == SE_LEFT4DEAD2
 	dictionary = (void_to_func<IEntityFactoryDictionary *(*)()>(EntityFactoryDictionaryPtr))();
-	
+
 	sizeofInfected = dictionary->FindFactory("infected")->GetEntitySize();
 #else
 	dictionary = servertools->GetEntityFactoryDictionary();
 #endif
 
-	g_pGameConf->GetOffset("CBaseEntity::PostConstructor", &CBaseEntityPostConstructor);
-
-	g_pGameConf->GetMemSig("NDebugOverlay::Line", &NDebugOverlayLine);
-	g_pGameConf->GetMemSig("NDebugOverlay::VertArrow", &NDebugOverlayVertArrow);
-	g_pGameConf->GetMemSig("NDebugOverlay::HorzArrow", &NDebugOverlayHorzArrow);
-	g_pGameConf->GetMemSig("NDebugOverlay::Triangle", &NDebugOverlayTriangle);
-	g_pGameConf->GetMemSig("NDebugOverlay::Circle(QAngle)", &NDebugOverlayCircleAng);
-	g_pGameConf->GetMemSig("NDebugOverlay::Circle(float)", &NDebugOverlayCircleRad);
-	g_pGameConf->GetMemSig("NDebugOverlay::Cross3D", &NDebugOverlayCross3D);
-	g_pGameConf->GetMemSig("NavAreaBuildPath", &NavAreaBuildPathPtr);
-	g_pGameConf->GetMemSig("CBaseEntity::CalcAbsolutePosition", &CBaseEntityCalcAbsolutePosition);
-	
-	g_pGameConf->GetOffset("CBaseEntity::MyNextBotPointer", &CBaseEntityMyNextBotPointer);
-	SH_MANUALHOOK_RECONFIGURE(MyNextBotPointer, CBaseEntityMyNextBotPointer, 0, 0);
-	
-	int offset = -1;
-	g_pGameConf->GetOffset("CBaseEntity::PerformCustomPhysics", &offset);
-	SH_MANUALHOOK_RECONFIGURE(PerformCustomPhysics, offset, 0, 0);
-	
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsAreaTraversable", &CBaseCombatCharacterIsAreaTraversable);
-	SH_MANUALHOOK_RECONFIGURE(IsAreaTraversable, CBaseCombatCharacterIsAreaTraversable, 0, 0);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::ClearLastKnownArea", &CBaseCombatCharacterClearLastKnownArea);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::OnNavAreaChanged", &CBaseCombatCharacterOnNavAreaChanged);
-	
-	g_pGameConf->GetOffset("CBaseEntity::Spawn", &CBaseEntitySpawn);
-	SH_MANUALHOOK_RECONFIGURE(Spawn, CBaseEntitySpawn, 0, 0);
-
-	nbspawn_fwd = forwards->CreateForward("OnNextbotSpawned", ET_Ignore, 2, nullptr, Param_Cell, Param_Cell);
-
-	g_pGameConf->GetOffset("CBaseEntity::EyePosition", &CBaseEntityEyePosition);
-
-	g_pGameConf->GetOffset("CBaseEntity::Deflected", &offset);
-	SH_MANUALHOOK_RECONFIGURE(Deflected, offset, 0, 0);
-
-	g_pGameConf->GetOffset("CBaseEntity::UpdateOnRemove", &offset);
-	SH_MANUALHOOK_RECONFIGURE(UpdateOnRemove, offset, 0, 0);
-
-	g_pGameConf->GetOffset("CBaseEntity::MyCombatCharacterPointer", &CBaseEntityMyCombatCharacterPointer);
-	g_pGameConf->GetOffset("CBaseEntity::GetBaseAnimating", &CBaseEntityGetBaseAnimating);
-
-#if SOURCE_ENGINE == SE_TF2
-	g_pGameConf->GetOffset("CBaseEntity::IsBaseObject", &CBaseEntityIsBaseObject);
-
-	g_pGameConf->GetMemSig("CTFNavMesh::CollectBuiltObjects", &CTFNavMeshCollectBuiltObjects);
-#endif
-
-	g_pGameConf->GetOffset("CGameRules::InitDefaultAIRelationships", &CGameRulesInitDefaultAIRelationships);
-	g_pGameConf->GetOffset("CGameRules::AIClassText", &CGameRulesAIClassText);
-	g_pGameConf->GetOffset("CGameRules::GetSkillLevel", &CGameRulesGetSkillLevel);
-	g_pGameConf->GetOffset("CGameRules::PlayerRelationship", &CGameRulesPlayerRelationship);
-	g_pGameConf->GetOffset("CGameRules::RefreshSkillData", &CGameRulesRefreshSkillDataOffset);
-	g_pGameConf->GetOffset("CGameRules::ShouldAutoAim", &CGameRulesShouldAutoAim);
-	g_pGameConf->GetOffset("CGameRules::GetAutoAimScale", &CGameRulesGetAutoAimScale);
-	g_pGameConf->GetOffset("CGameRules::ShouldCollide", &CGameRulesShouldCollideOffset);
-
-	g_pGameConf->GetMemSig("CBaseCombatCharacter::SetDefaultRelationship", &CBaseCombatCharacterSetDefaultRelationship);
-
-	g_pGameConf->GetOffset("CBaseEntity::Classify", &CBaseEntityClassify);
-	g_pGameConf->GetOffset("CBaseEntity::IsNPC", &CBaseEntityIsNPC);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::HasHumanGibs", &CBaseCombatCharacterHasHumanGibs);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::HasAlienGibs", &CBaseCombatCharacterHasAlienGibs);
-	g_pGameConf->GetOffset("CBaseEntity::BloodColor", &CBaseEntityBloodColor);
-	g_pGameConf->GetOffset("CBaseEntity::PhysicsSolidMaskForEntity", &CBaseEntityPhysicsSolidMaskForEntity);
-	g_pGameConf->GetOffset("CBaseEntity::Touch", &CBaseEntityTouch);
-	g_pGameConf->GetOffset("CBaseEntity::IsCombatItem", &CBaseEntityIsCombatItem);
-	g_pGameConf->GetOffset("CBaseEntity::ShouldCollide", &CBaseEntityShouldCollide);
-#if SOURCE_ENGINE == SE_TF2
-	g_pGameConf->GetOffset("CBaseCombatCharacter::GetBossType", &CBaseCombatCharacterGetBossType);
-#endif
-	pMyNPCPointer = DETOUR_CREATE_MEMBER(MyNPCPointer, "CBaseEntity::MyNPCPointer")
-	pMyNPCPointer->EnableDetour();
-
-#if SOURCE_ENGINE == SE_LEFT4DEAD2
-	g_pGameConf->GetOffset("CBaseEntity::MyInfectedPointer", &CBaseEntityMyInfectedPointer);
-	SH_MANUALHOOK_RECONFIGURE(MyInfectedPointer, CBaseEntityMyInfectedPointer, 0, 0);
-	
-	g_pGameConf->GetOffset("NextBotCombatCharacter::GetNextBotCombatCharacter", &NextBotCombatCharacterGetNextBotCombatCharacter);
-	
-	g_pGameConf->GetOffset("CBaseCombatCharacter::GetClass", &offset);
-	SH_MANUALHOOK_RECONFIGURE(GetClass, offset, 0, 0);
-	
-	g_pGameConf->GetOffset("CBaseCombatCharacter::CanBeA", &CBaseCombatCharacterCanBeA);
-	SH_MANUALHOOK_RECONFIGURE(CanBeA, CBaseCombatCharacterCanBeA, 0, 0);
-#endif
-
-	g_pGameConf->GetOffset("CBaseEntity::WorldSpaceCenter", &CBaseEntityWorldSpaceCenter);
-	g_pGameConf->GetOffset("CBaseEntity::EyeAngles", &CBaseEntityEyeAngles);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::GetLastKnownArea", &CBaseCombatCharacterGetLastKnownArea);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::UpdateLastKnownArea", &CBaseCombatCharacterUpdateLastKnownArea);
-	SH_MANUALHOOK_RECONFIGURE(UpdateLastKnownArea, CBaseCombatCharacterUpdateLastKnownArea, 0, 0);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(Vector)", &CBaseCombatCharacterIsHiddenByFogVec);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(CBaseEntity)", &CBaseCombatCharacterIsHiddenByFogEnt);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsHiddenByFog(float)", &CBaseCombatCharacterIsHiddenByFogR);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(Vector)", &CBaseCombatCharacterGetFogObscuredRatioVec);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(CBaseEntity)", &CBaseCombatCharacterGetFogObscuredRatioEnt);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::GetFogObscuredRatio(float)", &CBaseCombatCharacterGetFogObscuredRatioR);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLookingTowards(CBaseEntity)", &CBaseCombatCharacterIsLookingTowardsEnt);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLookingTowards(Vector)", &CBaseCombatCharacterIsLookingTowardsVec);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsInFieldOfView(CBaseEntity)", &CBaseCombatCharacterIsInFieldOfViewEnt);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsInFieldOfView(Vector)", &CBaseCombatCharacterIsInFieldOfViewVec);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLineOfSightClear(CBaseEntity)", &CBaseCombatCharacterIsLineOfSightClearEnt);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IsLineOfSightClear(Vector)", &CBaseCombatCharacterIsLineOfSightClearVec);
-
-	g_pGameConf->GetOffset("CBaseEntity::FVisible(Vector)", &CBaseEntityFVisibleVec);
-	g_pGameConf->GetOffset("CBaseEntity::FVisible(CBaseEntity)", &CBaseEntityFVisibleEnt);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::FInViewCone(Vector)", &CBaseCombatCharacterFInViewConeVec);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::FInViewCone(CBaseEntity)", &CBaseCombatCharacterFInViewConeEnt);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::FInAimCone(Vector)", &CBaseCombatCharacterFInAimConeVec);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::FInAimCone(CBaseEntity)", &CBaseCombatCharacterFInAimConeEnt);
-
-	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseEntity)", &CBaseCombatCharacterIsAbleToSeeEnt);
-	g_pGameConf->GetMemSig("CBaseCombatCharacter::IsAbleToSee(CBaseCombatCharacter)", &CBaseCombatCharacterIsAbleToSeeCC);
-
-	g_pGameConf->GetOffset("CBaseCombatCharacter::IRelationType", &CBaseCombatCharacterIRelationType);
-	g_pGameConf->GetOffset("CBaseCombatCharacter::OnPursuedBy", &CBaseCombatCharacterOnPursuedBy);
-
-#if SOURCE_ENGINE == SE_TF2
-	g_pGameConf->GetOffset("CFuncNavCost::GetCostMultiplier", &CFuncNavCostGetCostMultiplier);
-#endif
-
-	void **TheNavMeshPtr;
-	g_pGameConf->GetMemSig("TheNavMesh", (void **)&TheNavMeshPtr);
 	TheNavMesh = *(CNavMesh **)TheNavMeshPtr;
 
-	g_pGameConf->GetMemSig("TheNavAreas", (void **)&TheNavAreas);
-
-	g_pGameConf->GetMemSig("CNavArea::m_masterMarker", (void **)&CNavArea::m_masterMarker);
-	g_pGameConf->GetMemSig("CNavArea::m_openList", (void **)&CNavArea::m_openList);
-	g_pGameConf->GetMemSig("CNavArea::m_openListTail", (void **)&CNavArea::m_openListTail);
-	g_pGameConf->GetMemSig("CNavArea::s_nCurrVisTestCounter", (void **)&CNavArea::s_nCurrVisTestCounter);
-	
 #if SOURCE_ENGINE == SE_TF2
 	SH_ADD_HOOK(CNavMesh, IsAuthoritative, TheNavMesh, SH_STATIC(HookIsAuthoritative), false);
 #endif
-	
-	pPathOptimize = DETOUR_CREATE_MEMBER(PathOptimize, "Path::Optimize")
-	pPathOptimize->EnableDetour();
 
-	pAdjustSpeed = DETOUR_CREATE_MEMBER(AdjustSpeed, "PathFollower::AdjustSpeed")
-	pAdjustSpeed->EnableDetour();
-
-	pNextBotTraversableTraceFilterCTOR = DETOUR_CREATE_MEMBER(NextBotTraversableTraceFilterCTOR, "NextBotTraversableTraceFilter::NextBotTraversableTraceFilter")
-	pNextBotTraversableTraceFilterCTOR->EnableDetour();
-
-#if SOURCE_ENGINE == SE_TF2
-	pApplyAccumulatedApproach = DETOUR_CREATE_MEMBER(ApplyAccumulatedApproach, "NextBotGroundLocomotion::ApplyAccumulatedApproach")
-	pApplyAccumulatedApproach->EnableDetour();
-	
-	pUpdatePosition = DETOUR_CREATE_MEMBER(UpdatePosition, "NextBotGroundLocomotion::UpdatePosition")
-	pUpdatePosition->EnableDetour();
-	
-	pUpdateGroundConstraint = DETOUR_CREATE_MEMBER(UpdateGroundConstraint, "NextBotGroundLocomotion::UpdateGroundConstraint")
-	pUpdateGroundConstraint->EnableDetour();
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	pResolveZombieCollisions = DETOUR_CREATE_MEMBER(ResolveZombieCollisions, "ZombieBotLocomotion::ResolveZombieCollisions")
-	pResolveZombieCollisions->EnableDetour();
-	
-	pVocalize = DETOUR_CREATE_MEMBER(Vocalize, "Infected::Vocalize")
-	pVocalize->EnableDetour();
-	
-	pIsTankImmediatelyDangerousTo = DETOUR_CREATE_MEMBER(IsTankImmediatelyDangerousTo, "SurvivorIntention::IsTankImmediatelyDangerousTo")
-	pIsTankImmediatelyDangerousTo->EnableDetour();
-#endif
-
-#if SOURCE_ENGINE == SE_TF2
-	pTraverseLadder = DETOUR_CREATE_MEMBER(TraverseLadder, "NextBotGroundLocomotion::TraverseLadder")
-#elif SOURCE_ENGINE == SE_LEFT4DEAD2
-	pTraverseLadder = DETOUR_CREATE_MEMBER(TraverseLadder, "ZombieBotLocomotion::TraverseLadder")
-#endif
-	pTraverseLadder->EnableDetour();
-	
 	sm_sendprop_info_t info{};
 	gamehelpers->FindSendPropInfo("CBaseEntity", "m_iTeamNum", &info);
 	m_iTeamNumOffset = info.actual_offset;
@@ -21803,23 +22424,14 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	gamehelpers->FindSendPropInfo("CTerrorPlayer", "m_isGhost", &info);
 	m_isGhostOffset = info.actual_offset;
 #endif
-	
+
 	g_pEntityList = reinterpret_cast<CBaseEntityList *>(gamehelpers->GetGlobalEntityList());
-
-#if SOURCE_ENGINE == SE_TF2 && 0
-	IGameConfig *game_actions_conf{nullptr};
-	gameconfs->LoadGameConfigFile("nextbot.actions.tf2", &game_actions_conf, error, maxlen);
-
-	
-
-	gameconfs->CloseGameConfigFile(game_actions_conf);
-#endif
 
 	HandleSystemHack::init();
 
 	PathHandleType = handlesys->CreateType("Path", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
 	PathFollowerHandleType = handlesys->CreateType("PathFollower", this, PathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
-	
+
 #if SOURCE_ENGINE == SE_TF2
 	CTFPathFollowerHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("CTFPathFollower", this, PathFollowerHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 #endif
@@ -21829,11 +22441,13 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
 	InfectedChasePathHandleType = ((HandleSystemHack *)handlesys)->CreateTypeAllowChild("InfectedChasePath", this, DirectChasePathHandleType, nullptr, nullptr, myself->GetIdentity(), nullptr);
 #endif
-	
+
+	nbspawn_fwd = forwards->CreateForward("OnNextbotSpawned", ET_Ignore, 2, nullptr, Param_Cell, Param_Cell);
+
 	BehaviorEntryHandleType = handlesys->CreateType("BehaviorActionEntry", this, 0, nullptr, nullptr, myself->GetIdentity(), nullptr);
-	
+
 	plsys->AddPluginsListener(this);
-	
+
 #ifdef __HAS_DAMAGERULES
 	sharesys->AddDependency(myself, "damagerules.ext", false, true);
 #endif

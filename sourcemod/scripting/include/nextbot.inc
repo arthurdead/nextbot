@@ -104,6 +104,7 @@ methodmap CustomBehaviorAction < BehaviorAction
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -936,6 +937,7 @@ methodmap NextBotFlyingLocomotion < ILocomotion
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -1112,6 +1114,7 @@ methodmap GameLocomotionCustom < GameLocomotion
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -1818,6 +1821,7 @@ methodmap GameVisionCustom < GameVision
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -1867,6 +1871,7 @@ methodmap INextBotReply
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -2004,6 +2009,7 @@ methodmap IBodyCustom < IBody
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -2066,6 +2072,7 @@ methodmap IIntentionCustom < IIntention
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
@@ -2241,6 +2248,7 @@ methodmap INextBotCustom
 	public native void set_data(const char[] name, any data);
 	public native any get_data(const char[] name);
 	public native bool has_data(const char[] name);
+	public native void remove_data(const char[] name);
 	
 	public native void set_data_array(const char[] name, const any[] data, int len);
 	public native void get_data_array(const char[] name, any[] data, int len);
