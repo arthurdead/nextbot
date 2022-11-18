@@ -1996,6 +1996,7 @@ methodmap IBodyCustom < IBody
 		public native set(bool val);
 	}
 
+	public native bool IsSequence(int seq);
 	public native bool StartSequence(int sequence, Activity act = ACT_INVALID, ActivityType flags = NO_ACTIVITY_FLAGS);
 
 	public native void GetHeadAngles(float vec[3]);

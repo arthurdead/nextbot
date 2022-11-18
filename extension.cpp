@@ -8924,6 +8924,7 @@ public:
 	}
 };
 
+#if SOURCE_ENGINE == SE_TF2
 ConVar tf_npc_flying_avoid_range( "tf_npc_flying_avoid_range", "100" );
 ConVar tf_npc_flying_avoid_force( "tf_npc_flying_avoid_force", "100" );
 
@@ -8931,6 +8932,7 @@ ConVar tf_npc_flying_deflect_range( "tf_npc_flying_deflect_range", "300" );
 ConVar tf_npc_flying_deflect_force( "tf_npc_flying_deflect_force", "2000" );
 
 ConVar tf_npc_flying_init_vel( "tf_npc_flying_init_vel", "250" );
+#endif
 
 static bool g_bInPathFollowerFaceTowards{false};
 
@@ -8939,7 +8941,9 @@ CBaseEntity *FindEntityByClassname( CBaseEntity *pStartEntity, const char *szNam
 	return servertools->FindEntityByClassname( pStartEntity, szName );
 }
 
+#if SOURCE_ENGINE == SE_TF2
 SH_DECL_MANUALHOOK2_void(Deflected, 0, 0, 0, CBaseEntity *, Vector &);
+#endif
 
 class CNavMeshHack : public CNavMesh
 {
@@ -9169,7 +9173,9 @@ public:
 				entity_hookids.emplace_back(SH_ADD_MANUALHOOK(UpdateLastKnownArea, pCC, SH_MEMBER(this, &vars_t::HookUpdateLastKnownArea), false));
 			}
 
+		#if SOURCE_ENGINE == SE_TF2
 			entity_hookids.emplace_back(SH_ADD_MANUALHOOK(Deflected, pEntity, SH_MEMBER(loc, &CNextBotFlyingLocomotion::HookDeflected), false));
+		#endif
 			entity_hookids.emplace_back(SH_ADD_MANUALHOOK(UpdateOnRemove, pEntity, SH_MEMBER(this, &vars_t::HookUpdateOnRemove), false));
 		}
 
@@ -9999,6 +10005,7 @@ public:
 		return getvars().pitch;
 	}
 
+#if SOURCE_ENGINE == SE_TF2
 	void HookDeflected( CBaseEntity *pDeflectedBy, Vector &vecDir )
 	{
 		if(pDeflectedBy) {
@@ -10007,6 +10014,7 @@ public:
 
 		RETURN_META(MRES_HANDLED);
 	}
+#endif
 
 	void Deflect( CBaseEntity *deflector )
 	{
@@ -10282,7 +10290,38 @@ public:
 		act_info_t &old_act_info{get_act_info()};
 
 		if((old_act_info.flags & ACTIVITY_UNINTERRUPTIBLE) && !(flags & ACTIVITY_UNINTERRUPTIBLE)) {
-			return false;
+			if(!sequenceFinished) {
+				return false;
+			}
+		}
+
+		bool seq_changed{true};
+		if(old_act_info.seq != -1) {
+			seq_changed = (old_act_info.seq != sequence);
+		}
+
+		bool act_changed{true};
+		if(old_act_info.act != ACT_INVALID && act != ACT_INVALID) {
+			act_changed = (old_act_info.act != act);
+		}
+
+		if(!(flags & ACTIVITY_TRANSITORY) && in_transitory) {
+			if(!sequenceFinished) {
+				seq_changed = false;
+				act_changed = false;
+			}
+		}
+
+		INextBot *bot = GetBot();
+
+		if(act_changed) {
+			if(old_act_info.act != ACT_INVALID) {
+				if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+					DevMsg("%s: IBodyCustom::OnAnimationActivityInterrupted([%i, %s])\n", bot->GetDebugIdentifier(), old_act_info.act, ActivityName(old_act_info.act));
+				}
+
+				bot->OnAnimationActivityInterrupted(old_act_info.act);
+			}
 		}
 
 		if(flags & ACTIVITY_TRANSITORY) {
@@ -10290,25 +10329,12 @@ public:
 		}
 
 		act_info_t &new_act_info{get_act_info()};
-
-		bool changed{false};
-		if(!!(flags & ACTIVITY_TRANSITORY) == in_transitory) {
-			if(new_act_info.real_act != ACT_INVALID && real_act != ACT_INVALID) {
-				if(new_act_info.real_act != real_act) {
-					changed = true;
-				}
-			} else {
-				changed = true;
-			}
-		}
-
 		new_act_info.seq = sequence;
 		new_act_info.act = act;
 		new_act_info.real_act = real_act;
 		new_act_info.flags = flags;
 
-		if(changed) {
-			INextBot *bot = GetBot();
+		if(seq_changed) {
 			CBaseCombatCharacter *pEntity = bot->GetEntity();
 			pEntity->ResetSequence(sequence);
 		}
@@ -10322,7 +10348,7 @@ public:
 		CBaseCombatCharacter *pEntity = bot->GetEntity();
 
 		if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-			DevMsg("%s: IBodyCustom::StartSequence([%i, %i], [%i, %s], %i)\n", sequence, pEntity->SequenceName(sequence), bot->GetDebugIdentifier(), act, ActivityName(act), flags);
+			DevMsg("%s: IBodyCustom::StartSequence([%i, %s], [%i, %s], %i)\n", bot->GetDebugIdentifier(), sequence, pEntity->SequenceName(sequence), act, ActivityName(act), flags);
 		}
 
 		if(sequence == -1) {
@@ -10374,6 +10400,11 @@ public:
 	int GetSequence()
 	{
 		return get_act_info().seq;
+	}
+
+	bool IsSequence(int seq)
+	{
+		return get_act_info().seq == seq;
 	}
 
 	bool HasActivityType( unsigned int flags ) const override
@@ -10440,7 +10471,6 @@ public:
 	}
 
 	act_info_t current_act[2];
-	Activity last_activity = ACT_INVALID;
 	bool in_transitory = false;
 	ArousalType current_arousal = NEUTRAL;
 	PostureType current_posture = STAND;
@@ -10506,7 +10536,6 @@ public:
 
 		current_act[0].reset();
 		current_act[1].reset();
-		last_activity = ACT_INVALID;
 
 		in_transitory = false;
 
@@ -10632,29 +10661,13 @@ public:
 
 		pEntity->StudioFrameAdvance();
 
-		if(pEntity->GetSequenceFinished() && pEntity->GetSequence() == get_act_info().seq) {
-			sequenceFinished = true;
-		} else {
-			sequenceFinished = false;
-		}
+		sequenceFinished = pEntity->GetSequenceFinished();
 
 		pEntity->DispatchAnimEvents();
 
-		if(sequenceFinished && in_transitory) {
-			Activity old_act = current_act[1].real_act;
-			Activity new_act = current_act[0].real_act;
-
-			bool changed{true};
-			if(old_act != ACT_INVALID && new_act != ACT_INVALID) {
-				if(new_act == old_act) {
-					changed = false;
-				}
-			}
-
-			if(changed) {
-				if(current_act[0].seq != -1) {
-					pEntity->ResetSequence(current_act[0].seq);
-				}
+		if(sequenceFinished && in_transitory && current_act[0].seq != -1) {
+			if(current_act[1].seq != current_act[0].seq) {
+				pEntity->ResetSequence(current_act[0].seq);
 			}
 		}
 	}
@@ -10906,33 +10919,22 @@ public:
 
 		INextBot *bot = GetBot();
 
-		if(last_activity != ACT_INVALID && !IsActivity(last_activity)) {
-			if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-				DevMsg("%s: IBodyCustom::OnAnimationActivityInterrupted([%i, %s])\n", bot->GetDebugIdentifier(), last_activity, ActivityName(last_activity));
-			}
-
-			bot->OnAnimationActivityInterrupted(last_activity);
-		}
-
-		last_activity = GetActivity();
-
 		act_info_t &act_info{get_act_info()};
 
-		if(in_transitory) {
-			if(sequenceFinished) {
-				Activity act = act_info.act;
+		if(sequenceFinished) {
+			if(act_info.act != ACT_INVALID) {
+				if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
+					DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act_info.act, ActivityName(act_info.act));
+				}
+
+				bot->OnAnimationActivityComplete(act_info.act);
+			}
+
+			if(in_transitory) {
 				bool is_posture = act_info.is_posture;
 
 				act_info.reset();
 				in_transitory = false;
-
-				if(act != ACT_INVALID) {
-					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
-					}
-
-					bot->OnAnimationActivityComplete(act);
-				}
 
 				if(is_posture && current_posture != desired_posture) {
 					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
@@ -10944,7 +10946,9 @@ public:
 					bot->OnPostureChanged();
 				}
 			}
-		} else {
+		}
+
+		if(!in_transitory) {
 			if(current_posture != desired_posture) {
 				Activity posture_act = get_posture_activity(current_posture, desired_posture);
 
@@ -10958,18 +10962,6 @@ public:
 					current_posture = desired_posture;
 
 					bot->OnPostureChanged();
-				}
-			}
-
-			if(sequenceFinished) {
-				Activity act = act_info.act;
-
-				if(act != ACT_INVALID) {
-					if(bot->IsDebugging(NEXTBOT_ANIMATION)) {
-						DevMsg("%s: IBodyCustom::OnAnimationActivityComplete([%i, %s])\n", bot->GetDebugIdentifier(), act, ActivityName(act));
-					}
-
-					bot->OnAnimationActivityComplete(act);
 				}
 			}
 		}
@@ -11224,21 +11216,21 @@ public:
 		return m_headSteadyTimer.HasStarted();
 	}
 
-	float GetHeadSteadyDuration( void ) const
+	float GetHeadSteadyDuration( void ) const override
 	{
 		return m_headSteadyTimer.HasStarted() ? m_headSteadyTimer.GetElapsedTime() : 0.0f;
 	}
 	
 #if SOURCE_ENGINE == SE_TF2
-	float GetHeadAimSubjectLeadTime( void ) const
+	float GetHeadAimSubjectLeadTime( void ) const override
 	{
 		return 0.0f;
 	}
-	float GetHeadAimTrackingInterval( void ) const
+	float GetHeadAimTrackingInterval( void ) const override
 	{
 		return 0.05f;
 	}
-	void ClearPendingAimReply( void )
+	void ClearPendingAimReply( void ) override
 	{
 		remove_reply();
 	}
@@ -11609,6 +11601,7 @@ public:
 
 	void HookCollectPotentiallyVisibleEntities(CUtlVector<CBaseEntity *> *potentiallyVisible)
 	{
+	#if SOURCE_ENGINE == SE_TF2
 		CUtlVector<CBaseObject *> collectionVector{};
 		((CTFNavMesh *)TheNavMesh)->CollectBuiltObjects(&collectionVector, TEAM_ANY);
 
@@ -11616,6 +11609,7 @@ public:
 		{
 			potentiallyVisible->AddToTail(collectionVector[i]);
 		}
+	#endif
 
 		RETURN_META(MRES_HANDLED);
 	}
@@ -17392,6 +17386,12 @@ cell_t IBodyCustomSequenceget(IPluginContext *pContext, const cell_t *params)
 	return locomotion->GetSequence();
 }
 
+cell_t IBodyCustomIsSequence(IPluginContext *pContext, const cell_t *params)
+{
+	IBodyCustom *area = (IBodyCustom *)params[1];
+	return area->IsSequence(params[2]);
+}
+
 cell_t IBodyCustomHeadAsAnglesset(IPluginContext *pContext, const cell_t *params)
 {
 	IBodyCustom *locomotion = (IBodyCustom *)params[1];
@@ -18759,6 +18759,7 @@ cell_t SearchSurroundingAreasNative(IPluginContext *pContext, const cell_t *para
 	return 0;
 }
 
+#if SOURCE_ENGINE == SE_TF2
 cell_t CTFNavMeshGetControlPointCenterArea(IPluginContext *pContext, const cell_t *params)
 {
 	return (cell_t)((CTFNavMesh *)TheNavMesh)->GetControlPointCenterArea(params[1]);
@@ -18771,6 +18772,7 @@ cell_t CTFNavMeshGetSetupGateDefenseAreas(IPluginContext *pContext, const cell_t
 cell_t CTFNavMeshGetControlPointAreas(IPluginContext *pContext, const cell_t *params);
 cell_t CTFNavMeshGetSpawnRoomAreas(IPluginContext *pContext, const cell_t *params);
 cell_t CTFNavMeshGetSpawnRoomExitAreas(IPluginContext *pContext, const cell_t *params);
+#endif
 
 cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params);
 cell_t CollectAllBots(IPluginContext *pContext, const cell_t *params);
@@ -19590,6 +19592,7 @@ sp_nativeinfo_t natives[] =
 	{"IBody.AimHeadTowardsEnt", IBodyAimHeadTowardsEnt},
 	{"IBody.HeadAimingOnTarget.get", IBodyHeadAimingOnTarget},
 	{"IBodyCustom.Sequence.get", IBodyCustomSequenceget},
+	{"IBodyCustom.IsSequence", IBodyCustomIsSequence},
 	{"IBodyCustom.HeadAsAngles.set", IBodyCustomHeadAsAnglesset},
 	{"IBodyCustom.ViewAsHead.set", IBodyCustomViewAsHeadset},
 	{"IBodyCustom.GetHeadAngles", IBodyCustomGetHeadAngles},
@@ -19982,6 +19985,7 @@ public:
 		return false;
 	}
 
+#if SOURCE_ENGINE == SE_TF2
 	HalloweenBossType DetourGetBossType()
 	{
 		Class_T myClass = Classify();
@@ -19996,10 +20000,12 @@ public:
 
 		return HALLOWEEN_BOSS_INVALID;
 	}
+#endif
 
 	unsigned int DetourPhysicsSolidMaskForEntity();
 };
 
+#if SOURCE_ENGINE == SE_TF2
 class ZombieVTableHack : public CombatCharacterVTableHack
 {
 public:
@@ -20044,6 +20050,7 @@ public:
 		return CLASS_EYEBALL;
 	}
 };
+#endif
 
 class BodyVTableHack : public IBody
 {
@@ -20059,15 +20066,18 @@ public:
 	}
 };
 
+#if SOURCE_ENGINE == SE_TF2
 #define TF_TEAM_RED 2
 #define TF_TEAM_BLUE 3
 #define TF_TEAM_HALLOWEEN 5
+#endif
 
 unsigned int team_contents(int team)
 {
 	int contentsMask = 0;
 
 	switch(team) {
+#if SOURCE_ENGINE == SE_TF2
 	case TF_TEAM_RED:
 		contentsMask |= (CONTENTS_BLUETEAM|CONTENTS_HALLOWEENTEAM|CONTENTS_UNASSIGNEDTEAM);
 		break;
@@ -20080,6 +20090,7 @@ unsigned int team_contents(int team)
 	case TEAM_UNASSIGNED:
 		contentsMask |= (CONTENTS_BLUETEAM|CONTENTS_REDTEAM|CONTENTS_HALLOWEENTEAM);
 		break;
+#endif
 	}
 
 	return contentsMask;
@@ -20096,6 +20107,7 @@ bool EntityVTableHack::DetourShouldCollide(int collisionGroup, int contentsMask)
 {
 	if(collisionGroup == COLLISION_GROUP_PLAYER_MOVEMENT) {
 		switch(GetTeamNumber()) {
+	#if SOURCE_ENGINE == SE_TF2
 		case TF_TEAM_RED:
 			if(!(contentsMask & CONTENTS_REDTEAM)) {
 				return false;
@@ -20108,6 +20120,7 @@ bool EntityVTableHack::DetourShouldCollide(int collisionGroup, int contentsMask)
 			break;
 		case TF_TEAM_HALLOWEEN:
 			break;
+	#endif
 		case TEAM_UNASSIGNED:
 			break;
 		}
@@ -20598,19 +20611,30 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 		return;
 	}
 
+#if SOURCE_ENGINE == SE_TF2
+	if(classname.compare(0, 14, "tf_projectile_"sv) == 0) {
+		pEntity->AddIEFlags(EFL_DONTWALKON);
+		return;
+	}
+#endif
+
 	CBaseCombatCharacter *pCC = pEntity->MyCombatCharacterPointer();
 	npc_type ntype{entity_to_npc_type(pEntity, classname)};
 
 	if(!(ntype & npc_any) &&
+	#if SOURCE_ENGINE == SE_TF2
 		!pEntity->IsBaseObject() &&
+	#endif
 		!pEntity->IsPlayer()) {
 		return;
 	}
 
+#if SOURCE_ENGINE == SE_TF2
 	if(pEntity->IsBaseObject()) {
 		//TODO!!!!!! move this to clsobj_hack
 		pCC->SetBloodColor(BLOOD_COLOR_MECH);
 	}
+#endif
 
 	if((ntype & npc_any) &&
 		!pEntity->IsPlayer()) {
@@ -20618,7 +20642,9 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 	}
 
 	if(pEntity->IsPlayer() ||
+	#if SOURCE_ENGINE == SE_TF2
 		pEntity->IsBaseObject() ||
+	#endif
 		(ntype & npc_any)) {
 		pEntity->AddIEFlags(EFL_DONTWALKON);
 	}
@@ -20628,11 +20654,14 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 	}
 
 	int patch_size = 0;
+#if SOURCE_ENGINE == SE_TF2
 	if(pEntity->IsPlayer()) {
 		patch_size = CBaseCombatCharacterGetBossType;
 	} else if(pCC) {
 		patch_size = CBaseCombatCharacterGetBossType;
-	} else {
+	} else
+#endif
+	{
 		patch_size = CBaseEntityPhysicsSolidMaskForEntity;
 	}
 	patch_size *= sizeof(void *);
@@ -20640,22 +20669,29 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 	void **entity_vtabl = *(void ***)pEntity;
 	SourceHook::SetMemAccess(entity_vtabl, patch_size, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 
+#if SOURCE_ENGINE == SE_TF2
 	if(pEntity->IsBaseObject()) {
 		//TODO!!!!!! move this to clsobj_hack
 		entity_vtabl[CBaseEntityBloodColor] = func_to_void(&EntityVTableHack::DetourBloodColor);
 	}
+#endif
 
 	if((ntype & npc_any) &&
 		!pEntity->IsPlayer()) {
 		entity_vtabl[CBaseEntityIsNPC] = func_to_void(&EntityVTableHack::DetourIsNPC);
-		if(!pEntity->IsBaseObject()) {
+	#if SOURCE_ENGINE == SE_TF2
+		if(!pEntity->IsBaseObject())
+	#endif
+		{
 			entity_vtabl[CBaseEntityShouldCollide] = func_to_void(&EntityVTableHack::DetourShouldCollide);
 		}
 		if(pCC) {
 			entity_vtabl[CBaseEntityPhysicsSolidMaskForEntity] = func_to_void(&CombatCharacterVTableHack::DetourPhysicsSolidMaskForEntity);
 			//entity_vtabl[CBaseCombatCharacterHasHumanGibs] = func_to_void(&CombatCharacterVTableHack::DetourHasHumanGibs);
 			//entity_vtabl[CBaseCombatCharacterHasAlienGibs] = func_to_void(&CombatCharacterVTableHack::DetourHasAlienGibs);
+		#if SOURCE_ENGINE == SE_TF2
 			entity_vtabl[CBaseCombatCharacterGetBossType] = func_to_void(&CombatCharacterVTableHack::DetourGetBossType);
+		#endif
 		}
 	}
 
@@ -20668,6 +20704,7 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 
 		SourceHook::SetMemAccess(body_vtabl, (GetCollisionGroupOffset * sizeof(void *)) + 4, SH_MEM_READ|SH_MEM_WRITE|SH_MEM_EXEC);
 
+	#if SOURCE_ENGINE == SE_TF2
 		switch(ntype) {
 			case npc_zombie: {
 				entity_vtabl[CBaseEntityClassify] = func_to_void(&ZombieVTableHack::DetourClassify);
@@ -20700,6 +20737,7 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 				body_vtabl[GetCollisionGroupOffset] = func_to_void(&BodyVTableHack::DetourGetCollisionGroup);
 			} break;
 		}
+	#endif
 	}
 
 	vtables_already_set.emplace_back(std::move(classname));
@@ -20712,8 +20750,11 @@ DETOUR_DECL_MEMBER0(MyNPCPointer, CAI_BaseNPC *)
 	CBaseEntity *pEntity = (CBaseEntity *)this;
 
 	if(pEntity->MyNextBotPointer() ||
-		pEntity->IsPlayer() ||
-		pEntity->IsBaseObject()) {
+		pEntity->IsPlayer()
+	#if SOURCE_ENGINE == SE_TF2
+		|| pEntity->IsBaseObject()
+	#endif
+	) {
 		return nullptr;
 	}
 
@@ -20801,6 +20842,7 @@ public:
 			case CLASS_PLAYER:			return "CLASS_PLAYER";
 			case CLASS_PLAYER_ALLY:		return "CLASS_PLAYER_ALLY";
 
+		#if SOURCE_ENGINE == SE_TF2
 			case CLASS_TFGOAL:			return "CLASS_TFGOAL";
 			case CLASS_TFGOAL_TIMER:	return "CLASS_TFGOAL_TIMER";
 			case CLASS_TFGOAL_ITEM:		return "CLASS_TFGOAL_ITEM";
@@ -20812,6 +20854,7 @@ public:
 			case CLASS_WIZARD:			return "CLASS_WIZARD";
 			case CLASS_EYEBALL:			return "CLASS_EYEBALL";
 			case CLASS_TANK:			return "CLASS_TANK";
+		#endif
 
 			case CLASS_CUSTOM_NPC:		return "CLASS_CUSTOM_NPC";
 
@@ -21112,6 +21155,7 @@ public:
 			return false;
 		}
 
+	#if SOURCE_ENGINE == SE_TF2
 		// Rockets need to collide with players when they hit, but
 		// be ignored by player movement checks
 		if ( ( collisionGroup0 == COLLISION_GROUP_NPC ) && 
@@ -21142,6 +21186,7 @@ public:
 		{
 			return false;
 		}
+	#endif
 
 		if ( collisionGroup0 == COLLISION_GROUP_NPC_MOVEMENT )
 		{
@@ -21275,6 +21320,7 @@ void Sample::OnCoreMapStart(edict_t *pEdictList, int edictCount, int clientMax)
 
 #include "funnyfile.h"
 
+#if SOURCE_ENGINE == SE_TF2
 cell_t CTFNavMeshGetSpawnRoomExitAreas(IPluginContext *pContext, const cell_t *params)
 {
 	HandleSecurity security(pContext->GetIdentity(), myself->GetIdentity());
@@ -21438,6 +21484,7 @@ cell_t CTFNavMeshCollectAmbushAreas(IPluginContext *pContext, const cell_t *para
 
 	return 0;
 }
+#endif
 
 cell_t CollectSurroundingAreasNative(IPluginContext *pContext, const cell_t *params)
 {
@@ -21493,6 +21540,7 @@ cell_t CollectAllBots(IPluginContext *pContext, const cell_t *params)
 	return 0;
 }
 
+#if SOURCE_ENGINE == SE_TF2
 cell_t CTFNavAreaGetEnemyInvasionAreaVector(IPluginContext *pContext, const cell_t *params)
 {
 	CTFNavArea *area = (CTFNavArea *)params[1];
@@ -21519,6 +21567,7 @@ cell_t CTFNavAreaGetEnemyInvasionAreaVector(IPluginContext *pContext, const cell
 
 	return 0;
 }
+#endif
 
 bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 {
