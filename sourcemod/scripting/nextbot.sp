@@ -9,7 +9,7 @@ public Plugin myinfo =
 	name = "nextbot",
 	author = "Arthurdead",
 	description = "",
-	version = "0.1.2.1",
+	version = "0.1.2.2",
 	url = ""
 };
 
@@ -42,14 +42,6 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int length)
 
 stock CustomDatamap __register_nb_factory_based(Handle plugin, const char[] classname, const char[] name, const char[] clientnet, const char[] based, CustomSendtable &table = null, CustomEntityFactory &factory = null)
 {
-	char netname[64];
-	strcopy(netname, sizeof(netname), "C");
-	StrCat(netname, sizeof(netname), name);
-
-	char tblname[64];
-	strcopy(tblname, sizeof(tblname), "DT_");
-	StrCat(tblname, sizeof(tblname), name);
-
 	CustomEntityFactory old_factory = EntityFactoryDictionary.register_based(classname, based);
 	factory = view_as<CustomEntityFactory>(CloneHandle(old_factory, plugin));
 	delete old_factory;
@@ -66,24 +58,15 @@ stock CustomDatamap __register_nb_factory_based(Handle plugin, const char[] clas
 		table.set_client_class_id(clientnet);
 	}
 
-	table.set_name(tblname);
-	table.set_class_name(netname);
+	table.set_shared_name(name);
 
-	datamap.set_name(netname);
+	datamap.set_shared_name(name);
 
 	return datamap;
 }
 
 stock CustomDatamap __register_nb_factory_func(Handle plugin, const char[] classname, const char[] name, const char[] clientnet, entityalloc_func_t alloc, int size, any data, CustomSendtable &table = null, CustomEntityFactory &factory = null)
 {
-	char netname[64];
-	strcopy(netname, sizeof(netname), "C");
-	StrCat(netname, sizeof(netname), name);
-
-	char tblname[64];
-	strcopy(tblname, sizeof(tblname), "DT_");
-	StrCat(tblname, sizeof(tblname), name);
-
 	CustomEntityFactory old_factory = EntityFactoryDictionary.register_function(classname, alloc, size, data);
 	factory = view_as<CustomEntityFactory>(CloneHandle(old_factory, plugin));
 	delete old_factory;
@@ -100,10 +83,9 @@ stock CustomDatamap __register_nb_factory_func(Handle plugin, const char[] class
 		table.set_client_class_id(clientnet);
 	}
 
-	table.set_name(tblname);
-	table.set_class_name(netname);
+	table.set_shared_name(name);
 
-	datamap.set_name(netname);
+	datamap.set_shared_name(name);
 
 	return datamap;
 }
@@ -208,8 +190,6 @@ static any native_register_basenpc_nextbot_factory(Handle plugin, int params)
 	CustomEntityFactory factory = GetNativeCellRef(4);
 
 	CustomDatamap datamap = __register_nb_factory_func(plugin, classname, name, "CAI_BaseNPC", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table, factory);
-	table.set_client_name("DT_AI_BaseNPC");
-	table.set_client_class_name("CAI_BaseNPC");
 	table.add_prop_int("m_lifeState", 1, 3, SPROP_UNSIGNED);
 	table.add_prop_bool("m_bPerformAvoidance");
 	table.add_prop_bool("m_bIsMoving");
@@ -240,8 +220,7 @@ static any native_register_tankboss_nextbot_factory(Handle plugin, int params)
 	CustomEntityFactory factory = GetNativeCellRef(4);
 
 	CustomDatamap datamap = __register_nb_factory_func(plugin, classname, name, "CTFTankBoss", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table, factory);
-	table.set_client_name("DT_TFBaseBoss");
-	table.set_client_class_name("CTFBaseBoss");
+	table.set_shared_client_name("TFBaseBoss");
 	table.add_prop_float("m_lastHealthPercentage", _, 1.0, 11, SPROP_NOSCALE);
 
 	SetNativeCellRef(3, table);
@@ -266,8 +245,6 @@ static any native_register_robot_nextbot_factory(Handle plugin, int params)
 	CustomEntityFactory factory = GetNativeCellRef(4);
 
 	CustomDatamap datamap = __register_nb_factory_func(plugin, classname, name, "CTFRobotDestruction_Robot", datamaps_allocatenextbot, GetNextBotCombatCharacterSize(), 0, table, factory);
-	table.set_client_name("DT_TFRobotDestruction_Robot");
-	table.set_client_class_name("CTFRobotDestruction_Robot");
 	table.add_prop_int("m_iHealth", 4, _, SPROP_VARINT);
 	table.add_prop_int("m_iMaxHealth", 4, _, SPROP_VARINT);
 	table.add_prop_int("m_eType", 4, _, SPROP_VARINT);
