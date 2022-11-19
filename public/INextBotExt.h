@@ -3,12 +3,10 @@
 
 #pragma once
 
-#include <string_view>
-
 #include <IShareSys.h>
 
 #define SMINTERFACE_NEXTBOT_NAME "INextBotExt"
-#define SMINTERFACE_NEXTBOT_VERSION 1
+#define SMINTERFACE_NEXTBOT_VERSION 2
 
 #if SOURCE_ENGINE == SE_TF2
 enum Class_T
@@ -69,7 +67,7 @@ public:
 	virtual unsigned int GetInterfaceVersion()
 	{ return SMINTERFACE_NEXTBOT_VERSION; }
 
-	virtual npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname) = 0;
+	virtual npc_type entity_to_npc_type(CBaseEntity *pEntity, const char *classname) = 0;
 };
 
 #endif

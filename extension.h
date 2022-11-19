@@ -48,7 +48,7 @@
 class Sample : public SDKExtension, public IPluginsListener, public IHandleTypeDispatch, public IConCommandBaseAccessor, public ISMEntityListener, public INextBotExt
 {
 public:
-	virtual npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname);
+	virtual npc_type entity_to_npc_type(CBaseEntity *pEntity, const char *classname);
 
 	virtual void OnEntityCreated(CBaseEntity *pEntity, const char *classname);
 

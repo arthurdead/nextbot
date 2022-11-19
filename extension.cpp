@@ -34,11 +34,9 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <string_view>
 #include <cstdint>
 
 using namespace std::literals::string_literals;
-using namespace std::literals::string_view_literals;
 
 #include <cxxabi.h>
 #if __has_include(<tinfo.h>)
@@ -167,7 +165,7 @@ enum MRESReturn
 	MRES_Supercede				// skip real function; use my return value
 };
 
-static_assert(sizeof(MRESReturn) == sizeof(cell_t));
+static_assert(sizeof(MRESReturn) == sizeof(cell_t), "");
 
 META_RES mres_to_meta_res(MRESReturn res)
 {
@@ -4545,7 +4543,7 @@ enum QueryResultType
 	ANSWER_UNDEFINED
 };
 
-static_assert(sizeof(QueryResultType) == sizeof(cell_t));
+static_assert(sizeof(QueryResultType) == sizeof(cell_t), "");
 
 #if SOURCE_ENGINE == SE_TF2
 class CKnownEntity;
@@ -5640,7 +5638,8 @@ HandleType_t BehaviorEntryHandleType = 0;
 
 using SPActor = NextBotCombatCharacter;
 
-static std::vector<std::string> reason_ptr_vec{};
+using reason_ptr_vec_t = std::vector<std::string>;
+static reason_ptr_vec_t reason_ptr_vec{};
 
 class SPActionResult : public ActionResult<SPActor>
 {
@@ -5649,7 +5648,7 @@ public:
 	
 	void set_reason(std::string &&reason_)
 	{
-		auto it{std::find(reason_ptr_vec.begin(), reason_ptr_vec.end(), reason_)};
+		reason_ptr_vec_t::iterator it{std::find(reason_ptr_vec.begin(), reason_ptr_vec.end(), reason_)};
 		if(it == reason_ptr_vec.end()) {
 			reason_ptr_vec.emplace_back(std::move(reason_));
 			it = (reason_ptr_vec.end()-1);
@@ -5763,7 +5762,7 @@ void cleanup_func(spfunc_t &func, IdentityToken_t *pId)
 }
 
 #define PLUGINNB_GETSET_FUNCS_NOBASE \
-	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) { \
+	bool set_function(const std::string &name, IPluginFunction *func, IPluginContext *pContext) { \
 		member_func_t member{get_function_member(name)}; \
 		if(!member) { \
 			return false; \
@@ -5771,7 +5770,7 @@ void cleanup_func(spfunc_t &func, IdentityToken_t *pId)
 		(this->*member) = spfunc_t{func, pContext}; \
 		return true; \
 	} \
-	bool get_function(std::string_view name, spfunc_t &func) { \
+	bool get_function(const std::string &name, spfunc_t &func) { \
 		member_func_t member{get_function_member(name)}; \
 		if(!member) { \
 			return false; \
@@ -5779,7 +5778,7 @@ void cleanup_func(spfunc_t &func, IdentityToken_t *pId)
 		func = (this->*member); \
 		return true; \
 	} \
-	bool has_function(std::string_view name) { \
+	bool has_function(const std::string &name) { \
 		member_func_t member{get_function_member(name)}; \
 		if(!member) { \
 			return false; \
@@ -5892,95 +5891,95 @@ struct SPActionEntryFuncs
 
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "OnStart"sv) {
+		if(name == "OnStart"s) {
 			return &this_t::onstart;
-		} else if(name == "Update"sv) {
+		} else if(name == "Update"s) {
 			return &this_t::onupdate;
-		} else if(name == "OnSuspend"sv) {
+		} else if(name == "OnSuspend"s) {
 			return &this_t::onsus;
-		} else if(name == "OnResume"sv) {
+		} else if(name == "OnResume"s) {
 			return &this_t::onresume;
-		} else if(name == "OnEnd"sv) {
+		} else if(name == "OnEnd"s) {
 			return &this_t::onend;
-		} else if(name == "InitialContainedAction"sv) {
+		} else if(name == "InitialContainedAction"s) {
 			return &this_t::intialact;
-		} else if(name == "OnLandOnGround"sv) {
+		} else if(name == "OnLandOnGround"s) {
 			return &this_t::landgrnd;
-		} else if(name == "OnContact"sv) {
+		} else if(name == "OnContact"s) {
 			return &this_t::oncontact;
-		} else if(name == "OnAnimationActivityComplete"sv) {
+		} else if(name == "OnAnimationActivityComplete"s) {
 			return &this_t::animcompl;
-		} else if(name == "OnAnimationActivityInterrupted"sv) {
+		} else if(name == "OnAnimationActivityInterrupted"s) {
 			return &this_t::animinter;
-		} else if(name == "OnAnimationEvent"sv) {
+		} else if(name == "OnAnimationEvent"s) {
 			return &this_t::animevent;
-		} else if(name == "OnOtherKilled"sv) {
+		} else if(name == "OnOtherKilled"s) {
 			return &this_t::otherkilled;
-		} else if(name == "OnSight"sv) {
+		} else if(name == "OnSight"s) {
 			return &this_t::onsight;
-		} else if(name == "OnLostSight"sv) {
+		} else if(name == "OnLostSight"s) {
 			return &this_t::onlosesight;
-		} else if(name == "OnShoved"sv) {
+		} else if(name == "OnShoved"s) {
 			return &this_t::shoved;
-		} else if(name == "OnBlinded"sv) {
+		} else if(name == "OnBlinded"s) {
 			return &this_t::blinded;
-		} else if(name == "OnTerritoryContested"sv) {
+		} else if(name == "OnTerritoryContested"s) {
 			return &this_t::terrcontest;
-		} else if(name == "OnTerritoryCaptured"sv) {
+		} else if(name == "OnTerritoryCaptured"s) {
 			return &this_t::terrcap;
-		} else if(name == "OnTerritoryLost"sv) {
+		} else if(name == "OnTerritoryLost"s) {
 			return &this_t::terrlost;
-		} else if(name == "OnThreatChanged"sv) {
+		} else if(name == "OnThreatChanged"s) {
 			return &this_t::threachngd;
-		} else if(name == "OnHitByVomitJar"sv) {
+		} else if(name == "OnHitByVomitJar"s) {
 			return &this_t::hitvom;
-		} else if(name == "OnDrop"sv) {
+		} else if(name == "OnDrop"s) {
 			return &this_t::drop;
-		} else if(name == "OnMoveToSuccess"sv) {
+		} else if(name == "OnMoveToSuccess"s) {
 			return &this_t::movesucc;
-		} else if(name == "OnStuck"sv) {
+		} else if(name == "OnStuck"s) {
 			return &this_t::stuck;
-		} else if(name == "OnUnStuck"sv) {
+		} else if(name == "OnUnStuck"s) {
 			return &this_t::unstuck;
-		} else if(name == "OnIgnite"sv) {
+		} else if(name == "OnIgnite"s) {
 			return &this_t::ignite;
-		} else if(name == "OnInjured"sv) {
+		} else if(name == "OnInjured"s) {
 			return &this_t::injured;
-		} else if(name == "OnKilled"sv) {
+		} else if(name == "OnKilled"s) {
 			return &this_t::killed;
-		} else if(name == "OnWin"sv) {
+		} else if(name == "OnWin"s) {
 			return &this_t::win;
-		} else if(name == "OnLose"sv) {
+		} else if(name == "OnLose"s) {
 			return &this_t::lose;
-		} else if(name == "OnEnteredSpit"sv) {
+		} else if(name == "OnEnteredSpit"s) {
 			return &this_t::enterspit;
-		} else if(name == "OnModelChanged"sv) {
+		} else if(name == "OnModelChanged"s) {
 			return &this_t::mdlchnd;
-		} else if(name == "OnMoveToFailure"sv) {
+		} else if(name == "OnMoveToFailure"s) {
 			return &this_t::movefail;
-		} else if(name == "OnSound"sv) {
+		} else if(name == "OnSound"s) {
 			return &this_t::sound;
-		} else if(name == "OnWeaponFired"sv) {
+		} else if(name == "OnWeaponFired"s) {
 			return &this_t::wepfired;
-		} else if(name == "OnActorEmoted"sv) {
+		} else if(name == "OnActorEmoted"s) {
 			return &this_t::actemote;
-		} else if(name == "OnPickUp"sv) {
+		} else if(name == "OnPickUp"s) {
 			return &this_t::pickup;
-		} else if(name == "ShouldHurry"sv) {
+		} else if(name == "ShouldHurry"s) {
 			return &this_t::hurry;
-		} else if(name == "ShouldRetreat"sv) {
+		} else if(name == "ShouldRetreat"s) {
 			return &this_t::retreat;
-		} else if(name == "ShouldAttack"sv) {
+		} else if(name == "ShouldAttack"s) {
 			return &this_t::attack;
-		} else if(name == "IsHindrance"sv) {
+		} else if(name == "IsHindrance"s) {
 			return &this_t::hinder;
-		} else if(name == "SelectTargetPoint"sv) {
+		} else if(name == "SelectTargetPoint"s) {
 			return &this_t::targetpoint;
-		} else if(name == "IsPositionAllowed"sv) {
+		} else if(name == "IsPositionAllowed"s) {
 			return &this_t::posallow;
-		} else if(name == "SelectMoreDangerousThreat"sv) {
+		} else if(name == "SelectMoreDangerousThreat"s) {
 			return &this_t::dangertreat;
 		}
 		
@@ -6001,11 +6000,12 @@ struct SPActionEntry : public SPActionEntryFuncs
 	
 	Handle_t hndl = BAD_HANDLE;
 	
-	std::vector<SPAction *> actions{};
+	using actions_t = std::vector<SPAction *>;
+	actions_t actions{};
 	
 	void on_destroyed(SPAction *action)
 	{
-		auto it = actions.begin();
+		actions_t::iterator it = actions.begin();
 		while(it != actions.end()) {
 			if(*it == action) {
 				actions.erase(it);
@@ -6026,8 +6026,8 @@ struct SPActionEntry : public SPActionEntryFuncs
 #define RESVARS_SIZE (sizeof(cell_t) + RESVARS_REASON_SIZE + sizeof(cell_t))
 #define RESVARS_SIZE_IN_CELL (RESVARS_SIZE / sizeof(cell_t))
 
-static_assert(sizeof(ActionResultType) == sizeof(cell_t));
-static_assert(sizeof(SPAction *) == sizeof(cell_t));
+static_assert(sizeof(ActionResultType) == sizeof(cell_t), "");
+static_assert(sizeof(SPAction *) == sizeof(cell_t), "");
 
 #include <npcevent.h>
 
@@ -6036,10 +6036,11 @@ using spfncmap_t = std::unordered_map<std::string, spfunc_t>;
 
 class IPluginNextBotComponent;
 
-std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> spnbcomponents{};
+using spnbcomponents_t = std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>>;
+spnbcomponents_t spnbcomponents{};
 
 #define PLUGINNB_GETSET_FUNCS \
-	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) override { \
+	bool set_function(const std::string &name, IPluginFunction *func, IPluginContext *pContext) override { \
 		member_func_t member{get_function_member(name)}; \
 		if(!member) { \
 			return base_t::set_function(name, func, pContext); \
@@ -6047,7 +6048,7 @@ std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> sp
 		(this->*member) = spfunc_t{func, pContext}; \
 		return true; \
 	} \
-	bool get_function(std::string_view name, spfunc_t &func) override { \
+	bool get_function(const std::string &name, spfunc_t &func) override { \
 		member_func_t member{get_function_member(name)}; \
 		if(!member) { \
 			return base_t::get_function(name, func); \
@@ -6055,7 +6056,7 @@ std::unordered_map<IdentityToken_t *, std::vector<IPluginNextBotComponent *>> sp
 		func = (this->*member); \
 		return true; \
 	} \
-	bool has_function(std::string_view name) override { \
+	bool has_function(const std::string &name) override { \
 		member_func_t member{get_function_member(name)}; \
 		if(!member) { \
 			return base_t::has_function(name); \
@@ -6076,11 +6077,12 @@ public:
 		for(auto &pid_it : pIds) {
 			IdentityToken_t *pId{pid_it.second};
 
-			auto it{spnbcomponents.find(pId)};
+			spnbcomponents_t::iterator it{spnbcomponents.find(pId)};
 			if(it != spnbcomponents.end()) {
-				std::vector<IPluginNextBotComponent *> &vec{it->second};
+				using vec_t = std::vector<IPluginNextBotComponent *>;
+				vec_t &vec{it->second};
 
-				auto it_vec = vec.begin();
+				vec_t::iterator it_vec = vec.begin();
 				while(it_vec != vec.end()) {
 					if(*it_vec == this) {
 						vec.erase(it_vec);
@@ -6114,20 +6116,21 @@ public:
 			return pContext->ThrowNativeError("invalid name %s", name_ptr);
 		}
 
-		auto pid_it{pIds.find(name)};
+		pIds_t::iterator pid_it{pIds.find(name)};
 		if(pid_it != pIds.end()) {
 			pid_it->second = pId;
 		} else {
 			pid_it = pIds.emplace(name, pId).first;
 		}
 
-		auto nbcomp_it{spnbcomponents.find(pId)};
+		spnbcomponents_t::iterator nbcomp_it{spnbcomponents.find(pId)};
 		if(nbcomp_it == spnbcomponents.end()) {
 			nbcomp_it = spnbcomponents.emplace(pId, std::vector<IPluginNextBotComponent *>{}).first;
 		}
-		std::vector<IPluginNextBotComponent *> &comps{nbcomp_it->second};
+		using comps_t = std::vector<IPluginNextBotComponent *>;
+		comps_t &comps{nbcomp_it->second};
 
-		auto nbcomp_ptr_it{std::find(comps.begin(), comps.end(), this)};
+		comps_t::iterator nbcomp_ptr_it{std::find(comps.begin(), comps.end(), this)};
 		if(nbcomp_ptr_it == comps.end()) {
 			comps.emplace_back(this);
 		}
@@ -6139,7 +6142,7 @@ public:
 	{
 		char *name_ptr = nullptr;
 		pContext->LocalToString(params[2], &name_ptr);
-		std::string_view name{name_ptr};
+		std::string name{name_ptr};
 		
 		spfunc_t func{};
 		get_function(name, func);
@@ -6155,29 +6158,29 @@ public:
 	{
 		char *name_ptr = nullptr;
 		pContext->LocalToString(params[2], &name_ptr);
-		std::string_view name{name_ptr};
+		std::string name{name_ptr};
 		
 		return has_function(name);
 	}
 
-	virtual bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext)
+	virtual bool set_function(const std::string &name, IPluginFunction *func, IPluginContext *pContext)
 	{
 		return false;
 	}
 
-	virtual bool get_function(std::string_view name, spfunc_t &func)
+	virtual bool get_function(const std::string &name, spfunc_t &func)
 	{
 		return false;
 	}
 
-	virtual bool has_function(std::string_view name)
+	virtual bool has_function(const std::string &name)
 	{
 		return false;
 	}
 
 	virtual void plugin_unloaded(IdentityToken_t *pId)
 	{
-		auto it{pIds.begin()};
+		pIds_t::iterator it{pIds.begin()};
 		while(it != pIds.end()) {
 			if(it->second == pId) {
 				it = pIds.erase(it);
@@ -6188,7 +6191,8 @@ public:
 		}
 	}
 
-	std::unordered_map<std::string, IdentityToken_t *> pIds{};
+	using pIds_t = std::unordered_map<std::string, IdentityToken_t *>;
+	pIds_t pIds{};
 
 	spvarmap_t &get_sp_data()
 	{ return data; }
@@ -6207,7 +6211,7 @@ public:
 	{
 		IPluginNextBotComponent::plugin_unloaded(pId);
 
-		auto it{fncs.begin()};
+		spfncmap_t::iterator it{fncs.begin()};
 		while(it != fncs.end()) {
 			if(it->second == pId) {
 				it = fncs.erase(it);
@@ -6218,10 +6222,10 @@ public:
 		}
 	}
 
-	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) override
+	bool set_function(const std::string &name, IPluginFunction *func, IPluginContext *pContext) override
 	{
 		std::string name_tmp{name};
-		auto it{fncs.find(name_tmp)};
+		spfncmap_t::iterator it{fncs.find(name_tmp)};
 		if(it == fncs.cend()) {
 			it = fncs.emplace(std::move(name_tmp), spfunc_t{func, pContext}).first;
 		} else {
@@ -6230,10 +6234,10 @@ public:
 		return true;
 	}
 
-	bool get_function(std::string_view name, spfunc_t &func) override
+	bool get_function(const std::string &name, spfunc_t &func) override
 	{
 		std::string name_tmp{name};
-		auto it{fncs.find(name_tmp)};
+		spfncmap_t::iterator it{fncs.find(name_tmp)};
 		if(it == fncs.cend()) {
 			return IPluginNextBotComponent::get_function(name, func);
 		}
@@ -6241,10 +6245,10 @@ public:
 		return true;
 	}
 
-	bool has_function(std::string_view name) override
+	bool has_function(const std::string &name) override
 	{
 		std::string name_tmp{name};
-		auto it{fncs.find(name_tmp)};
+		spfncmap_t::iterator it{fncs.find(name_tmp)};
 		if(it == fncs.cend()) {
 			return IPluginNextBotComponent::has_function(name);
 		}
@@ -6265,7 +6269,7 @@ public:
 		IPluginNextBotComponentArbitraryFuncs::plugin_unloaded(pId);
 	}
 
-	bool set_function(std::string_view name, IPluginFunction *func, IPluginContext *pContext) override
+	bool set_function(const std::string &name, IPluginFunction *func, IPluginContext *pContext) override
 	{
 		if(SPActionEntryFuncs::set_function(name, func, pContext)) {
 			return true;
@@ -6273,7 +6277,7 @@ public:
 		return IPluginNextBotComponentArbitraryFuncs::set_function(name, func, pContext);
 	}
 
-	bool get_function(std::string_view name, spfunc_t &func) override
+	bool get_function(const std::string &name, spfunc_t &func) override
 	{
 		if(SPActionEntryFuncs::get_function(name, func)) {
 			return true;
@@ -6281,7 +6285,7 @@ public:
 		return IPluginNextBotComponentArbitraryFuncs::get_function(name, func);
 	}
 
-	bool has_function(std::string_view name) override
+	bool has_function(const std::string &name) override
 	{
 		if(SPActionEntryFuncs::has_function(name)) {
 			return true;
@@ -7741,9 +7745,9 @@ public:
 	
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "InitialContainedAction"sv) {
+		if(name == "InitialContainedAction"s) {
 			return &this_t::initact;
 		}
 
@@ -8379,17 +8383,17 @@ public:
 	
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "ClimbLadder"sv) {
+		if(name == "ClimbLadder"s) {
 			return &this_t::climbladdr;
-		} else if(name == "DescendLadder"sv) {
+		} else if(name == "DescendLadder"s) {
 			return &this_t::desceladdr;
-		} else if(name == "ClimbUpToLedge"sv) {
+		} else if(name == "ClimbUpToLedge"s) {
 			return &this_t::climbledge;
-		} else if(name == "ShouldCollideWith"sv) {
+		} else if(name == "ShouldCollideWith"s) {
 			return &this_t::collidewith;
-		} else if(name == "IsEntityTraversable"sv) {
+		} else if(name == "IsEntityTraversable"s) {
 			return &this_t::entitytaver;
 		}
 
@@ -8831,9 +8835,9 @@ struct customlocomotion_vars_t : customlocomotion_base_vars_t
 	
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "TraverseLadder"sv) {
+		if(name == "TraverseLadder"s) {
 			return &this_t::travladdr;
 		}
 
@@ -9131,9 +9135,9 @@ public:
 
 		using member_func_t = spfunc_t (this_t::*);
 
-		member_func_t get_function_member(std::string_view name)
+		member_func_t get_function_member(const std::string &name)
 		{
-			if(name == "LimitPitch"sv) {
+			if(name == "LimitPitch"s) {
 				return &this_t::limitpitch;
 			}
 
@@ -10160,7 +10164,7 @@ INextBotComponent::~INextBotComponent()
 	m_bot->UnregisterComponent( this );
 }
 
-static_assert(sizeof(Activity) == sizeof(cell_t));
+static_assert(sizeof(Activity) == sizeof(cell_t), "");
 
 class SPNextBotReply : public INextBotReply, public IPluginNextBotComponent
 {
@@ -10210,13 +10214,13 @@ public:
 
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "OnSuccess"sv) {
+		if(name == "OnSuccess"s) {
 			return &this_t::succ;
-		} else if(name == "OnSuccess"sv) {
+		} else if(name == "OnSuccess"s) {
 			return &this_t::fail;
-		} else if(name == "Destroyed"sv) {
+		} else if(name == "Destroyed"s) {
 			return &this_t::dest;
 		}
 
@@ -11251,11 +11255,11 @@ public:
 
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "SelectAnimationSequence"sv) {
+		if(name == "SelectAnimationSequence"s) {
 			return &this_t::selectseq;
-		} else if(name == "TranslateActivity"sv) {
+		} else if(name == "TranslateActivity"s) {
 			return &this_t::translact;
 		}
 
@@ -11551,11 +11555,11 @@ public:
 
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "IsIgnored"sv) {
+		if(name == "IsIgnored"s) {
 			return &this_t::ignored;
-		} else if(name == "IsVisibleEntityNoticed"sv) {
+		} else if(name == "IsVisibleEntityNoticed"s) {
 			return &this_t::noticed;
 		}
 
@@ -12305,7 +12309,8 @@ struct pathfollower_vars_t
 	std::vector<int> hookids{};
 };
 
-std::unordered_map<PathFollower *, unsigned char *> pathfollower_var_map{};
+using pathfollower_var_map_t = std::unordered_map<PathFollower *, unsigned char *>;
+pathfollower_var_map_t pathfollower_var_map{};
 
 class PathFollower : public Path
 {
@@ -12353,7 +12358,7 @@ public:
 
 	unsigned char *vars_ptr()
 	{
-		auto it{pathfollower_var_map.find(this)};
+		pathfollower_var_map_t::iterator it{pathfollower_var_map.find(this)};
 		if(it == pathfollower_var_map.end()) {
 			return nullptr;
 		}
@@ -12375,7 +12380,7 @@ public:
 
 		vars.~vars_t();
 
-		auto it{pathfollower_var_map.find(base)};
+		pathfollower_var_map_t::iterator it{pathfollower_var_map.find(base)};
 		if(it != pathfollower_var_map.end()) {
 			pathfollower_var_map.erase(it);
 		}
@@ -12665,7 +12670,7 @@ public:
 	template <typename C = ChasePath, typename T = vars_t>
 	static C *create(SubjectChaseType chaseHow)
 	{
-		static_assert(std::is_base_of_v<ChasePath, C>);
+		static_assert(std::is_base_of<ChasePath, C>::value, "");
 		C *bytes = (C *)PathFollower::create<C, T>();
 		bytes->ctor(chaseHow);
 		T &vars{PathFollower::getvars<C, T>(bytes)};
@@ -13778,13 +13783,14 @@ HandleType_t RetreatPathHandleType = 0;
 HandleType_t InfectedChasePathHandleType = 0;
 #endif
 
-static std::unordered_map<PathFollower *, Handle_t> pathfollower_hndl_map;
+using pathfollower_hndl_map_t = std::unordered_map<PathFollower *, Handle_t>;
+static pathfollower_hndl_map_t pathfollower_hndl_map;
 
 template <typename T>
 class SPPathFollower : public T
 {
 public:
-	static_assert(std::is_base_of_v<PathFollower, T>);
+	static_assert(std::is_base_of<PathFollower, T>::value, "");
 
 	struct vars_t : T::vars_t
 	{
@@ -13809,7 +13815,7 @@ public:
 
 	void handle_destroyed()
 	{
-		auto it{pathfollower_hndl_map.find(static_cast<PathFollower *>(this))};
+		pathfollower_hndl_map_t::iterator it{pathfollower_hndl_map.find(static_cast<PathFollower *>(this))};
 		if(it != pathfollower_hndl_map.cend()) {
 			pathfollower_hndl_map.erase(it);
 		}
@@ -14737,7 +14743,7 @@ cell_t INextBotCurrentPathget(IPluginContext *pContext, const cell_t *params)
 		return BAD_HANDLE;
 	}
 
-	auto it{pathfollower_hndl_map.find(path)};
+	pathfollower_hndl_map_t::iterator it{pathfollower_hndl_map.find(path)};
 	if(it == pathfollower_hndl_map.cend()) {
 		return BAD_HANDLE;
 	}
@@ -14747,14 +14753,15 @@ cell_t INextBotCurrentPathget(IPluginContext *pContext, const cell_t *params)
 
 class INextBotCustom;
 
-std::unordered_map<int, INextBotCustom *> nbcustomap{};
+using nbcustomap_t = std::unordered_map<int, INextBotCustom *>;
+nbcustomap_t nbcustomap{};
 
 cell_t INextBotCustomget(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *bot = (INextBot *)params[1];
 	CBaseEntity *pEntity = bot->GetEntity();
 
-	auto it{nbcustomap.find(gamehelpers->EntityToReference(pEntity))};
+	nbcustomap_t::iterator it{nbcustomap.find(gamehelpers->EntityToReference(pEntity))};
 	if(it == nbcustomap.cend()) {
 		return 0;
 	}
@@ -16750,7 +16757,7 @@ cell_t handle_set_data(IPluginContext *pContext, const cell_t *params, spvarmap_
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
-	auto it{data.find(name)};
+	spvarmap_t::iterator it{data.find(name)};
 	if(it == data.end()) {
 		it = data.emplace(spvarmap_t::value_type{name, {}}).first;
 	}
@@ -16770,7 +16777,7 @@ cell_t handle_get_data(IPluginContext *pContext, const cell_t *params, spvarmap_
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
-	auto it{data.find(name)};
+	spvarmap_t::iterator it{data.find(name)};
 	if(it == data.end() || it->second.size() == 0) {
 		return pContext->ThrowNativeError("theres no data with the name %s", name);
 	}
@@ -16783,7 +16790,7 @@ cell_t handle_has_data(IPluginContext *pContext, const cell_t *params, spvarmap_
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
-	auto it{data.find(name)};
+	spvarmap_t::iterator it{data.find(name)};
 	return (it != data.end() && it->second.size() > 0);
 }
 
@@ -16792,7 +16799,7 @@ cell_t handle_remove_data(IPluginContext *pContext, const cell_t *params, spvarm
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
-	auto it{data.find(name)};
+	spvarmap_t::iterator it{data.find(name)};
 	if(it == data.end()) {
 		return 0;
 	}
@@ -16806,7 +16813,7 @@ cell_t handle_set_data_array(IPluginContext *pContext, const cell_t *params, spv
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
-	auto it{data.find(name)};
+	spvarmap_t::iterator it{data.find(name)};
 	if(it == data.end()) {
 		it = data.emplace(spvarmap_t::value_type{name, {}}).first;
 	}
@@ -16830,7 +16837,7 @@ cell_t handle_get_data_array(IPluginContext *pContext, const cell_t *params, spv
 	char *name = nullptr;
 	pContext->LocalToString(params[2], &name);
 	
-	auto it{data.find(name)};
+	spvarmap_t::iterator it{data.find(name)};
 	if(it == data.end()) {
 		it = data.emplace(spvarmap_t::value_type{name, {}}).first;
 	}
@@ -18202,11 +18209,11 @@ public:
 
 	using member_func_t = spfunc_t (this_t::*);
 
-	member_func_t get_function_member(std::string_view name)
+	member_func_t get_function_member(const std::string &name)
 	{
-		if(name == "IsAbleToBlockMovementOf"sv) {
+		if(name == "IsAbleToBlockMovementOf"s) {
 			return &this_t::ableblock;
-		} else if(name == "ShouldTouch"sv) {
+		} else if(name == "ShouldTouch"s) {
 			return &this_t::shouldtouch;
 		}
 
@@ -18224,7 +18231,7 @@ cell_t INextBotMakeCustom(IPluginContext *pContext, const cell_t *params)
 
 	INextBotCustom *pcustom = nullptr;
 	
-	auto it = nbcustomap.find(ref);
+	nbcustomap_t::iterator it = nbcustomap.find(ref);
 	if(it != nbcustomap.end()) {
 		pcustom = it->second;
 	} else {
@@ -18379,7 +18386,7 @@ cell_t BehaviorActionEntryset_function(IPluginContext *pContext, const cell_t *p
 	
 	char *name_ptr = nullptr;
 	pContext->LocalToString(params[2], &name_ptr);
-	std::string_view name{name_ptr};
+	std::string name{name_ptr};
 	
 	IPluginFunction *func = pContext->GetFunctionById(params[3]);
 	
@@ -18403,7 +18410,7 @@ cell_t BehaviorActionEntryget_function(IPluginContext *pContext, const cell_t *p
 	
 	char *name_ptr = nullptr;
 	pContext->LocalToString(params[2], &name_ptr);
-	std::string_view name{name_ptr};
+	std::string name{name_ptr};
 	
 	spfunc_t func{};
 	obj->get_function(name, func);
@@ -18424,7 +18431,7 @@ cell_t BehaviorActionEntryhas_function(IPluginContext *pContext, const cell_t *p
 	
 	char *name_ptr = nullptr;
 	pContext->LocalToString(params[2], &name_ptr);
-	std::string_view name{name_ptr};
+	std::string name{name_ptr};
 	
 	return obj->has_function(name);
 }
@@ -19845,25 +19852,25 @@ DETOUR_DECL_MEMBER2(IsTankImmediatelyDangerousTo, bool, CBasePlayer *, pPlayer, 
 }
 #endif
 
-static npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname)
+static npc_type entity_to_npc_type(CBaseEntity *pEntity, const char *classname)
 {
 #if SOURCE_ENGINE == SE_TF2
-	if(classname == "tf_zombie"sv) {
+	if(strcmp(classname, "tf_zombie") == 0) {
 		return npc_zombie;
-	} else if(classname == "headless_hatman"sv) {
+	} else if(strcmp(classname, "headless_hatman") == 0) {
 		return npc_hhh;
-	} else if(classname == "eyeball_boss"sv) {
+	} else if(strcmp(classname, "eyeball_boss") == 0) {
 		return npc_zombie;
-	} else if(classname == "merasmus"sv) {
+	} else if(strcmp(classname, "merasmus") == 0) {
 		return npc_wizard;
-	} else if(classname == "tank_boss"sv) {
+	} else if(strcmp(classname, "tank_boss") == 0) {
 		return npc_tank;
-	} else if(classname == "tf_bot"sv) {
+	} else if(strcmp(classname, "tf_bot") == 0) {
 		return npc_none;
 #else
 	#error
 #endif
-	} else if(classname == "player"sv) {
+	} else if(strcmp(classname, "player") == 0) {
 		return npc_none;
 	} else if(!pEntity->IsPlayer() && pEntity->MyNextBotPointer()) {
 		return npc_custom;
@@ -19871,7 +19878,7 @@ static npc_type entity_to_npc_type(CBaseEntity *pEntity, std::string_view classn
 	return npc_none;
 }
 
-npc_type Sample::entity_to_npc_type(CBaseEntity *pEntity, std::string_view classname)
+npc_type Sample::entity_to_npc_type(CBaseEntity *pEntity, const char *classname)
 {
 	return ::entity_to_npc_type(pEntity, classname);
 }
@@ -19889,15 +19896,15 @@ enum obj_type : unsigned char
 	obj_sapper =     (obj_any|obj_default|(1 << 6)),
 };
 
-static obj_type entity_to_obj_type(CBaseEntity *pEntity, std::string_view classname)
+static obj_type entity_to_obj_type(CBaseEntity *pEntity, const char *classname)
 {
-	if(classname == "obj_sentrygun"sv) {
+	if(strcmp(classname, "obj_sentrygun") == 0) {
 		return obj_sentry;
-	} else if(classname == "obj_dispenser"sv) {
+	} else if(strcmp(classname, "obj_dispenser") == 0) {
 		return obj_dispenser;
-	} else if(classname == "obj_teleporter"sv) {
+	} else if(strcmp(classname, "obj_teleporter") == 0) {
 		return obj_teleporter;
-	} else if(classname == "obj_sapper"sv) {
+	} else if(strcmp(classname, "obj_sapper") == 0) {
 		return obj_sapper;
 	} else if(pEntity->IsBaseObject()) {
 		return obj_custom;
@@ -20598,28 +20605,28 @@ void Sample::OnEntityCreated(CBaseEntity *pEntity, const char *classname_ptr)
 {
 	std::string classname{classname_ptr};
 
-	if(classname == "__hack_get_nb_vtable__"sv ||
-		classname == "__hack_get_groundloc_vtable__"sv ||
+	if(classname == "__hack_get_nb_vtable__"s ||
+		classname == "__hack_get_groundloc_vtable__"s ||
 #if SOURCE_ENGINE == SE_TF2
-		classname == "__hack_get_obj_vtable__"sv ||
+		classname == "__hack_get_obj_vtable__"s ||
 #endif
-		classname == "__hack_getsvclass__"sv
+		classname == "__hack_getsvclass__"s
 #if SOURCE_ENGINE == SE_LEFT4DEAD2
-		|| classname == "__hack_get_infected_vtable__"sv
+		|| classname == "__hack_get_infected_vtable__"s
 #endif
 	) {
 		return;
 	}
 
 #if SOURCE_ENGINE == SE_TF2
-	if(classname.compare(0, 14, "tf_projectile_"sv) == 0) {
+	if(classname.compare(0, 14, "tf_projectile_"s) == 0) {
 		pEntity->AddIEFlags(EFL_DONTWALKON);
 		return;
 	}
 #endif
 
 	CBaseCombatCharacter *pCC = pEntity->MyCombatCharacterPointer();
-	npc_type ntype{entity_to_npc_type(pEntity, classname)};
+	npc_type ntype{entity_to_npc_type(pEntity, classname.c_str())};
 
 	if(!(ntype & npc_any) &&
 	#if SOURCE_ENGINE == SE_TF2
