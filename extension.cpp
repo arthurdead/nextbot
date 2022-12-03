@@ -3956,6 +3956,10 @@ public:
 	virtual void OnFail( INextBot *bot, FailureReason reason ) = 0;		// invoked when process failed
 };
 
+#if SOURCE_ENGINE == SE_TF2
+struct ScriptClassDesc_t;
+#endif
+
 class INextBotComponent : public INextBotEventResponder
 {
 public:
@@ -3967,7 +3971,7 @@ public:
 	virtual void Upkeep( void ) {}										// lightweight update guaranteed to occur every server tick
 
 	virtual INextBot *GetBot( void ) const { return m_bot; }
-	
+
 	float GetUpdateInterval() 
 	{ 
 		return m_curInterval; 
@@ -4006,6 +4010,10 @@ public:
 		m_stuckTimer.Invalidate();
 		m_stuckPos = vec3_origin;
 	}
+
+#if SOURCE_ENGINE == SE_TF2
+	virtual ScriptClassDesc_t *GetScriptDesc() = 0;
+#endif
 
 	//
 	// The primary locomotive method
@@ -9105,11 +9113,6 @@ private:
 	INextBot *m_bot;
 	TraverseWhenType m_when;
 };
-
-DETOUR_DECL_MEMBER2(NextBotTraversableTraceFilterCTOR, void, INextBot *, bot, TraverseWhenType, when)
-{
-	new ((void *)this) NextBotTraversableTraceFilter{bot, when};
-}
 
 class CNextBotFlyingLocomotion : public ILocomotion
 {
@@ -18113,8 +18116,8 @@ public:
 	int ref = -1;
 	INextBot *bot = nullptr;
 
-	INextBotCustom(INextBot *pNextBot)
-		: IPluginNextBotComponentArbitraryFuncs(), ref{gamehelpers->EntityToReference(pNextBot->GetEntity())}, bot{pNextBot}
+	INextBotCustom(INextBot *pNextBot, int ref_)
+		: IPluginNextBotComponentArbitraryFuncs(), ref{ref_}, bot{pNextBot}
 	{
 		nbcustomap.emplace(ref, this);
 
@@ -18226,8 +18229,9 @@ public:
 cell_t INextBotMakeCustom(IPluginContext *pContext, const cell_t *params)
 {
 	INextBot *pNextBot = (INextBot *)params[1];
+	CBaseEntity *pEntity = pNextBot->GetEntity();
 
-	int ref{gamehelpers->EntityToReference(pNextBot->GetEntity())};
+	int ref{gamehelpers->EntityToReference(pEntity)};
 
 	INextBotCustom *pcustom = nullptr;
 	
@@ -18235,7 +18239,7 @@ cell_t INextBotMakeCustom(IPluginContext *pContext, const cell_t *params)
 	if(it != nbcustomap.end()) {
 		pcustom = it->second;
 	} else {
-		pcustom = new INextBotCustom(pNextBot);
+		pcustom = new INextBotCustom(pNextBot, ref);
 	}
 	
 	return (cell_t)pcustom;
@@ -19790,7 +19794,6 @@ IGameConfig *g_pGameConf = nullptr;
 
 CDetour *pPathOptimize = nullptr;
 CDetour *pAdjustSpeed = nullptr;
-CDetour *pNextBotTraversableTraceFilterCTOR = nullptr;
 
 CDetour *pTraverseLadder = nullptr;
 
@@ -22334,12 +22337,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 		return false;
 	}
 
-	pNextBotTraversableTraceFilterCTOR = DETOUR_CREATE_MEMBER(NextBotTraversableTraceFilterCTOR, "NextBotTraversableTraceFilter::NextBotTraversableTraceFilter")
-	if(!pNextBotTraversableTraceFilterCTOR) {
-		snprintf(error, maxlen, "could not create NextBotTraversableTraceFilter::NextBotTraversableTraceFilter detour");
-		return false;
-	}
-
 #if SOURCE_ENGINE == SE_TF2
 	pApplyAccumulatedApproach = DETOUR_CREATE_MEMBER(ApplyAccumulatedApproach, "NextBotGroundLocomotion::ApplyAccumulatedApproach")
 	if(!pApplyAccumulatedApproach) {
@@ -22395,7 +22392,6 @@ bool Sample::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	pMyNPCPointer->EnableDetour();
 	pPathOptimize->EnableDetour();
 	pAdjustSpeed->EnableDetour();
-	pNextBotTraversableTraceFilterCTOR->EnableDetour();
 #if SOURCE_ENGINE == SE_TF2
 	pApplyAccumulatedApproach->EnableDetour();
 	pUpdatePosition->EnableDetour();
@@ -22609,7 +22605,6 @@ void Sample::SDK_OnUnload()
 	forwards->ReleaseForward(nbspawn_fwd);
 	pPathOptimize->Destroy();
 	pAdjustSpeed->Destroy();
-	pNextBotTraversableTraceFilterCTOR->Destroy();
 	pMyNPCPointer->Destroy();
 #if SOURCE_ENGINE == SE_TF2
 	pApplyAccumulatedApproach->Destroy();

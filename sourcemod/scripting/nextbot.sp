@@ -194,7 +194,7 @@ static any native_register_basenpc_nextbot_factory(Handle plugin, int params)
 	table.add_prop_bool("m_bPerformAvoidance");
 	table.add_prop_bool("m_bIsMoving");
 	table.add_prop_bool("m_bFadeCorpse");
-	table.add_prop_int("m_iDeathPose", 4, 12);
+	table.add_prop_int("m_iDeathPose", 4, ANIMATION_SEQUENCE_BITS);
 	table.add_prop_int("m_iDeathFrame", 4, 5);
 	table.add_prop_bool("m_bImportanRagdoll");
 

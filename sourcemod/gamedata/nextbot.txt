@@ -347,47 +347,47 @@
 		{
 			"CBaseEntity::MyNextBotPointer"
 			{
-				"linux" "73"
+				"linux" "75"
 			}
 			"CBaseEntity::MyCombatCharacterPointer"
 			{
-				"linux" "72"
+				"linux" "74"
 			}
 			"CBaseEntity::GetBaseAnimating"
 			{
-				"linux" "51"
+				"linux" "53"
 			}
 			"CBaseEntity::WorldSpaceCenter"
 			{
-				"linux" "153"
+				"linux" "156"
 			}
 			"CBaseEntity::EyeAngles"
 			{
-				"linux" "135"
+				"linux" "138"
 			}
 			"CBaseCombatCharacter::GetLastKnownArea"
 			{
-				"linux" "320"
+				"linux" "323"
 			}
 			"CBaseCombatCharacter::UpdateLastKnownArea"
 			{
-				"linux" "323"
+				"linux" "326"
 			}
 			"CFuncNavCost::GetCostMultiplier"
 			{
-				"linux" "196"
+				"linux" "199"
 			}
 			"CBaseEntity::PerformCustomPhysics"
 			{
-				"linux" "173"
+				"linux" "176"
 			}
 			"CBaseCombatCharacter::IsAreaTraversable"
 			{
-				"linux" "321"
+				"linux" "324"
 			}
 			"CBaseEntity::Spawn"
 			{
-				"linux" "23"
+				"linux" "25"
 			}
 			"sizeof(NextBotCombatCharacter)"
 			{
@@ -395,39 +395,39 @@
 			}
 			"CBaseEntity::EyePosition"
 			{
-				"linux" "134"
+				"linux" "137"
 			}
 			"CBaseEntity::UpdateOnRemove"
 			{
-				"linux" "109"
+				"linux" "111"
 			}
 			"CBaseEntity::Classify"
 			{
-				"linux" "54"
+				"linux" "56"
 			}
 			"CBaseEntity::IsNPC"
 			{
-				"linux" "71"
+				"linux" "73"
 			}
 			"CBaseCombatCharacter::GetBossType"
 			{
-				"linux" "327"
+				"linux" "330"
 			}
 			"CBaseEntity::IsBaseObject"
 			{
-				"linux" "84"
+				"linux" "86"
 			}
 			"CBaseCombatCharacter::HasHumanGibs"
 			{
-				"linux" "292"
+				"linux" "295"
 			}
 			"CBaseCombatCharacter::HasAlienGibs"
 			{
-				"linux" "293"
+				"linux" "296"
 			}
 			"CBaseEntity::BloodColor"
 			{
-				"linux" "69"
+				"linux" "71"
 			}
 			"CGameRules::InitDefaultAIRelationships"
 			{
@@ -479,11 +479,11 @@
 			}
 			"CBaseEntity::PhysicsSolidMaskForEntity"
 			{
-				"linux" "171"
+				"linux" "174"
 			}
 			"CBaseEntity::ShouldCollide"
 			{
-				"linux" "17"
+				"linux" "18"
 			}
 			"CGameRules::ShouldCollide"
 			{
@@ -491,107 +491,107 @@
 			}
 			"CBaseCombatCharacter::IsHiddenByFog(Vector)"
 			{
-				"linux" "248"
+				"linux" "251"
 			}
 			"CBaseCombatCharacter::IsHiddenByFog(CBaseEntity)"
 			{
-				"linux" "249"
+				"linux" "252"
 			}
 			"CBaseCombatCharacter::IsHiddenByFog(float)"
 			{
-				"linux" "250"
+				"linux" "253"
 			}
 			"CBaseCombatCharacter::GetFogObscuredRatio(Vector)"
 			{
-				"linux" "251"
+				"linux" "254"
 			}
 			"CBaseCombatCharacter::GetFogObscuredRatio(CBaseEntity)"
 			{
-				"linux" "252"
+				"linux" "255"
 			}
 			"CBaseCombatCharacter::GetFogObscuredRatio(float)"
 			{
-				"linux" "253"
+				"linux" "256"
 			}
 			"CBaseCombatCharacter::IsLookingTowards(CBaseEntity)"
 			{
-				"linux" "254"
+				"linux" "257"
 			}
 			"CBaseCombatCharacter::IsLookingTowards(Vector)"
 			{
-				"linux" "255"
+				"linux" "258"
 			}
 			"CBaseCombatCharacter::IsInFieldOfView(CBaseEntity)"
 			{
-				"linux" "256"
+				"linux" "259"
 			}
 			"CBaseCombatCharacter::IsInFieldOfView(Vector)"
 			{
-				"linux" "257"
+				"linux" "260"
 			}
 			"CBaseCombatCharacter::IsLineOfSightClear(CBaseEntity)"
 			{
-				"linux" "258"
+				"linux" "261"
 			}
 			"CBaseCombatCharacter::IsLineOfSightClear(Vector)"
 			{
-				"linux" "259"
+				"linux" "262"
 			}
 			"CBaseEntity::FVisible(Vector)"
 			{
-				"linux" "146"
+				"linux" "149"
 			}
 			"CBaseEntity::FVisible(CBaseEntity)"
 			{
-				"linux" "145"
+				"linux" "148"
 			}
 			"CBaseCombatCharacter::FInViewCone(Vector)"
 			{
-				"linux" "235"
+				"linux" "238"
 			}
 			"CBaseCombatCharacter::FInViewCone(CBaseEntity)"
 			{
-				"linux" "234"
+				"linux" "237"
 			}
 			"CBaseCombatCharacter::FInAimCone(Vector)"
 			{
-				"linux" "237"
+				"linux" "240"
 			}
 			"CBaseCombatCharacter::FInAimCone(CBaseEntity)"
 			{
-				"linux" "236"
+				"linux" "239"
 			}
 			"CBaseCombatCharacter::IRelationType"
 			{
-				"linux" "305"
+				"linux" "308"
 			}
 			"CBaseCombatCharacter::OnPursuedBy"
 			{
-				"linux" "326"
+				"linux" "329"
 			}
 			"CBaseCombatCharacter::ClearLastKnownArea"
 			{
-				"linux" "322"
+				"linux" "325"
 			}
 			"CBaseCombatCharacter::OnNavAreaChanged"
 			{
-				"linux" "324"
+				"linux" "327"
 			}
 			"CBaseEntity::Deflected"
 			{
-				"linux" "157"
+				"linux" "160"
 			}
 			"CBaseEntity::PostConstructor"
 			{
-				"linux" "27"
+				"linux" "29"
 			}
 			"CBaseEntity::Touch"
 			{
-				"linux" "103"
+				"linux" "105"
 			}
 			"CBaseEntity::IsCombatItem"
 			{
-				"linux" "86"
+				"linux" "88"
 			}
 		}
 		"Signatures"
@@ -650,11 +650,6 @@
 			{
 				"library" "server"
 				"linux" "@_ZN10CTFNavMesh19CollectBuiltObjectsEP10CUtlVectorIP11CBaseObject10CUtlMemoryIS2_iEEi"
-			}
-			"NextBotTraversableTraceFilter::NextBotTraversableTraceFilter"
-			{
-				"library" "server"
-				"linux" "@_ZN29NextBotTraversableTraceFilterC1EP8INextBotN11ILocomotion16TraverseWhenTypeE"
 			}
 		}
 	}
